@@ -1,0 +1,55 @@
+# ============================================
+# Meowney Docker Compose
+# 냥~ NAS 배포용 도커 설정 🐱
+# ============================================
+
+services:
+  # FastAPI 백엔드
+  meowney-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: meowney-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - DEBUG=${DEBUG:-false}
+      - SNAPSHOT_HOUR=${SNAPSHOT_HOUR:-23}
+      - SNAPSHOT_MINUTE=${SNAPSHOT_MINUTE:-0}
+      - TIMEZONE=${TIMEZONE:-Asia/Seoul}
+      - DEFAULT_USD_KRW_RATE=${DEFAULT_USD_KRW_RATE:-1350}
+    volumes:
+      - ./backend:/app
+    networks:
+      - meowney-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # React 프론트엔드
+  meowney-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: meowney-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000/api/v1}
+      - VITE_APP_NAME=${VITE_APP_NAME:-Meowney}
+    depends_on:
+      - meowney-backend
+    networks:
+      - meowney-network
+
+networks:
+  meowney-network:
+    driver: bridge

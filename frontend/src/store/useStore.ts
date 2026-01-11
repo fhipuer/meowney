@@ -1,0 +1,83 @@
+/**
+ * Zustand 전역 스토어 냥~ 🐱
+ */
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+
+interface AppState {
+  // 현재 선택된 포트폴리오 ID
+  currentPortfolioId: string | null
+  setCurrentPortfolioId: (id: string | null) => void
+
+  // 사이드바 상태
+  isSidebarOpen: boolean
+  toggleSidebar: () => void
+  setSidebarOpen: (open: boolean) => void
+
+  // 다크 모드
+  isDarkMode: boolean
+  toggleDarkMode: () => void
+
+  // 리밸런싱 목표 비율 (임시 저장)
+  rebalanceTargets: Record<string, number>
+  setRebalanceTarget: (categoryId: string, percentage: number) => void
+  clearRebalanceTargets: () => void
+}
+
+export const useStore = create<AppState>()(
+  persist(
+    (set) => ({
+      // 포트폴리오
+      currentPortfolioId: null,
+      setCurrentPortfolioId: (id) => set({ currentPortfolioId: id }),
+
+      // 사이드바
+      isSidebarOpen: true,
+      toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+      setSidebarOpen: (open) => set({ isSidebarOpen: open }),
+
+      // 다크 모드
+      isDarkMode: false,
+      toggleDarkMode: () =>
+        set((state) => {
+          const newMode = !state.isDarkMode
+          // HTML 클래스 토글
+          if (newMode) {
+            document.documentElement.classList.add('dark')
+          } else {
+            document.documentElement.classList.remove('dark')
+          }
+          return { isDarkMode: newMode }
+        }),
+
+      // 리밸런싱
+      rebalanceTargets: {},
+      setRebalanceTarget: (categoryId, percentage) =>
+        set((state) => ({
+          rebalanceTargets: {
+            ...state.rebalanceTargets,
+            [categoryId]: percentage,
+          },
+        })),
+      clearRebalanceTargets: () => set({ rebalanceTargets: {} }),
+    }),
+    {
+      name: 'meowney-storage', // localStorage 키
+      partialize: (state) => ({
+        isDarkMode: state.isDarkMode,
+        isSidebarOpen: state.isSidebarOpen,
+      }),
+    }
+  )
+)
+
+// 다크 모드 초기화 (앱 로드 시)
+if (typeof window !== 'undefined') {
+  const stored = localStorage.getItem('meowney-storage')
+  if (stored) {
+    const { state } = JSON.parse(stored)
+    if (state?.isDarkMode) {
+      document.documentElement.classList.add('dark')
+    }
+  }
+}

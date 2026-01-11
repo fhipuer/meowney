@@ -1,0 +1,20 @@
+"""
+API v1 라우터 통합 냥~ 🐱
+"""
+from fastapi import APIRouter
+from app.api.v1 import assets, dashboard
+
+api_router = APIRouter()
+
+# 라우터 등록
+api_router.include_router(
+    assets.router,
+    prefix="/assets",
+    tags=["Assets - 자산 관리"]
+)
+
+api_router.include_router(
+    dashboard.router,
+    prefix="/dashboard",
+    tags=["Dashboard - 대시보드"]
+)
