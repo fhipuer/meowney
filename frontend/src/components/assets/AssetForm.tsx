@@ -176,6 +176,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
 
   const isPending = createAssetMutation.isPending || updateAssetMutation.isPending
   const isCashType = formData.asset_type === 'cash'
+  const hasNoTicker = !formData.ticker.trim()  // 티커가 없는 경우
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -370,6 +371,27 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
                     />
                   </div>
                 </div>
+
+                {/* 티커 없는 자산 (금현물 등) - 현재 가치 수동 입력 */}
+                {hasNoTicker && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="current_value">현재 가치 (수동 입력)</Label>
+                    <Input
+                      id="current_value"
+                      type="number"
+                      step="any"
+                      placeholder="현재 총 평가액"
+                      value={formData.current_value}
+                      onChange={(e) =>
+                        setFormData({ ...formData, current_value: e.target.value })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      티커가 없는 자산(금현물, 실물자산 등)은 현재 가치를 직접 입력해주세요.
+                      수정할 때마다 갱신됩니다.
+                    </p>
+                  </div>
+                )}
 
                 {/* USD 자산일 때 환율 입력 */}
                 {formData.currency === 'USD' && (

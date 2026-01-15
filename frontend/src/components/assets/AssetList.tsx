@@ -2,7 +2,7 @@
  * 자산 목록 컴포넌트 냥~ 🐱
  */
 import { useState } from 'react'
-import { Pencil, Trash2, PawPrint, TrendingUp, TrendingDown } from 'lucide-react'
+import { Pencil, Trash2, PawPrint, TrendingUp, TrendingDown, Clock } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,6 +28,22 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
   const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null)
 
   const deleteAssetMutation = useDeleteAsset()
+
+  // 상대적 시간 표시 (예: "2시간 전", "3일 전")
+  const formatRelativeTime = (dateString: string) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / (1000 * 60))
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+    if (diffMins < 1) return '방금 전'
+    if (diffMins < 60) return `${diffMins}분 전`
+    if (diffHours < 24) return `${diffHours}시간 전`
+    if (diffDays < 7) return `${diffDays}일 전`
+    return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })
+  }
 
   const handleDelete = async () => {
     if (!deletingAsset) return
@@ -108,14 +124,25 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-medium truncate">{asset.name}</span>
-                    {asset.ticker && (
+                    {asset.ticker ? (
                       <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
                         {asset.ticker}
                       </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded">
+                        수동
+                      </span>
                     )}
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    {asset.quantity.toLocaleString()}주 × {formatKRW(asset.average_price)}
+                  <div className="text-sm text-muted-foreground flex items-center gap-2">
+                    <span>{asset.quantity.toLocaleString()}주 × {formatKRW(asset.average_price)}</span>
+                    {/* 티커 없는 자산은 갱신일시 표시 */}
+                    {!asset.ticker && asset.updated_at && (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground/70">
+                        <Clock className="h-3 w-3" />
+                        {formatRelativeTime(asset.updated_at)}
+                      </span>
+                    )}
                   </div>
                 </div>
 

@@ -155,8 +155,10 @@ class FinanceService:
                 else:
                     asset_copy["current_price"] = None
             elif asset.get("current_value"):
-                # 현금성 자산
-                asset_copy["current_price"] = Decimal(str(asset["current_value"])) / quantity if quantity else Decimal("0")
+                # 티커 없는 자산 (현금, 금현물, 예금 등)
+                # current_value가 총 가치를 나타냄
+                asset_copy["current_price"] = None  # 단가는 없음
+                asset_copy["manual_value"] = True  # 수동 입력 표시
             else:
                 asset_copy["current_price"] = None
 
@@ -176,6 +178,7 @@ class FinanceService:
 
             # 평가금액, 손익, 수익률 계산
             if asset_copy.get("current_price") and quantity > 0:
+                # 티커가 있는 자산: 현재가 × 수량
                 current_price = Decimal(str(asset_copy["current_price"]))
                 market_value = current_price * quantity
                 principal = avg_price * quantity
@@ -188,16 +191,23 @@ class FinanceService:
                     asset_copy["profit_rate"] = float((profit_loss / principal) * 100)
                 else:
                     asset_copy["profit_rate"] = 0.0
-            else:
-                # 현금성 자산이거나 수량이 0인 경우
-                if asset.get("current_value"):
-                    asset_copy["market_value"] = Decimal(str(asset["current_value"]))
-                    asset_copy["profit_loss"] = Decimal("0")
-                    asset_copy["profit_rate"] = 0.0
+            elif asset.get("current_value"):
+                # 티커 없는 자산 (금현물, 현금, 예금 등)
+                # current_value = 현재 총 가치, average_price × quantity = 원금
+                current_value = Decimal(str(asset["current_value"]))
+                principal = avg_price * quantity
+
+                asset_copy["market_value"] = current_value
+                asset_copy["profit_loss"] = current_value - principal
+
+                if principal > 0:
+                    asset_copy["profit_rate"] = float(((current_value - principal) / principal) * 100)
                 else:
-                    asset_copy["market_value"] = Decimal("0")
-                    asset_copy["profit_loss"] = Decimal("0")
                     asset_copy["profit_rate"] = 0.0
+            else:
+                asset_copy["market_value"] = Decimal("0")
+                asset_copy["profit_loss"] = Decimal("0")
+                asset_copy["profit_rate"] = 0.0
 
             enriched.append(asset_copy)
 
