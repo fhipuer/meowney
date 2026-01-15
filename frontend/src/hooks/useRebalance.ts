@@ -7,6 +7,7 @@ import type {
   RebalancePlanCreate,
   RebalancePlanUpdate,
   PlanAllocationCreate,
+  AllocationGroupCreate,
 } from '@/types'
 
 // 플랜 목록 조회
@@ -114,5 +115,24 @@ export function useSaveAllocations() {
 export function useCalculateRebalance() {
   return useMutation({
     mutationFn: (planId: string) => rebalanceApi.calculate(planId),
+  })
+}
+
+// 배분 그룹 저장 냥~
+export function useSaveGroups() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      planId,
+      groups,
+    }: {
+      planId: string
+      groups: AllocationGroupCreate[]
+    }) => rebalanceApi.saveGroups(planId, groups),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['rebalancePlan', variables.planId] })
+      queryClient.invalidateQueries({ queryKey: ['rebalancePlans'] })
+    },
   })
 }

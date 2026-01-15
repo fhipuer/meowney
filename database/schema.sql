@@ -237,3 +237,50 @@ GROUP BY p.id, p.name;
 
 -- 전략 프롬프트 컬럼 추가 (v3)
 -- ALTER TABLE rebalance_plans ADD COLUMN IF NOT EXISTS strategy_prompt TEXT;
+
+-- ============================================
+-- 배분 시스템 확장 (v4)
+-- ============================================
+
+-- plan_allocations 테이블 확장
+-- ALTER TABLE plan_allocations ADD COLUMN IF NOT EXISTS display_name VARCHAR(100);
+-- ALTER TABLE plan_allocations ADD COLUMN IF NOT EXISTS alias VARCHAR(100);
+
+-- 기존 check_asset_or_ticker 제약조건을 alias도 포함하도록 업데이트
+-- ALTER TABLE plan_allocations DROP CONSTRAINT IF EXISTS check_asset_or_ticker;
+-- ALTER TABLE plan_allocations ADD CONSTRAINT check_asset_or_ticker_or_alias CHECK (
+--     asset_id IS NOT NULL OR ticker IS NOT NULL OR alias IS NOT NULL
+-- );
+
+-- 배분 그룹 테이블 (신규)
+/*
+CREATE TABLE allocation_groups (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    plan_id UUID NOT NULL REFERENCES rebalance_plans(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    target_percentage DECIMAL(5, 2) NOT NULL CHECK (target_percentage >= 0 AND target_percentage <= 100),
+    display_order INT DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE allocation_group_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    group_id UUID NOT NULL REFERENCES allocation_groups(id) ON DELETE CASCADE,
+    asset_id UUID REFERENCES assets(id) ON DELETE SET NULL,
+    ticker VARCHAR(20),
+    alias VARCHAR(100),
+    weight DECIMAL(5, 2) DEFAULT 100 CHECK (weight > 0 AND weight <= 100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT check_item_key CHECK (
+        asset_id IS NOT NULL OR ticker IS NOT NULL OR alias IS NOT NULL
+    )
+);
+
+CREATE INDEX idx_allocation_groups_plan ON allocation_groups(plan_id);
+CREATE INDEX idx_allocation_group_items_group ON allocation_group_items(group_id);
+
+CREATE TRIGGER update_allocation_groups_updated_at
+    BEFORE UPDATE ON allocation_groups
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+*/

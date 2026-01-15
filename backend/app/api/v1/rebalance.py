@@ -12,6 +12,8 @@ from app.models.schemas import (
     RebalancePlanCreate,
     RebalancePlanUpdate,
     PlanAllocationCreate,
+    AllocationGroupCreate,
+    AllocationGroupResponse,
     AssetRebalanceResponse,
 )
 from app.services.rebalance_service import RebalanceService
@@ -111,3 +113,31 @@ async def calculate_rebalance(plan_id: UUID, portfolio_id: Optional[UUID] = None
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ============================================
+# 배분 그룹 API 냥~
+# ============================================
+
+@router.get("/plans/{plan_id}/groups", response_model=list[AllocationGroupResponse])
+async def get_groups(plan_id: UUID):
+    """플랜의 배분 그룹 목록 조회 냥~"""
+    service = RebalanceService()
+    plan = await service.get_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="플랜을 찾을 수 없다옹! 🙀")
+
+    groups = await service.get_groups(plan_id)
+    return groups
+
+
+@router.put("/plans/{plan_id}/groups", response_model=list[AllocationGroupResponse])
+async def save_groups(plan_id: UUID, groups: list[AllocationGroupCreate]):
+    """배분 그룹 저장 냥~"""
+    service = RebalanceService()
+    plan = await service.get_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="플랜을 찾을 수 없다옹! 🙀")
+
+    saved_groups = await service.save_groups(plan_id, [g.model_dump() for g in groups])
+    return saved_groups

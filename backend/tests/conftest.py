@@ -1,12 +1,12 @@
 """
 pytest 설정 및 fixtures 냥~ 🐱
 """
-import pytest
+import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client():
     """비동기 테스트 클라이언트 냥~"""
     transport = ASGITransport(app=app)

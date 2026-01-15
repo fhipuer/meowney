@@ -27,7 +27,15 @@ class RebalanceService:
             query = query.eq("portfolio_id", str(portfolio_id))
 
         response = query.order("created_at", desc=True).execute()
-        return response.data or []
+        plans = response.data or []
+
+        # 각 플랜의 필드명 정리 및 그룹 정보 추가
+        for plan in plans:
+            # plan_allocations -> allocations 키 변환
+            plan["allocations"] = plan.pop("plan_allocations", [])
+            plan["groups"] = await self.get_groups(UUID(plan["id"]))
+
+        return plans
 
     async def get_plan(self, plan_id: UUID) -> Optional[dict]:
         """플랜 상세 조회 냥~"""
@@ -35,10 +43,16 @@ class RebalanceService:
             self.supabase.table("rebalance_plans")
             .select("*, plan_allocations(*)")
             .eq("id", str(plan_id))
-            .single()
             .execute()
         )
-        return response.data
+        if not response.data:
+            return None
+
+        plan = response.data[0]
+        # plan_allocations -> allocations 키 변환
+        plan["allocations"] = plan.pop("plan_allocations", [])
+        plan["groups"] = await self.get_groups(plan_id)
+        return plan
 
     async def get_main_plan(self, portfolio_id: Optional[UUID] = None) -> Optional[dict]:
         """메인 플랜 조회 냥~"""
@@ -50,7 +64,12 @@ class RebalanceService:
             query = query.eq("portfolio_id", str(portfolio_id))
 
         response = query.limit(1).execute()
-        return response.data[0] if response.data else None
+        if response.data:
+            plan = response.data[0]
+            # plan_allocations -> allocations 키 변환
+            plan["allocations"] = plan.pop("plan_allocations", [])
+            return plan
+        return None
 
     async def create_plan(self, data: dict) -> dict:
         """플랜 생성 냥~"""
@@ -166,46 +185,124 @@ class RebalanceService:
                 item["asset_id"] = str(alloc["asset_id"])
             if alloc.get("ticker"):
                 item["ticker"] = alloc["ticker"]
+            if alloc.get("alias"):
+                item["alias"] = alloc["alias"]
+            if alloc.get("display_name"):
+                item["display_name"] = alloc["display_name"]
             allocation_data.append(item)
 
         response = self.supabase.table("plan_allocations").insert(allocation_data).execute()
         return response.data or []
 
-    async def calculate_rebalance_by_plan(
-        self, plan_id: UUID, portfolio_id: Optional[UUID] = None
-    ) -> dict:
-        """플랜 기준 리밸런싱 계산 냥~"""
-        from app.services.asset_service import AssetService
+    # ============================================
+    # 배분 그룹 관련 메서드 냥~
+    # ============================================
 
-        # 플랜 조회
-        plan = await self.get_plan(plan_id)
-        if not plan:
-            raise ValueError("플랜을 찾을 수 없다옹! 🙀")
-
-        allocations = plan.get("plan_allocations", [])
-        if not allocations:
-            return {
-                "plan_id": str(plan_id),
-                "plan_name": plan["name"],
-                "total_value": Decimal("0"),
-                "suggestions": [],
-            }
-
-        # 현재 보유 자산 조회
-        asset_service = AssetService(self.supabase)
-        assets = await asset_service.get_assets(
-            portfolio_id=portfolio_id or UUID(plan["portfolio_id"])
+    async def get_groups(self, plan_id: UUID) -> list[dict]:
+        """플랜의 배분 그룹 목록 조회 냥~"""
+        response = (
+            self.supabase.table("allocation_groups")
+            .select("*, allocation_group_items(*)")
+            .eq("plan_id", str(plan_id))
+            .order("display_order")
+            .execute()
         )
+        groups = response.data or []
 
-        if not assets:
-            return {
+        # 그룹 아이템 키 이름 정리
+        for group in groups:
+            group["items"] = group.pop("allocation_group_items", [])
+
+        return groups
+
+    async def save_groups(self, plan_id: UUID, groups: list[dict]) -> list[dict]:
+        """배분 그룹 저장 냥~"""
+        # 기존 그룹 삭제 (CASCADE로 아이템도 삭제됨)
+        self.supabase.table("allocation_groups").delete().eq(
+            "plan_id", str(plan_id)
+        ).execute()
+
+        if not groups:
+            return []
+
+        saved_groups = []
+        for idx, group in enumerate(groups):
+            # 그룹 생성
+            group_data = {
                 "plan_id": str(plan_id),
-                "plan_name": plan["name"],
-                "total_value": Decimal("0"),
-                "suggestions": [],
+                "name": group["name"],
+                "target_percentage": group["target_percentage"],
+                "display_order": group.get("display_order", idx),
             }
+            group_response = self.supabase.table("allocation_groups").insert(group_data).execute()
+            saved_group = group_response.data[0]
 
-        # 현재가 조회 및 시장 가치 계산
+            # 그룹 아이템 생성
+            items = group.get("items", [])
+            saved_items = []
+            if items:
+                items_data = []
+                for item in items:
+                    item_data = {
+                        "group_id": saved_group["id"],
+                        "weight": item.get("weight", 100),
+                    }
+                    if item.get("asset_id"):
+                        item_data["asset_id"] = str(item["asset_id"])
+                    if item.get("ticker"):
+                        item_data["ticker"] = item["ticker"]
+                    if item.get("alias"):
+                        item_data["alias"] = item["alias"]
+                    items_data.append(item_data)
+
+                items_response = self.supabase.table("allocation_group_items").insert(items_data).execute()
+                saved_items = items_response.data or []
+
+            saved_group["items"] = saved_items
+            saved_groups.append(saved_group)
+
+        return saved_groups
+
+    # ============================================
+    # 매칭 로직 냥~
+    # ============================================
+
+    def match_item_to_asset(self, item: dict, assets: list[dict]) -> Optional[dict]:
+        """배분 항목을 실제 자산에 매칭 냥~
+
+        매칭 우선순위:
+        1. asset_id - 직접 참조
+        2. ticker - 티커 매칭
+        3. alias - 이름 기반 fuzzy match
+        """
+        # 1. asset_id 매칭
+        if item.get("asset_id"):
+            asset_id = str(item["asset_id"])
+            for asset in assets:
+                if str(asset.get("id")) == asset_id:
+                    return asset
+
+        # 2. ticker 매칭
+        if item.get("ticker"):
+            ticker = item["ticker"]
+            for asset in assets:
+                if asset.get("ticker") == ticker:
+                    return asset
+
+        # 3. alias 매칭 (이름 포함 검사)
+        if item.get("alias"):
+            alias_lower = item["alias"].lower()
+            for asset in assets:
+                asset_name = asset.get("name", "").lower()
+                if alias_lower in asset_name or asset_name in alias_lower:
+                    return asset
+
+        return None
+
+    async def _get_asset_values(
+        self, assets: list[dict]
+    ) -> tuple[Decimal, dict[str, dict]]:
+        """자산들의 현재가 및 시장 가치 계산 냥~"""
         total_value = Decimal("0")
         asset_values = {}
 
@@ -238,70 +335,186 @@ class RebalanceService:
             }
             total_value += market_value
 
-        # 각 배분 목표에 대해 리밸런싱 제안 계산
-        suggestions = []
+        return total_value, asset_values
 
-        for alloc in allocations:
-            target_pct = Decimal(str(alloc["target_percentage"]))
-            target_value = total_value * target_pct / Decimal("100")
+    async def calculate_rebalance_by_plan(
+        self, plan_id: UUID, portfolio_id: Optional[UUID] = None
+    ) -> dict:
+        """플랜 기준 리밸런싱 계산 냥~"""
+        from app.services.asset_service import AssetService
 
-            # 해당하는 자산 찾기
-            matched_asset = None
-            current_value = Decimal("0")
+        # 플랜 조회
+        plan = await self.get_plan(plan_id)
+        if not plan:
+            raise ValueError("플랜을 찾을 수 없다옹! 🙀")
 
-            if alloc.get("asset_id"):
-                asset_data = asset_values.get(alloc["asset_id"])
-                if asset_data:
-                    matched_asset = asset_data["asset"]
-                    current_value = asset_data["market_value"]
-            elif alloc.get("ticker"):
-                # 티커로 매칭
-                for asset_id, asset_data in asset_values.items():
-                    if asset_data["asset"].get("ticker") == alloc["ticker"]:
-                        matched_asset = asset_data["asset"]
-                        current_value = asset_data["market_value"]
-                        break
+        allocations = plan.get("allocations", [])
+        groups = plan.get("groups", [])
 
-            current_pct = (
-                (current_value / total_value * Decimal("100"))
-                if total_value > 0
-                else Decimal("0")
-            )
-            diff_pct = target_pct - current_pct
-            suggested_amount = target_value - current_value
-
-            # 매수/매도 수량 계산
-            suggested_qty = None
-            if matched_asset:
-                current_price = asset_values.get(matched_asset["id"], {}).get(
-                    "current_price"
-                )
-                if current_price and current_price > 0:
-                    # USD 자산의 경우 환율 고려
-                    if matched_asset.get("currency") == "USD":
-                        exchange_rate = await self.finance_service.get_exchange_rate()
-                        suggested_qty = suggested_amount / (
-                            current_price * Decimal(str(exchange_rate))
-                        )
-                    else:
-                        suggested_qty = suggested_amount / current_price
-
-            suggestion = {
-                "asset_id": matched_asset["id"] if matched_asset else None,
-                "asset_name": matched_asset["name"] if matched_asset else (alloc.get("ticker") or "미확인 자산"),
-                "ticker": matched_asset.get("ticker") if matched_asset else alloc.get("ticker"),
-                "current_value": current_value,
-                "current_percentage": float(current_pct),
-                "target_percentage": float(target_pct),
-                "difference_percentage": float(diff_pct),
-                "suggested_amount": suggested_amount,
-                "suggested_quantity": suggested_qty,
+        if not allocations and not groups:
+            return {
+                "plan_id": str(plan_id),
+                "plan_name": plan["name"],
+                "total_value": Decimal("0"),
+                "suggestions": [],
+                "group_suggestions": [],
             }
+
+        # 현재 보유 자산 조회
+        asset_service = AssetService(self.supabase)
+        assets = await asset_service.get_assets(
+            portfolio_id=portfolio_id or UUID(plan["portfolio_id"])
+        )
+
+        if not assets:
+            return {
+                "plan_id": str(plan_id),
+                "plan_name": plan["name"],
+                "total_value": Decimal("0"),
+                "suggestions": [],
+                "group_suggestions": [],
+            }
+
+        # 자산 가치 계산
+        total_value, asset_values = await self._get_asset_values(assets)
+
+        # 개별 배분 제안 계산
+        suggestions = []
+        for alloc in allocations:
+            suggestion = await self._calculate_allocation_suggestion(
+                alloc, assets, asset_values, total_value
+            )
             suggestions.append(suggestion)
+
+        # 그룹 배분 제안 계산
+        group_suggestions = []
+        for group in groups:
+            group_suggestion = await self._calculate_group_suggestion(
+                group, assets, asset_values, total_value
+            )
+            group_suggestions.append(group_suggestion)
 
         return {
             "plan_id": str(plan_id),
             "plan_name": plan["name"],
             "total_value": total_value,
             "suggestions": suggestions,
+            "group_suggestions": group_suggestions,
+        }
+
+    async def _calculate_allocation_suggestion(
+        self, alloc: dict, assets: list[dict], asset_values: dict, total_value: Decimal
+    ) -> dict:
+        """개별 배분 제안 계산 냥~"""
+        target_pct = Decimal(str(alloc["target_percentage"]))
+        target_value = total_value * target_pct / Decimal("100")
+
+        # 매칭 로직 사용
+        matched_asset = self.match_item_to_asset(alloc, assets)
+        current_value = Decimal("0")
+
+        if matched_asset:
+            asset_data = asset_values.get(matched_asset["id"])
+            if asset_data:
+                current_value = asset_data["market_value"]
+
+        current_pct = (
+            (current_value / total_value * Decimal("100"))
+            if total_value > 0
+            else Decimal("0")
+        )
+        diff_pct = target_pct - current_pct
+        suggested_amount = target_value - current_value
+
+        # 매수/매도 수량 계산
+        suggested_qty = None
+        if matched_asset:
+            current_price = asset_values.get(matched_asset["id"], {}).get("current_price")
+            if current_price and current_price > 0:
+                if matched_asset.get("currency") == "USD":
+                    exchange_rate = await self.finance_service.get_exchange_rate()
+                    suggested_qty = suggested_amount / (current_price * Decimal(str(exchange_rate)))
+                else:
+                    suggested_qty = suggested_amount / current_price
+
+        # 표시명 결정
+        display_name = alloc.get("display_name")
+        if not display_name:
+            if matched_asset:
+                display_name = matched_asset["name"]
+            elif alloc.get("ticker"):
+                display_name = alloc["ticker"]
+            elif alloc.get("alias"):
+                display_name = alloc["alias"]
+            else:
+                display_name = "미확인 자산"
+
+        return {
+            "asset_id": matched_asset["id"] if matched_asset else None,
+            "asset_name": display_name,
+            "ticker": matched_asset.get("ticker") if matched_asset else alloc.get("ticker"),
+            "alias": alloc.get("alias"),
+            "current_value": current_value,
+            "current_percentage": float(current_pct),
+            "target_percentage": float(target_pct),
+            "difference_percentage": float(diff_pct),
+            "suggested_amount": suggested_amount,
+            "suggested_quantity": suggested_qty,
+            "is_matched": matched_asset is not None,
+        }
+
+    async def _calculate_group_suggestion(
+        self, group: dict, assets: list[dict], asset_values: dict, total_value: Decimal
+    ) -> dict:
+        """그룹 배분 제안 계산 냥~"""
+        target_pct = Decimal(str(group["target_percentage"]))
+        target_value = total_value * target_pct / Decimal("100")
+
+        items = group.get("items", [])
+        total_weight = sum(Decimal(str(item.get("weight", 100))) for item in items)
+
+        group_current_value = Decimal("0")
+        item_suggestions = []
+
+        for item in items:
+            matched_asset = self.match_item_to_asset(item, assets)
+            item_current_value = Decimal("0")
+
+            if matched_asset:
+                asset_data = asset_values.get(matched_asset["id"])
+                if asset_data:
+                    item_current_value = asset_data["market_value"]
+
+            group_current_value += item_current_value
+
+            # 그룹 내 비중에 따른 개별 목표
+            weight = Decimal(str(item.get("weight", 100)))
+            item_target = target_value * (weight / total_weight) if total_weight > 0 else Decimal("0")
+
+            item_suggestions.append({
+                "asset_id": matched_asset["id"] if matched_asset else None,
+                "ticker": item.get("ticker"),
+                "alias": item.get("alias"),
+                "weight": float(weight),
+                "current_value": item_current_value,
+                "target_value": item_target,
+                "suggested_amount": item_target - item_current_value,
+                "is_matched": matched_asset is not None,
+            })
+
+        current_pct = (
+            (group_current_value / total_value * Decimal("100"))
+            if total_value > 0
+            else Decimal("0")
+        )
+
+        return {
+            "group_id": group.get("id"),
+            "group_name": group["name"],
+            "target_percentage": float(target_pct),
+            "current_percentage": float(current_pct),
+            "current_value": group_current_value,
+            "target_value": target_value,
+            "suggested_amount": target_value - group_current_value,
+            "items": item_suggestions,
         }

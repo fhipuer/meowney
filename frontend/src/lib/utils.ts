@@ -64,3 +64,15 @@ export function formatUSDWithKRW(usdValue: number, exchangeRate: number): string
   const krwValue = usdValue * exchangeRate
   return `${formatUSD(usdValue)} (${formatKRW(krwValue)})`
 }
+
+/**
+ * 프라이버시 마스킹 문자열 냥~
+ */
+export const PRIVACY_MASK = '●●●●●'
+
+/**
+ * 프라이버시 모드일 때 금액 마스킹 냥~
+ */
+export function maskValue(value: string, isPrivacyMode: boolean): string {
+  return isPrivacyMode ? PRIVACY_MASK : value
+}

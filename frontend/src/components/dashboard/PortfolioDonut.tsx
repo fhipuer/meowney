@@ -4,7 +4,8 @@
  */
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatKRW, cn } from '@/lib/utils'
+import { formatKRW, cn, maskValue, PRIVACY_MASK } from '@/lib/utils'
+import { useStore } from '@/store/useStore'
 import type { CategoryAllocation } from '@/types'
 
 interface PortfolioDonutProps {
@@ -13,6 +14,8 @@ interface PortfolioDonutProps {
 }
 
 export function PortfolioDonut({ allocations, isLoading }: PortfolioDonutProps) {
+  const { isPrivacyMode } = useStore()
+
   if (isLoading) {
     return (
       <Card className="h-[400px] border-0 bg-gradient-to-br from-background to-muted/30">
@@ -82,7 +85,7 @@ export function PortfolioDonut({ allocations, isLoading }: PortfolioDonutProps) 
                 </Pie>
                 <Tooltip
                   formatter={(value: number, _name, props) => [
-                    formatKRW(value),
+                    isPrivacyMode ? PRIVACY_MASK : formatKRW(value),
                     props.payload.name
                   ]}
                   contentStyle={{
@@ -98,7 +101,7 @@ export function PortfolioDonut({ allocations, isLoading }: PortfolioDonutProps) 
             {/* 중앙 텍스트 */}
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <span className="text-xs text-muted-foreground">총 자산</span>
-              <span className="text-lg font-bold">{formatKRW(totalValue)}</span>
+              <span className="text-lg font-bold">{maskValue(formatKRW(totalValue), isPrivacyMode)}</span>
             </div>
           </div>
 

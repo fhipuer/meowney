@@ -4,7 +4,8 @@
  */
 import { TrendingUp, TrendingDown, Wallet, PiggyBank, Cat, Percent } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
-import { formatKRW, formatPercent, getProfitClass, cn } from '@/lib/utils'
+import { formatKRW, formatPercent, getProfitClass, cn, maskValue } from '@/lib/utils'
+import { useStore } from '@/store/useStore'
 import type { DashboardSummary } from '@/types'
 
 interface SummaryCardsProps {
@@ -64,6 +65,8 @@ function StatCard({ title, value, subtitle, icon, iconBgClass, valueClass, delay
 }
 
 export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
+  const { isPrivacyMode } = useStore()
+
   if (isLoading) {
     return (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -102,7 +105,7 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
       <StatCard
         title="총 자산"
-        value={formatKRW(summary.total_value)}
+        value={maskValue(formatKRW(summary.total_value), isPrivacyMode)}
         subtitle={`${summary.asset_count}개 자산 보유`}
         icon={<Wallet className="h-5 w-5 text-blue-600 dark:text-blue-400" />}
         iconBgClass="bg-blue-100 dark:bg-blue-900/30"
@@ -111,7 +114,7 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
 
       <StatCard
         title="투자 원금"
-        value={formatKRW(summary.total_principal)}
+        value={maskValue(formatKRW(summary.total_principal), isPrivacyMode)}
         subtitle="누적 투자 금액"
         icon={<PiggyBank className="h-5 w-5 text-purple-600 dark:text-purple-400" />}
         iconBgClass="bg-purple-100 dark:bg-purple-900/30"
@@ -120,7 +123,7 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
 
       <StatCard
         title="총 손익"
-        value={`${summary.total_profit >= 0 ? '+' : ''}${formatKRW(summary.total_profit)}`}
+        value={maskValue(`${summary.total_profit >= 0 ? '+' : ''}${formatKRW(summary.total_profit)}`, isPrivacyMode)}
         subtitle="평가손익"
         icon={
           isProfitable ? (
@@ -134,7 +137,7 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
             ? 'bg-red-100 dark:bg-red-900/30'
             : 'bg-blue-100 dark:bg-blue-900/30'
         }
-        valueClass={getProfitClass(summary.total_profit)}
+        valueClass={isPrivacyMode ? '' : getProfitClass(summary.total_profit)}
         delay={100}
       />
 

@@ -11,7 +11,8 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatKRW, formatDate } from '@/lib/utils'
+import { formatKRW, formatDate, maskValue, PRIVACY_MASK } from '@/lib/utils'
+import { useStore } from '@/store/useStore'
 import type { AssetHistory } from '@/types'
 
 interface AssetTrendChartProps {
@@ -20,6 +21,8 @@ interface AssetTrendChartProps {
 }
 
 export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
+  const { isPrivacyMode } = useStore()
+
   if (isLoading) {
     return (
       <Card className="h-[400px] border-0 bg-gradient-to-br from-background to-muted/30">
@@ -75,7 +78,7 @@ export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
           </CardTitle>
           <div className="text-right">
             <div className={`text-sm font-semibold ${isPositive ? 'text-red-500' : 'text-blue-500'}`}>
-              {isPositive ? '+' : ''}{formatKRW(change)}
+              {maskValue(`${isPositive ? '+' : ''}${formatKRW(change)}`, isPrivacyMode)}
             </div>
             <div className={`text-xs ${isPositive ? 'text-red-500/70' : 'text-blue-500/70'}`}>
               {isPositive ? '+' : ''}{changePercent.toFixed(2)}% vs 전일
@@ -112,7 +115,7 @@ export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
             />
             <Tooltip
               formatter={(value: number, name: string) => [
-                formatKRW(value),
+                isPrivacyMode ? PRIVACY_MASK : formatKRW(value),
                 name === 'totalValue' ? '총 자산' : '투자 원금',
               ]}
               labelStyle={{ color: 'hsl(var(--foreground))', fontWeight: 500 }}

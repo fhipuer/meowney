@@ -18,6 +18,10 @@ interface AppState {
   isDarkMode: boolean
   toggleDarkMode: () => void
 
+  // 프라이버시 모드 (금액 숨김) 냥~
+  isPrivacyMode: boolean
+  togglePrivacyMode: () => void
+
   // 리밸런싱 목표 비율 (임시 저장)
   rebalanceTargets: Record<string, number>
   setRebalanceTarget: (categoryId: string, percentage: number) => void
@@ -50,6 +54,10 @@ export const useStore = create<AppState>()(
           return { isDarkMode: newMode }
         }),
 
+      // 프라이버시 모드 냥~
+      isPrivacyMode: false,
+      togglePrivacyMode: () => set((state) => ({ isPrivacyMode: !state.isPrivacyMode })),
+
       // 리밸런싱
       rebalanceTargets: {},
       setRebalanceTarget: (categoryId, percentage) =>
@@ -66,6 +74,7 @@ export const useStore = create<AppState>()(
       partialize: (state) => ({
         isDarkMode: state.isDarkMode,
         isSidebarOpen: state.isSidebarOpen,
+        isPrivacyMode: state.isPrivacyMode,
       }),
     }
   )

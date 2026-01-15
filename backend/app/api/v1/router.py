@@ -2,7 +2,7 @@
 API v1 라우터 통합 냥~ 🐱
 """
 from fastapi import APIRouter
-from app.api.v1 import assets, dashboard, rebalance
+from app.api.v1 import assets, dashboard, rebalance, data_migration
 
 api_router = APIRouter()
 
@@ -22,4 +22,10 @@ api_router.include_router(
 api_router.include_router(
     rebalance.router,
     tags=["Rebalance Plans - 리밸런싱 플랜"]
+)
+
+api_router.include_router(
+    data_migration.router,
+    prefix="/data",
+    tags=["Data Migration - 데이터 이동"]
 )

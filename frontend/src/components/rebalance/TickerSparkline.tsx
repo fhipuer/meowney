@@ -52,7 +52,6 @@ export function TickerSparkline({
   // 변화율에 따른 색상 결정 (한국식: 빨간색=수익, 파란색=손실)
   const isPositive = data.change_rate >= 0
   const strokeColor = isPositive ? '#ef4444' : '#3b82f6'
-  const fillColor = isPositive ? 'rgba(239, 68, 68, 0.2)' : 'rgba(59, 130, 246, 0.2)'
 
   return (
     <div className={cn('flex items-center gap-2', className)}>

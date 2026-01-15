@@ -4,7 +4,32 @@
       "Bash(dir:*)",
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Meowney 프로젝트 초기 구조 설정\n\n- Backend \\(FastAPI + Python 3.11\\)\n  - yfinance 연동 실시간 주가 조회\n  - Supabase 클라이언트 설정\n  - APScheduler 일일 스냅샷 스케줄러\n  - 자산 CRUD API \\(/api/v1/assets\\)\n  - 대시보드 API \\(/api/v1/dashboard\\)\n\n- Frontend \\(React + Vite + TypeScript\\)\n  - Tailwind CSS + shadcn/ui 컴포넌트\n  - TanStack Query + Zustand 상태관리\n  - Recharts 차트 \\(도넛, 라인\\)\n  - 대시보드, 자산목록, 리밸런싱 페이지\n\n- Database\n  - Supabase PostgreSQL 스키마\n  - portfolios, assets, asset_history 테이블\n\n- DevOps\n  - Docker + docker-compose 설정\n  - 환경변수 템플릿 \\(.env.example\\)\n\n냥~ 고양이 집사의 자산관리 시작이다옹! 🐱\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Meowney 프로젝트 초기 구조 설정\n\n- Backend \\(FastAPI + Python 3.11\\)\n  - yfinance 연동 실시간 주가 조회\n  - Supabase 클라이언트 설정\n  - APScheduler 일일 스냅샷 스케줄러\n  - 자산 CRUD API \\(/api/v1/assets\\)\n  - 대시보드 API \\(/api/v1/dashboard\\)\n\n- Frontend \\(React + Vite + TypeScript\\)\n  - Tailwind CSS + shadcn/ui 컴포넌트\n  - TanStack Query + Zustand 상태관리\n  - Recharts 차트 \\(도넛, 라인\\)\n  - 대시보드, 자산목록, 리밸런싱 페이지\n\n- Database\n  - Supabase PostgreSQL 스키마\n  - portfolios, assets, asset_history 테이블\n\n- DevOps\n  - Docker + docker-compose 설정\n  - 환경변수 템플릿 \\(.env.example\\)\n\n냥~ 고양이 집사의 자산관리 시작이다옹! 🐱\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(gh auth status:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(python -m venv:*)",
+      "Bash(./venv/Scripts/pip install:*)",
+      "Bash(./venv/Scripts/python:*)",
+      "Bash(curl:*)",
+      "Bash(taskkill:*)",
+      "Bash(npm run build:*)",
+      "Bash(timeout 10 python -m uvicorn:*)",
+      "Bash(npx shadcn@latest add:*)",
+      "Bash(pip install:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -c:*)",
+      "Bash(git commit:*)",
+      "Bash(cmd.exe /c \"c: && cd c:\\\\Miz\\\\Project\\\\meowney\\\\backend && python -m pytest tests\\\\test_rebalance.py -v\")",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location ''c:/Miz/Project/meowney/backend''; python -m pytest tests/test_rebalance.py -v --no-header 2>&1 | Out-String\")",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location 'c:/Miz/Project/meowney/backend'; python -m pytest:*)",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location ''c:/Miz/Project/meowney/backend''; python -m pytest tests/test_rebalance.py -v -s --capture=no --tb=line 2>&1\")",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location ''c:/Miz/Project/meowney/frontend''; npm run build 2>&1\")",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location ''c:/Miz/Project/meowney/frontend''; npm run lint 2>&1\")",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location ''c:/Miz/Project/meowney/frontend''; npm run dev 2>&1\")",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location ''c:/Miz/Project/meowney''; git add -A; git status\")",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location ''c:/Miz/Project/meowney''; Remove-Item -Path ''nul'' -Force -ErrorAction SilentlyContinue; git add backend database frontend .claude\")"
     ]
   }
 }

@@ -294,6 +294,8 @@ class PlanAllocationBase(BaseModel):
     """플랜 배분 기본"""
     asset_id: Optional[UUID] = None
     ticker: Optional[str] = None
+    alias: Optional[str] = None  # 티커 없는 자산용 별칭 냥~
+    display_name: Optional[str] = None  # 커스텀 표시명 냥~
     target_percentage: float = Field(..., ge=0, le=100)
 
 
@@ -307,6 +309,59 @@ class PlanAllocationResponse(PlanAllocationBase):
     id: UUID
     plan_id: UUID
     asset_name: Optional[str] = None
+    matched_asset: Optional[dict] = None  # 매칭된 자산 정보 냥~
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Allocation Groups (배분 그룹) 스키마 냥~
+# ============================================
+
+class AllocationGroupItemBase(BaseModel):
+    """그룹 아이템 기본"""
+    asset_id: Optional[UUID] = None
+    ticker: Optional[str] = None
+    alias: Optional[str] = None
+    weight: float = Field(default=100, gt=0, le=100)
+
+
+class AllocationGroupItemCreate(AllocationGroupItemBase):
+    """그룹 아이템 생성"""
+    pass
+
+
+class AllocationGroupItemResponse(AllocationGroupItemBase):
+    """그룹 아이템 응답"""
+    id: UUID
+    matched_asset: Optional[dict] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AllocationGroupBase(BaseModel):
+    """배분 그룹 기본"""
+    name: str = Field(..., min_length=1, max_length=100)
+    target_percentage: float = Field(..., ge=0, le=100)
+    display_order: int = 0
+
+
+class AllocationGroupCreate(AllocationGroupBase):
+    """배분 그룹 생성"""
+    items: list[AllocationGroupItemCreate] = []
+
+
+class AllocationGroupResponse(AllocationGroupBase):
+    """배분 그룹 응답"""
+    id: UUID
+    plan_id: UUID
+    items: list[AllocationGroupItemResponse] = []
+    current_value: Optional[float] = None
+    current_percentage: Optional[float] = None
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -343,6 +398,7 @@ class RebalancePlanResponse(RebalancePlanBase):
     created_at: datetime
     updated_at: datetime
     allocations: list[PlanAllocationResponse] = []
+    groups: list[AllocationGroupResponse] = []  # 배분 그룹 냥~
 
     class Config:
         from_attributes = True
@@ -357,12 +413,42 @@ class AssetRebalanceSuggestion(BaseModel):
     asset_id: Optional[UUID]
     asset_name: str
     ticker: Optional[str]
+    alias: Optional[str] = None  # 티커 없는 자산용 별칭 냥~
     current_value: Decimal
     current_percentage: float
     target_percentage: float
     difference_percentage: float
     suggested_amount: Decimal  # 양수면 매수, 음수면 매도
     suggested_quantity: Optional[Decimal] = None  # 매수/매도 수량
+    is_matched: bool = True  # 보유 자산과 매칭 여부 냥~
+
+
+# ============================================
+# 그룹 리밸런싱 제안 스키마 냥~
+# ============================================
+
+class GroupItemSuggestion(BaseModel):
+    """그룹 아이템 리밸런싱 제안"""
+    asset_id: Optional[UUID]
+    ticker: Optional[str]
+    alias: Optional[str]
+    weight: float
+    current_value: Decimal
+    target_value: Decimal
+    suggested_amount: Decimal
+    is_matched: bool = False
+
+
+class GroupRebalanceSuggestion(BaseModel):
+    """그룹 리밸런싱 제안"""
+    group_id: Optional[UUID]
+    group_name: str
+    target_percentage: float
+    current_percentage: float
+    current_value: Decimal
+    target_value: Decimal
+    suggested_amount: Decimal
+    items: list[GroupItemSuggestion] = []
 
 
 class AssetRebalanceResponse(BaseModel):
@@ -371,3 +457,4 @@ class AssetRebalanceResponse(BaseModel):
     plan_name: str
     total_value: Decimal
     suggestions: list[AssetRebalanceSuggestion]
+    group_suggestions: list[GroupRebalanceSuggestion] = []  # 그룹 제안 냥~

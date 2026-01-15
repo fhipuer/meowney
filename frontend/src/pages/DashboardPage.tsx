@@ -7,6 +7,7 @@ import { AssetTrendChart } from '@/components/dashboard/AssetTrendChart'
 import { RebalanceAlert } from '@/components/dashboard/RebalanceAlert'
 import { GoalProgress } from '@/components/dashboard/GoalProgress'
 import { ExchangeRateCard } from '@/components/dashboard/ExchangeRateCard'
+import { MarketIndicators } from '@/components/dashboard/MarketIndicators'
 import { useDashboardSummary, useAssetHistory } from '@/hooks/useDashboard'
 
 export function DashboardPage() {
@@ -25,6 +26,9 @@ export function DashboardPage() {
         </div>
         <ExchangeRateCard />
       </div>
+
+      {/* 시장 현황 */}
+      <MarketIndicators />
 
       {/* 리밸런싱 알림 */}
       <RebalanceAlert />

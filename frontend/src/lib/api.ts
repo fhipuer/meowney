@@ -23,8 +23,14 @@ import type {
   RebalancePlanCreate,
   RebalancePlanUpdate,
   PlanAllocationCreate,
+  AllocationGroup,
+  AllocationGroupCreate,
   AssetRebalanceResponse,
   TickerHistoryResponse,
+  ExportData,
+  ImportResponse,
+  SchemaInfo,
+  MarketIndicatorsResponse,
 } from '@/types'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -210,6 +216,12 @@ export const dashboardApi = {
     )
     return data
   },
+
+  // 시장 지표 조회 냥~
+  getMarketIndicators: async (): Promise<MarketIndicatorsResponse> => {
+    const { data } = await apiClient.get<MarketIndicatorsResponse>('/dashboard/market-indicators')
+    return data
+  },
 }
 
 // ============================================
@@ -294,6 +306,58 @@ export const rebalanceApi = {
     const { data } = await apiClient.post<AssetRebalanceResponse>(
       `/rebalance/plans/${planId}/calculate`
     )
+    return data
+  },
+
+  // ============================================
+  // 배분 그룹 API 냥~
+  // ============================================
+
+  // 그룹 목록 조회
+  getGroups: async (planId: string): Promise<AllocationGroup[]> => {
+    const { data } = await apiClient.get<AllocationGroup[]>(
+      `/rebalance/plans/${planId}/groups`
+    )
+    return data
+  },
+
+  // 그룹 저장 (전체 교체)
+  saveGroups: async (planId: string, groups: AllocationGroupCreate[]): Promise<AllocationGroup[]> => {
+    const { data } = await apiClient.put<AllocationGroup[]>(
+      `/rebalance/plans/${planId}/groups`,
+      groups
+    )
+    return data
+  },
+}
+
+// ============================================
+// Data Migration API 냥~
+// ============================================
+
+export const dataMigrationApi = {
+  // 데이터 내보내기
+  exportData: async (portfolioId?: string): Promise<ExportData> => {
+    const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
+    const { data } = await apiClient.get<ExportData>(`/data/export${params}`)
+    return data
+  },
+
+  // 데이터 가져오기
+  importData: async (
+    importData: Record<string, unknown>,
+    mergeStrategy: 'replace' | 'merge' = 'replace'
+  ): Promise<ImportResponse> => {
+    const { data } = await apiClient.post<ImportResponse>('/data/import', {
+      data: importData,
+      merge_strategy: mergeStrategy,
+    })
+    return data
+  },
+
+  // 스키마 정보 조회
+  getSchemaInfo: async (): Promise<SchemaInfo> => {
+    const { data } = await apiClient.get<SchemaInfo>('/data/schema-info')
     return data
   },
 }

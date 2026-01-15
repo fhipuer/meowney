@@ -2,7 +2,24 @@
  * 자산 목록 컴포넌트 냥~ 🐱
  */
 import { useState } from 'react'
-import { Pencil, Trash2, PawPrint, TrendingUp, TrendingDown, Clock } from 'lucide-react'
+import {
+  Pencil,
+  Trash2,
+  PawPrint,
+  TrendingUp,
+  TrendingDown,
+  Clock,
+  Landmark,
+  Coins,
+  Building,
+  Bitcoin,
+  Banknote,
+  Package,
+  BarChart3,
+  Layers,
+  CircleDollarSign,
+  type LucideIcon,
+} from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,7 +30,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { formatKRW, formatPercent, getProfitClass, formatUSD } from '@/lib/utils'
+import { formatKRW, formatPercent, getProfitClass, formatUSD, maskValue } from '@/lib/utils'
+import { useStore } from '@/store/useStore'
 import { useDeleteAsset } from '@/hooks/useAssets'
 import { useExchangeRate } from '@/hooks/useDashboard'
 import { AssetForm } from './AssetForm'
@@ -24,12 +42,27 @@ interface AssetListProps {
   isLoading: boolean
 }
 
+// 자산 유형별 아이콘 매핑 냥~
+const ASSET_TYPE_ICONS: Record<string, { icon: LucideIcon; label: string; bgColor: string }> = {
+  stock: { icon: TrendingUp, label: '주식', bgColor: 'bg-blue-500' },
+  etf: { icon: BarChart3, label: 'ETF', bgColor: 'bg-indigo-500' },
+  fund: { icon: Layers, label: '펀드', bgColor: 'bg-violet-500' },
+  bond: { icon: Landmark, label: '채권', bgColor: 'bg-amber-500' },
+  gold: { icon: Coins, label: '금', bgColor: 'bg-yellow-500' },
+  commodity: { icon: Package, label: '원자재', bgColor: 'bg-orange-500' },
+  real_estate: { icon: Building, label: '부동산', bgColor: 'bg-emerald-500' },
+  crypto: { icon: Bitcoin, label: '암호화폐', bgColor: 'bg-purple-500' },
+  cash: { icon: Banknote, label: '현금', bgColor: 'bg-green-500' },
+  other: { icon: CircleDollarSign, label: '기타', bgColor: 'bg-gray-500' },
+}
+
 export function AssetList({ assets, isLoading }: AssetListProps) {
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null)
   const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null)
 
   const deleteAssetMutation = useDeleteAsset()
   const { data: exchangeRate } = useExchangeRate()
+  const { isPrivacyMode } = useStore()
 
   // 상대적 시간 표시 (예: "2시간 전", "3일 전")
   const formatRelativeTime = (dateString: string) => {
@@ -109,17 +142,20 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {assets.map((asset) => (
+            {assets.map((asset) => {
+              const assetTypeInfo = ASSET_TYPE_ICONS[asset.asset_type] || ASSET_TYPE_ICONS.other
+              const IconComponent = assetTypeInfo.icon
+              return (
               <div
                 key={asset.id}
                 className="flex items-center gap-4 p-4 border rounded-lg hover:bg-accent/50 transition-colors"
               >
-                {/* 카테고리 색상 표시 */}
+                {/* 자산 유형 아이콘 */}
                 <div
-                  className="h-10 w-10 rounded-full flex items-center justify-center text-white text-lg"
-                  style={{ backgroundColor: asset.category_color || '#6b7280' }}
+                  className={`h-10 w-10 rounded-full flex items-center justify-center text-white ${assetTypeInfo.bgColor}`}
+                  title={assetTypeInfo.label}
                 >
-                  🐱
+                  <IconComponent className="h-5 w-5" />
                 </div>
 
                 {/* 자산 정보 */}
@@ -145,9 +181,9 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
                   <div className="text-sm text-muted-foreground flex items-center gap-2">
                     {/* USD 자산: 달러 단가 표시 */}
                     {asset.currency === 'USD' ? (
-                      <span>{asset.quantity.toLocaleString()}주 × {formatUSD(asset.average_price)}</span>
+                      <span>{asset.quantity.toLocaleString()}주 × {maskValue(formatUSD(asset.average_price), isPrivacyMode)}</span>
                     ) : (
-                      <span>{asset.quantity.toLocaleString()}주 × {formatKRW(asset.average_price)}</span>
+                      <span>{asset.quantity.toLocaleString()}주 × {maskValue(formatKRW(asset.average_price), isPrivacyMode)}</span>
                     )}
                     {/* 티커 없는 자산은 갱신일시 표시 */}
                     {!asset.ticker && asset.updated_at && (
@@ -165,15 +201,15 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
                   {asset.currency === 'USD' && asset.current_price && exchangeRate ? (
                     <div>
                       <div className="font-medium text-emerald-600 dark:text-emerald-400">
-                        {formatUSD(asset.current_price * asset.quantity)}
+                        {maskValue(formatUSD(asset.current_price * asset.quantity), isPrivacyMode)}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {formatKRW(asset.current_price * asset.quantity * exchangeRate.rate)}
+                        {maskValue(formatKRW(asset.current_price * asset.quantity * exchangeRate.rate), isPrivacyMode)}
                       </div>
                     </div>
                   ) : (
                     <div className="font-medium">
-                      {asset.market_value ? formatKRW(asset.market_value) : '-'}
+                      {asset.market_value ? maskValue(formatKRW(asset.market_value), isPrivacyMode) : '-'}
                     </div>
                   )}
                   <div className={`flex items-center justify-end gap-1 text-sm ${getProfitClass(asset.profit_rate || 0)}`}>
@@ -204,7 +240,8 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
                   </Button>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         </CardContent>
       </Card>

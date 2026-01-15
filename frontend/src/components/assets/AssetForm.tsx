@@ -36,9 +36,14 @@ interface AssetFormProps {
 
 const ASSET_TYPES = [
   { value: 'stock', label: '주식' },
-  { value: 'cash', label: '현금' },
+  { value: 'etf', label: 'ETF' },
+  { value: 'fund', label: '펀드' },
   { value: 'bond', label: '채권' },
+  { value: 'gold', label: '금' },
+  { value: 'commodity', label: '원자재' },
+  { value: 'real_estate', label: '부동산/리츠' },
   { value: 'crypto', label: '암호화폐' },
+  { value: 'cash', label: '현금' },
   { value: 'other', label: '기타' },
 ]
 

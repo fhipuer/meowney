@@ -363,3 +363,59 @@ async def get_ticker_history(
     result = await finance_service.get_ticker_history(ticker, days)
 
     return result
+
+
+@router.get("/market-indicators")
+async def get_market_indicators():
+    """
+    주요 시장 지표 조회 냥~ 🐱
+
+    - KOSPI, S&P 500, NASDAQ
+    - VIX (공포지수)
+    - USD/KRW 환율
+    """
+    finance_service = FinanceService()
+
+    # 주요 지표 목록
+    indicators = [
+        {"ticker": "^KS11", "name": "KOSPI", "currency": "KRW"},
+        {"ticker": "^GSPC", "name": "S&P 500", "currency": "USD"},
+        {"ticker": "^IXIC", "name": "NASDAQ", "currency": "USD"},
+        {"ticker": "^VIX", "name": "VIX", "currency": ""},
+    ]
+
+    results = []
+
+    for indicator in indicators:
+        try:
+            data = await finance_service.get_ticker_history(indicator["ticker"], 2)
+            if data and data.get("data") and len(data["data"]) >= 1:
+                latest = data["data"][-1]
+                results.append({
+                    "ticker": indicator["ticker"],
+                    "name": indicator["name"],
+                    "price": latest["close"],
+                    "change_rate": data.get("change_rate", 0),
+                    "currency": indicator["currency"],
+                })
+        except Exception:
+            # 개별 지표 조회 실패 시 스킵
+            pass
+
+    # 환율 추가
+    try:
+        rate = await finance_service.get_exchange_rate()
+        results.append({
+            "ticker": "USDKRW=X",
+            "name": "USD/KRW",
+            "price": rate,
+            "change_rate": 0,  # 환율은 별도 계산 필요
+            "currency": "KRW",
+        })
+    except Exception:
+        pass
+
+    return {
+        "indicators": results,
+        "timestamp": datetime.now().isoformat()
+    }
