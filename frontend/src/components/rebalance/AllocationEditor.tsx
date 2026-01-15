@@ -14,12 +14,14 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useAssets } from '@/hooks/useAssets'
 import { useSaveAllocations, useUpdatePlan } from '@/hooks/useRebalance'
 import { formatKRW } from '@/lib/utils'
+import { TickerSparkline } from './TickerSparkline'
 import type { RebalancePlan, PlanAllocationCreate } from '@/types'
 
 interface AllocationEditorProps {
@@ -44,9 +46,10 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     return initial
   })
 
-  // 플랜 이름/설명 편집
+  // 플랜 이름/설명/전략 편집
   const [planName, setPlanName] = useState(plan.name)
   const [planDescription, setPlanDescription] = useState(plan.description || '')
+  const [planStrategyPrompt, setPlanStrategyPrompt] = useState(plan.strategy_prompt || '')
 
   // 총합 계산
   const totalPercentage = useMemo(() => {
@@ -65,12 +68,17 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
 
   const handleSave = async () => {
     // 플랜 정보 업데이트
-    if (planName !== plan.name || planDescription !== (plan.description || '')) {
+    const nameChanged = planName !== plan.name
+    const descChanged = planDescription !== (plan.description || '')
+    const strategyChanged = planStrategyPrompt !== (plan.strategy_prompt || '')
+
+    if (nameChanged || descChanged || strategyChanged) {
       await updatePlanMutation.mutateAsync({
         planId: plan.id,
         data: {
           name: planName,
           description: planDescription || undefined,
+          strategy_prompt: planStrategyPrompt || undefined,
         },
       })
     }
@@ -146,6 +154,16 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                 placeholder="플랜 설명 (선택)"
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="editPlanStrategy">전략 프롬프트</Label>
+              <Textarea
+                id="editPlanStrategy"
+                value={planStrategyPrompt}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setPlanStrategyPrompt(e.target.value)}
+                placeholder="투자 전략, 리밸런싱 기준 등 (AI 분석 시 참고)"
+                rows={3}
+              />
+            </div>
           </div>
 
           <Separator />
@@ -166,21 +184,29 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
               const currentPct = allocations[asset.id] || 0
               return (
                 <div key={asset.id} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-shrink">
                       <div
-                        className="h-3 w-3 rounded-full"
+                        className="h-3 w-3 rounded-full flex-shrink-0"
                         style={{ backgroundColor: asset.category_color || '#6b7280' }}
                       />
-                      <span className="font-medium">{asset.name}</span>
+                      <span className="font-medium truncate">{asset.name}</span>
                       {asset.ticker && (
-                        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded flex-shrink-0">
                           {asset.ticker}
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground">
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {/* Sparkline 차트 */}
+                      <TickerSparkline
+                        ticker={asset.ticker}
+                        days={30}
+                        showChangeRate={true}
+                        width={60}
+                        height={24}
+                      />
+                      <span className="text-sm text-muted-foreground min-w-[80px] text-right">
                         {formatKRW(asset.market_value || 0)}
                       </span>
                       <div className="flex items-center gap-1">

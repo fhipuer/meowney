@@ -24,6 +24,7 @@ import type {
   RebalancePlanUpdate,
   PlanAllocationCreate,
   AssetRebalanceResponse,
+  TickerHistoryResponse,
 } from '@/types'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -198,6 +199,14 @@ export const dashboardApi = {
     const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
     const { data } = await apiClient.get<GoalProgressResponse>(
       `/dashboard/goal-progress${params}`
+    )
+    return data
+  },
+
+  // 티커 히스토리 조회 (Sparkline용) 냥~
+  getTickerHistory: async (ticker: string, days = 30): Promise<TickerHistoryResponse> => {
+    const { data } = await apiClient.get<TickerHistoryResponse>(
+      `/dashboard/ticker-history/${ticker}?days=${days}`
     )
     return data
   },

@@ -10,6 +10,7 @@ export const dashboardKeys = {
   all: ['dashboard'] as const,
   summary: (portfolioId?: string) => [...dashboardKeys.all, 'summary', portfolioId] as const,
   history: (portfolioId?: string) => [...dashboardKeys.all, 'history', portfolioId] as const,
+  exchangeRate: () => [...dashboardKeys.all, 'exchangeRate'] as const,
 }
 
 /**
@@ -48,5 +49,29 @@ export function useRebalanceCalculation() {
       targets: RebalanceTarget[]
       portfolioId?: string
     }) => dashboardApi.calculateRebalance(targets, portfolioId),
+  })
+}
+
+/**
+ * 환율 조회 훅 냥~
+ */
+export function useExchangeRate() {
+  return useQuery({
+    queryKey: dashboardKeys.exchangeRate(),
+    queryFn: () => dashboardApi.getExchangeRate(),
+    staleTime: 1000 * 60 * 10, // 10분간 캐시
+    refetchInterval: 1000 * 60 * 10, // 10분마다 자동 갱신
+  })
+}
+
+/**
+ * 티커 히스토리 조회 훅 (Sparkline용) 냥~
+ */
+export function useTickerHistory(ticker: string | null | undefined, days = 30) {
+  return useQuery({
+    queryKey: [...dashboardKeys.all, 'tickerHistory', ticker, days] as const,
+    queryFn: () => dashboardApi.getTickerHistory(ticker!, days),
+    enabled: !!ticker, // 티커가 있을 때만 실행
+    staleTime: 1000 * 60 * 5, // 5분간 캐시
   })
 }

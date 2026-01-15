@@ -13,8 +13,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { formatKRW, formatPercent, getProfitClass } from '@/lib/utils'
+import { formatKRW, formatPercent, getProfitClass, formatUSD } from '@/lib/utils'
 import { useDeleteAsset } from '@/hooks/useAssets'
+import { useExchangeRate } from '@/hooks/useDashboard'
 import { AssetForm } from './AssetForm'
 import type { Asset } from '@/types'
 
@@ -28,6 +29,7 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
   const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null)
 
   const deleteAssetMutation = useDeleteAsset()
+  const { data: exchangeRate } = useExchangeRate()
 
   // 상대적 시간 표시 (예: "2시간 전", "3일 전")
   const formatRelativeTime = (dateString: string) => {
@@ -133,9 +135,20 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
                         수동
                       </span>
                     )}
+                    {/* USD 자산 뱃지 */}
+                    {asset.currency === 'USD' && (
+                      <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded">
+                        USD
+                      </span>
+                    )}
                   </div>
                   <div className="text-sm text-muted-foreground flex items-center gap-2">
-                    <span>{asset.quantity.toLocaleString()}주 × {formatKRW(asset.average_price)}</span>
+                    {/* USD 자산: 달러 단가 표시 */}
+                    {asset.currency === 'USD' ? (
+                      <span>{asset.quantity.toLocaleString()}주 × {formatUSD(asset.average_price)}</span>
+                    ) : (
+                      <span>{asset.quantity.toLocaleString()}주 × {formatKRW(asset.average_price)}</span>
+                    )}
                     {/* 티커 없는 자산은 갱신일시 표시 */}
                     {!asset.ticker && asset.updated_at && (
                       <span className="flex items-center gap-1 text-xs text-muted-foreground/70">
@@ -148,9 +161,21 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
 
                 {/* 평가금액 & 수익률 */}
                 <div className="text-right">
-                  <div className="font-medium">
-                    {asset.market_value ? formatKRW(asset.market_value) : '-'}
-                  </div>
+                  {/* USD 자산: 달러/원화 병행 표시 */}
+                  {asset.currency === 'USD' && asset.current_price && exchangeRate ? (
+                    <div>
+                      <div className="font-medium text-emerald-600 dark:text-emerald-400">
+                        {formatUSD(asset.current_price * asset.quantity)}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatKRW(asset.current_price * asset.quantity * exchangeRate.rate)}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="font-medium">
+                      {asset.market_value ? formatKRW(asset.market_value) : '-'}
+                    </div>
+                  )}
                   <div className={`flex items-center justify-end gap-1 text-sm ${getProfitClass(asset.profit_rate || 0)}`}>
                     {(asset.profit_rate || 0) >= 0 ? (
                       <TrendingUp className="h-3 w-3" />

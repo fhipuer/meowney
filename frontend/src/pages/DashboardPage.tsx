@@ -6,6 +6,7 @@ import { PortfolioDonut } from '@/components/dashboard/PortfolioDonut'
 import { AssetTrendChart } from '@/components/dashboard/AssetTrendChart'
 import { RebalanceAlert } from '@/components/dashboard/RebalanceAlert'
 import { GoalProgress } from '@/components/dashboard/GoalProgress'
+import { ExchangeRateCard } from '@/components/dashboard/ExchangeRateCard'
 import { useDashboardSummary, useAssetHistory } from '@/hooks/useDashboard'
 
 export function DashboardPage() {
@@ -14,12 +15,15 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* 페이지 헤더 */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">대시보드</h1>
-        <p className="text-muted-foreground">
-          자산 현황을 한눈에 확인하세요.
-        </p>
+      {/* 페이지 헤더 + 환율 */}
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">대시보드</h1>
+          <p className="text-muted-foreground">
+            자산 현황을 한눈에 확인하세요.
+          </p>
+        </div>
+        <ExchangeRateCard />
       </div>
 
       {/* 리밸런싱 알림 */}

@@ -347,3 +347,19 @@ async def get_goal_progress(
         remaining_amount=max(remaining, Decimal("0")),
         is_achieved=current_value >= target_value if target_value > 0 else False,
     )
+
+
+@router.get("/ticker-history/{ticker}")
+async def get_ticker_history(
+    ticker: str,
+    days: int = Query(30, ge=7, le=90, description="조회 일수 (7~90일)"),
+):
+    """
+    티커 히스토리 조회 (Sparkline용) 냥~ 🐱
+
+    최근 N일간의 종가 데이터와 변화율 반환
+    """
+    finance_service = FinanceService()
+    result = await finance_service.get_ticker_history(ticker, days)
+
+    return result

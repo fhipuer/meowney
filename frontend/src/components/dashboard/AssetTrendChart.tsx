@@ -1,15 +1,14 @@
 /**
  * 자산 추이 라인 차트 컴포넌트 냥~ 🐱
+ * 글래스모피즘 & 애니메이션 적용
  */
 import {
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
-  CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatKRW, formatDate } from '@/lib/utils'
@@ -23,12 +22,12 @@ interface AssetTrendChartProps {
 export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
   if (isLoading) {
     return (
-      <Card className="h-[400px] animate-pulse">
+      <Card className="h-[400px] border-0 bg-gradient-to-br from-background to-muted/30">
         <CardHeader>
-          <div className="h-6 w-32 bg-muted rounded" />
+          <div className="h-6 w-32 animate-shimmer rounded" />
         </CardHeader>
         <CardContent className="flex items-center justify-center h-[300px]">
-          <div className="h-full w-full bg-muted rounded" />
+          <div className="h-full w-full animate-shimmer rounded" />
         </CardContent>
       </Card>
     )
@@ -36,12 +35,12 @@ export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
 
   if (!history || history.length === 0) {
     return (
-      <Card className="h-[400px]">
+      <Card className="h-[400px] border-0 bg-gradient-to-br from-background to-muted/30">
         <CardHeader>
           <CardTitle>자산 추이</CardTitle>
         </CardHeader>
         <CardContent className="flex items-center justify-center h-[300px]">
-          <p className="text-muted-foreground">
+          <p className="text-muted-foreground text-center">
             아직 히스토리가 없다옹! 🐱<br />
             <span className="text-xs">매일 밤 11시에 자동 저장됩니다~</span>
           </p>
@@ -60,62 +59,99 @@ export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
       profitRate: item.profit_rate ?? 0,
     }))
 
+  // 최근 변화 계산
+  const latestValue = chartData[chartData.length - 1]?.totalValue || 0
+  const previousValue = chartData[chartData.length - 2]?.totalValue || latestValue
+  const change = latestValue - previousValue
+  const changePercent = previousValue > 0 ? (change / previousValue) * 100 : 0
+  const isPositive = change >= 0
+
   return (
-    <Card className="h-[400px]">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          📈 자산 추이
-        </CardTitle>
+    <Card className="h-[400px] border-0 bg-gradient-to-br from-background to-muted/30 overflow-hidden opacity-0 animate-slide-up" style={{ animationDelay: '100ms' }}>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            자산 추이
+          </CardTitle>
+          <div className="text-right">
+            <div className={`text-sm font-semibold ${isPositive ? 'text-red-500' : 'text-blue-500'}`}>
+              {isPositive ? '+' : ''}{formatKRW(change)}
+            </div>
+            <div className={`text-xs ${isPositive ? 'text-red-500/70' : 'text-blue-500/70'}`}>
+              {isPositive ? '+' : ''}{changePercent.toFixed(2)}% vs 전일
+            </div>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+      <CardContent className="pt-0">
+        <ResponsiveContainer width="100%" height={290}>
+          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            <defs>
+              <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="colorPrincipal" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0.15} />
+                <stop offset="95%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0} />
+              </linearGradient>
+            </defs>
             <XAxis
               dataKey="date"
-              tick={{ fontSize: 12 }}
-              stroke="hsl(var(--muted-foreground))"
+              tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+              axisLine={false}
+              tickLine={false}
+              dy={10}
             />
             <YAxis
               tickFormatter={(value) => `${(value / 10000).toFixed(0)}만`}
-              tick={{ fontSize: 12 }}
-              stroke="hsl(var(--muted-foreground))"
+              tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+              axisLine={false}
+              tickLine={false}
+              dx={-5}
             />
             <Tooltip
               formatter={(value: number, name: string) => [
                 formatKRW(value),
                 name === 'totalValue' ? '총 자산' : '투자 원금',
               ]}
-              labelStyle={{ color: 'hsl(var(--foreground))' }}
+              labelStyle={{ color: 'hsl(var(--foreground))', fontWeight: 500 }}
               contentStyle={{
                 backgroundColor: 'hsl(var(--background))',
                 border: '1px solid hsl(var(--border))',
-                borderRadius: '8px',
+                borderRadius: '12px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                padding: '8px 12px',
               }}
             />
-            <Legend
-              formatter={(value) =>
-                value === 'totalValue' ? '총 자산' : '투자 원금'
-              }
+            <Area
+              type="monotone"
+              dataKey="totalPrincipal"
+              stroke="hsl(var(--muted-foreground))"
+              strokeWidth={1.5}
+              strokeDasharray="4 4"
+              fill="url(#colorPrincipal)"
             />
-            <Line
+            <Area
               type="monotone"
               dataKey="totalValue"
               stroke="hsl(var(--primary))"
               strokeWidth={2}
-              dot={{ r: 4 }}
-              activeDot={{ r: 6 }}
+              fill="url(#colorValue)"
             />
-            <Line
-              type="monotone"
-              dataKey="totalPrincipal"
-              stroke="hsl(var(--muted-foreground))"
-              strokeWidth={2}
-              strokeDasharray="5 5"
-              dot={{ r: 3 }}
-            />
-          </LineChart>
+          </AreaChart>
         </ResponsiveContainer>
+        {/* 범례 */}
+        <div className="flex items-center justify-center gap-6 mt-2">
+          <div className="flex items-center gap-2">
+            <div className="h-0.5 w-4 bg-primary rounded" />
+            <span className="text-xs text-muted-foreground">총 자산</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="h-0.5 w-4 border-t-2 border-dashed border-muted-foreground" />
+            <span className="text-xs text-muted-foreground">투자 원금</span>
+          </div>
+        </div>
       </CardContent>
     </Card>
   )

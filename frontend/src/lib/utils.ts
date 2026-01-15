@@ -44,3 +44,23 @@ export function formatDate(date: string | Date): string {
     day: 'numeric',
   })
 }
+
+/**
+ * 숫자를 달러로 포맷팅 냥~
+ */
+export function formatUSD(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+/**
+ * USD 가격을 달러/원화 병행 표시 냥~
+ */
+export function formatUSDWithKRW(usdValue: number, exchangeRate: number): string {
+  const krwValue = usdValue * exchangeRate
+  return `${formatUSD(usdValue)} (${formatKRW(krwValue)})`
+}

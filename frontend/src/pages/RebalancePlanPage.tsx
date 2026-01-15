@@ -25,6 +25,7 @@ import {
   useSetMainPlan,
 } from '@/hooks/useRebalance'
 import { AllocationEditor } from '@/components/rebalance/AllocationEditor'
+import { TickerSparkline } from '@/components/rebalance/TickerSparkline'
 import type { RebalancePlan } from '@/types'
 
 export function RebalancePlanPage() {
@@ -37,6 +38,7 @@ export function RebalancePlanPage() {
   const [editingPlan, setEditingPlan] = useState<RebalancePlan | null>(null)
   const [newPlanName, setNewPlanName] = useState('')
   const [newPlanDescription, setNewPlanDescription] = useState('')
+  const [newPlanStrategyPrompt, setNewPlanStrategyPrompt] = useState('')
   const [newPlanIsMain, setNewPlanIsMain] = useState(false)
 
   const handleCreatePlan = async () => {
@@ -45,11 +47,13 @@ export function RebalancePlanPage() {
     await createPlanMutation.mutateAsync({
       name: newPlanName.trim(),
       description: newPlanDescription.trim() || undefined,
+      strategy_prompt: newPlanStrategyPrompt.trim() || undefined,
       is_main: newPlanIsMain,
     })
 
     setNewPlanName('')
     setNewPlanDescription('')
+    setNewPlanStrategyPrompt('')
     setNewPlanIsMain(false)
     setIsCreateOpen(false)
   }
@@ -129,7 +133,21 @@ export function RebalancePlanPage() {
                   placeholder="플랜에 대한 설명을 입력하세요."
                   value={newPlanDescription}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNewPlanDescription(e.target.value)}
+                  rows={2}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="planStrategyPrompt">전략 프롬프트 (선택)</Label>
+                <Textarea
+                  id="planStrategyPrompt"
+                  placeholder="예: 장기 성장 중심, 분기별 리밸런싱, 기술주 비중 확대 시 보수적 접근..."
+                  value={newPlanStrategyPrompt}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNewPlanStrategyPrompt(e.target.value)}
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground">
+                  투자 전략이나 리밸런싱 기준을 기록합니다. AI 분석 시 참고됩니다.
+                </p>
               </div>
               <div className="flex items-center justify-between">
                 <Label htmlFor="isMain">메인 플랜으로 설정</Label>
@@ -210,6 +228,29 @@ export function RebalancePlanPage() {
                   <div className="text-sm text-muted-foreground">
                     {plan.allocations?.length || 0}개 자산 목표 설정됨
                   </div>
+                  {/* 주요 자산 Sparklines */}
+                  {plan.allocations && plan.allocations.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-2 border-t">
+                      {plan.allocations
+                        .filter((alloc) => alloc.ticker)
+                        .slice(0, 3)
+                        .map((alloc) => (
+                          <div
+                            key={alloc.id}
+                            className="flex items-center gap-1.5 text-xs bg-muted/50 rounded px-2 py-1"
+                          >
+                            <span className="text-muted-foreground">{alloc.ticker}</span>
+                            <TickerSparkline
+                              ticker={alloc.ticker}
+                              days={14}
+                              showChangeRate={false}
+                              width={40}
+                              height={16}
+                            />
+                          </div>
+                        ))}
+                    </div>
+                  )}
                   {!plan.is_main && (
                     <Button
                       variant="outline"

@@ -238,6 +238,7 @@ export interface RebalancePlan {
   portfolio_id: string
   name: string
   description: string | null
+  strategy_prompt: string | null
   is_main: boolean
   is_active: boolean
   allocations: PlanAllocation[]
@@ -249,6 +250,7 @@ export interface RebalancePlan {
 export interface RebalancePlanCreate {
   name: string
   description?: string
+  strategy_prompt?: string
   is_main?: boolean
   portfolio_id?: string
   allocations?: PlanAllocationCreate[]
@@ -258,6 +260,7 @@ export interface RebalancePlanCreate {
 export interface RebalancePlanUpdate {
   name?: string
   description?: string
+  strategy_prompt?: string
   is_main?: boolean
   is_active?: boolean
 }
@@ -288,4 +291,16 @@ export interface AssetRebalanceResponse {
   plan_name: string
   total_value: number
   suggestions: AssetRebalanceSuggestion[]
+}
+
+// 티커 히스토리 (Sparkline용)
+export interface TickerHistoryPoint {
+  date: string
+  close: number
+}
+
+export interface TickerHistoryResponse {
+  ticker: string
+  data: TickerHistoryPoint[]
+  change_rate: number
 }

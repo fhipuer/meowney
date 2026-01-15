@@ -234,3 +234,6 @@ GROUP BY p.id, p.name;
 -- 리밸런싱 플랜 테이블 (v2)
 -- CREATE TABLE IF NOT EXISTS rebalance_plans (...);
 -- CREATE TABLE IF NOT EXISTS plan_allocations (...);
+
+-- 전략 프롬프트 컬럼 추가 (v3)
+-- ALTER TABLE rebalance_plans ADD COLUMN IF NOT EXISTS strategy_prompt TEXT;

@@ -188,7 +188,10 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent
+        className="sm:max-w-[500px]"
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>

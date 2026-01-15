@@ -300,6 +300,74 @@ class FinanceService:
             "data": data
         }
 
+    def _get_ticker_history_sync(
+        self,
+        ticker: str,
+        days: int = 30
+    ) -> dict:
+        """
+        동기 방식으로 티커 히스토리 조회 (Sparkline용) 냥~
+        """
+        try:
+            stock = yf.Ticker(ticker)
+            end_date = date.today()
+            start_date = end_date - timedelta(days=days)
+
+            history = stock.history(
+                start=start_date.isoformat(),
+                end=(end_date + timedelta(days=1)).isoformat()
+            )
+
+            if history.empty:
+                return {"ticker": ticker, "data": [], "change_rate": 0.0}
+
+            data = []
+            first_close = None
+            last_close = None
+
+            for idx, row in history.iterrows():
+                close = float(row["Close"])
+                if first_close is None:
+                    first_close = close
+                last_close = close
+
+                data.append({
+                    "date": idx.date().isoformat(),
+                    "close": round(close, 2)
+                })
+
+            # 변화율 계산
+            change_rate = 0.0
+            if first_close and last_close:
+                change_rate = ((last_close - first_close) / first_close) * 100
+
+            return {
+                "ticker": ticker,
+                "data": data,
+                "change_rate": round(change_rate, 2)
+            }
+        except Exception as e:
+            print(f"🙀 티커 히스토리 조회 실패 냥: {ticker} - {e}")
+            return {"ticker": ticker, "data": [], "change_rate": 0.0}
+
+    async def get_ticker_history(
+        self,
+        ticker: str,
+        days: int = 30
+    ) -> dict:
+        """
+        티커 히스토리 조회 (Sparkline용) 냥~ 🐱
+        최근 N일간의 종가 데이터와 변화율 반환
+        """
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            self._executor,
+            self._get_ticker_history_sync,
+            ticker,
+            days
+        )
+        return result
+
 
 # 싱글톤 인스턴스 (필요시 사용)
 _finance_service: FinanceService | None = None
