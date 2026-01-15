@@ -13,7 +13,7 @@ export function AssetsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">자산 목록</h1>
         <p className="text-muted-foreground">
-          보유 중인 자산을 관리하세요 냥~ 🐱
+          보유 중인 자산을 관리합니다.
         </p>
       </div>
 

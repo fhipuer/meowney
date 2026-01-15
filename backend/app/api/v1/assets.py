@@ -11,11 +11,23 @@ from app.models.schemas import (
     AssetUpdate,
     AssetResponse,
     MeowResponse,
+    TickerValidationResponse,
 )
 from app.services.asset_service import AssetService
 from app.services.finance_service import FinanceService
 
 router = APIRouter()
+
+
+@router.get("/validate-ticker/{ticker}", response_model=TickerValidationResponse)
+async def validate_ticker(ticker: str):
+    """
+    티커 유효성 검증 및 정보 반환 냥~ 🐱
+    자산 추가 전 티커가 유효한지 확인하고 종목 정보 표시
+    """
+    finance_service = FinanceService()
+    result = await finance_service.validate_ticker_with_info(ticker)
+    return TickerValidationResponse(**result)
 
 
 @router.get("", response_model=list[AssetResponse])

@@ -26,16 +26,12 @@ export function useDashboardSummary(portfolioId?: string) {
 
 /**
  * 자산 히스토리 조회 훅 냥~
+ * @param limit - 조회 일수 (days)
  */
-export function useAssetHistory(
-  portfolioId?: string,
-  startDate?: string,
-  endDate?: string,
-  limit = 30
-) {
+export function useAssetHistory(limit = 30, portfolioId?: string) {
   return useQuery({
-    queryKey: [...dashboardKeys.history(portfolioId), startDate, endDate, limit],
-    queryFn: () => dashboardApi.getHistory(portfolioId, startDate, endDate, limit),
+    queryKey: [...dashboardKeys.history(portfolioId), limit],
+    queryFn: () => dashboardApi.getHistory(portfolioId, undefined, undefined, limit),
     staleTime: 1000 * 60 * 5, // 5분간 캐시 (히스토리는 자주 안 바뀜)
   })
 }

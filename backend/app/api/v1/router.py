@@ -2,7 +2,7 @@
 API v1 라우터 통합 냥~ 🐱
 """
 from fastapi import APIRouter
-from app.api.v1 import assets, dashboard
+from app.api.v1 import assets, dashboard, rebalance
 
 api_router = APIRouter()
 
@@ -17,4 +17,9 @@ api_router.include_router(
     dashboard.router,
     prefix="/dashboard",
     tags=["Dashboard - 대시보드"]
+)
+
+api_router.include_router(
+    rebalance.router,
+    tags=["Rebalance Plans - 리밸런싱 플랜"]
 )

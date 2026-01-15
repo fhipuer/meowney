@@ -2,7 +2,8 @@
 대시보드 API 냥~ 🐱
 """
 from uuid import UUID
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from fastapi import APIRouter, Query
 from typing import Optional
 
@@ -12,6 +13,13 @@ from app.models.schemas import (
     AssetHistoryResponse,
     RebalanceTarget,
     RebalanceResponse,
+    ExchangeRateResponse,
+    BenchmarkResponse,
+    PerformanceMetrics,
+    PeriodReturn,
+    RebalanceAlertsResponse,
+    RebalanceAlert,
+    GoalProgressResponse,
 )
 from app.services.asset_service import AssetService
 from app.services.finance_service import FinanceService
@@ -68,7 +76,7 @@ async def get_asset_history(
         portfolio_id, start_date, end_date, limit
     )
 
-    return history
+    return [AssetHistoryResponse(**h) for h in history]
 
 
 @router.post("/rebalance", response_model=RebalanceResponse)
@@ -92,3 +100,250 @@ async def calculate_rebalance(
     result = await asset_service.calculate_rebalance(enriched_assets, targets)
 
     return result
+
+
+@router.get("/exchange-rate", response_model=ExchangeRateResponse)
+async def get_current_exchange_rate():
+    """
+    현재 USD/KRW 환율 조회 냥~ 🐱
+    """
+    finance_service = FinanceService()
+    rate = await finance_service.get_exchange_rate()
+
+    return ExchangeRateResponse(
+        rate=Decimal(str(rate)),
+        from_currency="USD",
+        to_currency="KRW",
+        timestamp=datetime.now()
+    )
+
+
+@router.get("/benchmark/{ticker}", response_model=BenchmarkResponse)
+async def get_benchmark_history(
+    ticker: str,
+    start_date: Optional[date] = Query(None, description="시작일"),
+    end_date: Optional[date] = Query(None, description="종료일"),
+    period: str = Query("3M", description="기간 (1M, 3M, 6M, YTD, 1Y)"),
+):
+    """
+    벤치마크 수익률 히스토리 조회 냥~ 🐱
+
+    - ^KS11: KOSPI
+    - ^GSPC: S&P 500
+    - ^IXIC: NASDAQ
+    """
+    finance_service = FinanceService()
+
+    # 기본값 설정
+    if not end_date:
+        end_date = date.today()
+
+    if not start_date:
+        # 기간에 따른 시작일 계산
+        period_days = {
+            "1M": 30,
+            "3M": 90,
+            "6M": 180,
+            "YTD": (date.today() - date(date.today().year, 1, 1)).days,
+            "1Y": 365,
+        }
+        days = period_days.get(period, 90)
+        start_date = end_date - timedelta(days=days)
+
+    result = await finance_service.get_benchmark_history(ticker, start_date, end_date)
+
+    return BenchmarkResponse(
+        ticker=result["ticker"],
+        name=result["name"],
+        data=result["data"]
+    )
+
+
+@router.get("/performance", response_model=PerformanceMetrics)
+async def get_performance_metrics(
+    db: SupabaseDep,
+    portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
+):
+    """
+    기간별 수익률 및 드로우다운 분석 냥~ 🐱
+
+    - 1M, 3M, 6M, YTD, 1Y 수익률
+    - MDD (최대 드로우다운)
+    """
+    asset_service = AssetService(db)
+
+    today = date.today()
+    periods = [
+        ("1M", 30),
+        ("3M", 90),
+        ("6M", 180),
+        ("YTD", (today - date(today.year, 1, 1)).days),
+        ("1Y", 365),
+    ]
+
+    period_returns = []
+
+    for period_name, days in periods:
+        start_date = today - timedelta(days=days)
+
+        # 시작일과 현재 히스토리 조회
+        history = await asset_service.get_asset_history(
+            portfolio_id, start_date, today, limit=days + 1
+        )
+
+        if len(history) >= 2:
+            start_value = history[0].get("total_value", Decimal("0"))
+            end_value = history[-1].get("total_value", Decimal("0"))
+
+            if start_value and start_value > 0:
+                return_rate = float(((end_value - start_value) / start_value) * 100)
+            else:
+                return_rate = None
+        else:
+            start_value = None
+            end_value = None
+            return_rate = None
+
+        period_returns.append(PeriodReturn(
+            period=period_name,
+            return_rate=round(return_rate, 2) if return_rate is not None else None,
+            start_value=Decimal(str(start_value)) if start_value else None,
+            end_value=Decimal(str(end_value)) if end_value else None,
+        ))
+
+    # MDD 계산 (최근 1년 기준)
+    year_history = await asset_service.get_asset_history(
+        portfolio_id, today - timedelta(days=365), today, limit=365
+    )
+
+    max_drawdown = None
+    max_drawdown_period = None
+    current_drawdown = None
+
+    if year_history:
+        peak = Decimal("0")
+        max_dd = Decimal("0")
+        peak_date = None
+        trough_date = None
+
+        values = [h.get("total_value", Decimal("0")) for h in year_history]
+        dates = [h.get("snapshot_date") for h in year_history]
+
+        for i, value in enumerate(values):
+            if value > peak:
+                peak = value
+                peak_date = dates[i]
+
+            if peak > 0:
+                dd = (peak - value) / peak * 100
+                if dd > max_dd:
+                    max_dd = dd
+                    trough_date = dates[i]
+
+        max_drawdown = float(max_dd)
+
+        if peak_date and trough_date:
+            max_drawdown_period = f"{peak_date} ~ {trough_date}"
+
+        # 현재 드로우다운
+        if values and peak > 0:
+            current_value = values[-1]
+            current_drawdown = float((peak - current_value) / peak * 100)
+
+    return PerformanceMetrics(
+        period_returns=period_returns,
+        max_drawdown=round(max_drawdown, 2) if max_drawdown else None,
+        max_drawdown_period=max_drawdown_period,
+        current_drawdown=round(current_drawdown, 2) if current_drawdown else None,
+    )
+
+
+@router.get("/rebalance-alerts", response_model=RebalanceAlertsResponse)
+async def get_rebalance_alerts(
+    db: SupabaseDep,
+    portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
+    threshold: float = Query(5.0, ge=0, le=100, description="이탈도 임계값 (%)"),
+):
+    """
+    리밸런싱 알림 조회 냥~ 🐱
+
+    목표 비율 대비 {threshold}% 이상 이탈한 카테고리 반환
+    """
+    asset_service = AssetService(db)
+    finance_service = FinanceService()
+
+    # 현재 자산 조회
+    assets = await asset_service.get_assets(portfolio_id)
+    enriched_assets = await finance_service.enrich_assets_with_prices(assets)
+
+    # 요약 정보 계산 (현재 배분 포함)
+    summary = await asset_service.calculate_summary(enriched_assets, portfolio_id)
+
+    # 목표 배분 조회
+    target_allocations = await asset_service.get_target_allocations(portfolio_id)
+
+    alerts = []
+    for allocation in summary.allocations:
+        category_name = allocation.category_name
+        current_pct = allocation.percentage
+
+        # 해당 카테고리의 목표 비율 찾기
+        target_pct = 0.0
+        for target in target_allocations:
+            if target.get("category_name") == category_name:
+                target_pct = float(target.get("target_percentage", 0))
+                break
+
+        # 이탈도 계산
+        deviation = current_pct - target_pct
+
+        if abs(deviation) >= threshold:
+            alerts.append(RebalanceAlert(
+                category_name=category_name,
+                current_percentage=round(current_pct, 2),
+                target_percentage=round(target_pct, 2),
+                deviation=round(abs(deviation), 2),
+                direction="over" if deviation > 0 else "under",
+            ))
+
+    # 이탈도가 큰 순으로 정렬
+    alerts.sort(key=lambda x: x.deviation, reverse=True)
+
+    return RebalanceAlertsResponse(
+        alerts=alerts,
+        threshold=threshold,
+        needs_rebalancing=len(alerts) > 0,
+    )
+
+
+@router.get("/goal-progress", response_model=GoalProgressResponse)
+async def get_goal_progress(
+    db: SupabaseDep,
+    portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
+):
+    """
+    목표 진행률 조회 냥~ 🐱
+    """
+    asset_service = AssetService(db)
+    finance_service = FinanceService()
+
+    # 포트폴리오 목표 금액 조회
+    portfolio = await asset_service.get_portfolio(portfolio_id)
+    target_value = Decimal(str(portfolio.get("target_value", 0) or 0))
+
+    # 현재 자산 가치 조회
+    assets = await asset_service.get_assets(portfolio_id)
+    enriched_assets = await finance_service.enrich_assets_with_prices(assets)
+    summary = await asset_service.calculate_summary(enriched_assets, portfolio_id)
+
+    current_value = summary.total_value
+    remaining = target_value - current_value if target_value > 0 else Decimal("0")
+    progress = float((current_value / target_value) * 100) if target_value > 0 else 0.0
+
+    return GoalProgressResponse(
+        target_value=target_value,
+        current_value=current_value,
+        progress_percentage=round(progress, 2),
+        remaining_amount=max(remaining, Decimal("0")),
+        is_achieved=current_value >= target_value if target_value > 0 else False,
+    )

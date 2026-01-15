@@ -6,6 +6,8 @@ import {
   LayoutDashboard,
   Wallet,
   Calculator,
+  Target,
+  BarChart3,
   Settings,
   Cat,
 } from 'lucide-react'
@@ -35,6 +37,16 @@ const navItems: NavItem[] = [
     icon: Calculator,
   },
   {
+    title: '플랜 설정',
+    href: '/rebalance/plans',
+    icon: Target,
+  },
+  {
+    title: '분석',
+    href: '/analytics',
+    icon: BarChart3,
+  },
+  {
     title: '설정',
     href: '/settings',
     icon: Settings,
@@ -58,6 +70,7 @@ export function Sidebar() {
             <NavLink
               key={item.href}
               to={item.href}
+              end={item.href === '/rebalance'}
               className={({ isActive }) =>
                 cn(
                   'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',

@@ -3,6 +3,7 @@ Finance Service - yfinance 연동 냥~ 🐱
 실시간 주가 조회 및 계산 담당
 """
 import asyncio
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
@@ -90,6 +91,23 @@ class FinanceService:
         result = await self.get_stock_price(ticker)
         return result.get("valid", False)
 
+    async def validate_ticker_with_info(self, ticker: str) -> dict:
+        """
+        티커 검증 및 상세 정보 반환 냥~
+        프론트엔드에서 검증 결과를 표시하기 위한 상세 정보 포함
+        """
+        result = await self.get_stock_price(ticker)
+
+        return {
+            "valid": result.get("valid", False),
+            "ticker": ticker,
+            "name": result.get("name"),
+            "current_price": Decimal(str(result["current_price"])) if result.get("current_price") else None,
+            "currency": result.get("currency"),
+            "exchange": result.get("exchange"),
+            "error": result.get("error") if not result.get("valid") else None,
+        }
+
     async def enrich_assets_with_prices(self, assets: list[dict]) -> list[dict]:
         """
         자산 목록에 실시간 가격 정보 추가 냥~ 🐱
@@ -97,6 +115,7 @@ class FinanceService:
         - 주식: yfinance에서 현재가 조회
         - 현금: current_value 사용
         - 계산: 평가금액, 손익, 수익률
+        - 환율: USD 자산의 원화 환산 매입가 계산
         """
         # 티커가 있는 자산만 필터링
         tickers = [
@@ -108,12 +127,19 @@ class FinanceService:
         # 일괄 조회
         prices = await self.get_multiple_prices(list(set(tickers)))
 
+        # 현재 환율 조회 (USD 자산이 있을 경우)
+        current_exchange_rate = await self.get_exchange_rate()
+
         enriched = []
         for asset in assets:
             asset_copy = dict(asset)
             ticker = asset.get("ticker")
             quantity = Decimal(str(asset.get("quantity", 0)))
             avg_price = Decimal(str(asset.get("average_price", 0)))
+            currency = asset.get("currency", "KRW")
+
+            # 현재 환율 추가
+            asset_copy["current_exchange_rate"] = Decimal(str(current_exchange_rate))
 
             # 현재가 결정
             if ticker and ticker in prices:
@@ -122,8 +148,8 @@ class FinanceService:
 
                 if current_price:
                     # USD 자산인 경우 원화 환산 (선택적)
-                    if price_info.get("currency") == "USD" and asset.get("currency") == "KRW":
-                        current_price = float(current_price) * settings.default_usd_krw_rate
+                    if price_info.get("currency") == "USD" and currency == "KRW":
+                        current_price = float(current_price) * current_exchange_rate
 
                     asset_copy["current_price"] = Decimal(str(current_price))
                 else:
@@ -133,6 +159,20 @@ class FinanceService:
                 asset_copy["current_price"] = Decimal(str(asset["current_value"])) / quantity if quantity else Decimal("0")
             else:
                 asset_copy["current_price"] = None
+
+            # USD 자산의 원화 환산 매입가 계산
+            if currency == "USD" and quantity > 0:
+                # 매수 시점 환율이 있으면 사용, 없으면 현재 환율 사용
+                purchase_rate = asset.get("purchase_exchange_rate")
+                if purchase_rate:
+                    purchase_rate = Decimal(str(purchase_rate))
+                else:
+                    purchase_rate = Decimal(str(current_exchange_rate))
+
+                # 원화 환산 매입가 = 평균매수가(USD) × 수량 × 매수시점환율
+                asset_copy["cost_basis_krw"] = avg_price * quantity * purchase_rate
+            else:
+                asset_copy["cost_basis_krw"] = None
 
             # 평가금액, 손익, 수익률 계산
             if asset_copy.get("current_price") and quantity > 0:
@@ -175,6 +215,80 @@ class FinanceService:
 
         # 실패시 기본값 반환
         return settings.default_usd_krw_rate
+
+    def _get_benchmark_history_sync(
+        self,
+        ticker: str,
+        start_date: date,
+        end_date: date
+    ) -> list[dict]:
+        """
+        동기 방식으로 벤치마크 히스토리 조회 냥~
+        """
+        try:
+            stock = yf.Ticker(ticker)
+            history = stock.history(
+                start=start_date.isoformat(),
+                end=(end_date + timedelta(days=1)).isoformat()
+            )
+
+            if history.empty:
+                return []
+
+            data = []
+            first_close = None
+
+            for idx, row in history.iterrows():
+                close = float(row["Close"])
+                if first_close is None:
+                    first_close = close
+
+                # 시작점 대비 수익률 계산
+                return_rate = ((close - first_close) / first_close) * 100 if first_close else 0
+
+                data.append({
+                    "date": idx.date(),
+                    "close": Decimal(str(round(close, 2))),
+                    "return_rate": round(return_rate, 2)
+                })
+
+            return data
+        except Exception as e:
+            print(f"🙀 벤치마크 조회 실패 냥: {ticker} - {e}")
+            return []
+
+    async def get_benchmark_history(
+        self,
+        ticker: str,
+        start_date: date,
+        end_date: date
+    ) -> dict:
+        """
+        벤치마크 히스토리 조회 냥~ 🐱
+        KOSPI: ^KS11, S&P500: ^GSPC
+        """
+        # 벤치마크 이름 매핑
+        benchmark_names = {
+            "^KS11": "KOSPI",
+            "^GSPC": "S&P 500",
+            "^IXIC": "NASDAQ",
+            "^DJI": "Dow Jones",
+        }
+
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(
+            self._executor,
+            self._get_benchmark_history_sync,
+            ticker,
+            start_date,
+            end_date
+        )
+
+        return {
+            "ticker": ticker,
+            "name": benchmark_names.get(ticker, ticker),
+            "data": data
+        }
 
 
 # 싱글톤 인스턴스 (필요시 사용)

@@ -1,7 +1,9 @@
 """
-Meowney API 메인 엔트리포인트 냥~ 🐱
+Meowney API 메인 엔트리포인트 냥~
 고양이 집사의 자산 관리 서버
 """
+import sys
+import io
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api.v1.router import api_router
 from app.services.scheduler_service import start_scheduler, shutdown_scheduler
+
+# Windows 콘솔 인코딩 문제 해결
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 
 @asynccontextmanager
@@ -18,16 +25,16 @@ async def lifespan(app: FastAPI):
     서버 시작 시 스케줄러 시작, 종료 시 정리
     """
     # 시작 시
-    print("🐱 Meowney 서버가 기지개를 켜는 중이다옹...")
+    print("[Meowney] 서버가 기지개를 켜는 중이다옹...")
     start_scheduler()
-    print("⏰ 스케줄러가 깨어났다옹! 매일 밤 자산 스냅샷을 찍을 거야~")
+    print("[Meowney] 스케줄러가 깨어났다옹! 매일 밤 자산 스냅샷을 찍을 거야~")
 
     yield
 
     # 종료 시
-    print("😿 Meowney 서버가 잠들 준비를 하는 중이다옹...")
+    print("[Meowney] 서버가 잠들 준비를 하는 중이다옹...")
     shutdown_scheduler()
-    print("💤 안녕히 주무세요 냥~")
+    print("[Meowney] 안녕히 주무세요 냥~")
 
 
 # FastAPI 앱 생성

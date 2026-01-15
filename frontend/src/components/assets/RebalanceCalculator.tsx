@@ -9,10 +9,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
-import { formatKRW, formatPercent, getProfitClass } from '@/lib/utils'
+import { formatKRW, getProfitClass } from '@/lib/utils'
 import { useDashboardSummary } from '@/hooks/useDashboard'
 import { useRebalanceCalculation } from '@/hooks/useDashboard'
-import type { CategoryAllocation, RebalanceTarget, RebalanceSuggestion } from '@/types'
+import type { RebalanceTarget, RebalanceSuggestion } from '@/types'
 
 export function RebalanceCalculator() {
   const { data: summary, isLoading } = useDashboardSummary()
@@ -59,12 +59,12 @@ export function RebalanceCalculator() {
       }))
 
     if (targets.length === 0) {
-      alert('목표 비율을 입력해주세요 냥! 🐱')
+      alert('목표 비율을 입력해주세요.')
       return
     }
 
     if (Math.abs(totalTargetPercentage - 100) > 0.1) {
-      alert('목표 비율의 합이 100%가 되어야 해요 냥! 🐱')
+      alert('목표 비율의 합이 100%가 되어야 합니다.')
       return
     }
 
@@ -97,7 +97,7 @@ export function RebalanceCalculator() {
         </CardHeader>
         <CardContent className="py-12 text-center">
           <p className="text-muted-foreground">
-            먼저 자산을 추가해주세요 냥~ 🐱
+            먼저 자산을 추가해주세요.
           </p>
         </CardContent>
       </Card>
@@ -114,7 +114,7 @@ export function RebalanceCalculator() {
             리밸런싱 계산기
           </CardTitle>
           <CardDescription>
-            목표 배분 비율을 설정하면 리밸런싱에 필요한 매수/매도 금액을 계산해드려요 냥~
+            목표 배분 비율을 설정하면 리밸런싱에 필요한 매수/매도 금액을 계산합니다.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -203,7 +203,7 @@ export function RebalanceCalculator() {
             disabled={rebalanceMutation.isPending || Math.abs(totalTargetPercentage - 100) > 0.1}
             className="w-full"
           >
-            {rebalanceMutation.isPending ? '계산 중...' : '리밸런싱 계산하기 🐱'}
+            {rebalanceMutation.isPending ? '계산 중...' : '리밸런싱 계산'}
           </Button>
         </CardContent>
       </Card>
@@ -248,7 +248,7 @@ function RebalanceSuggestionCard({ suggestion }: { suggestion: RebalanceSuggesti
       <div className="text-right">
         {isHold ? (
           <div className="text-muted-foreground">
-            유지 냥~ 🐱
+            유지
           </div>
         ) : (
           <>

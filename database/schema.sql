@@ -15,6 +15,7 @@ CREATE TABLE portfolios (
     name VARCHAR(100) NOT NULL,  -- 포트폴리오 이름 (예: "나의 첫 번째 냥이 포트폴리오")
     description TEXT,             -- 설명
     base_currency VARCHAR(10) DEFAULT 'KRW',  -- 기준 통화
+    target_value DECIMAL(18, 4),  -- 목표 자산 금액 (목표 설정용)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -67,6 +68,9 @@ CREATE TABLE assets (
     -- 현금성 자산용 (티커가 없는 경우)
     current_value DECIMAL(18, 4),         -- 직접 입력한 현재 가치 (현금, 예금 등)
 
+    -- 환율 정보 (USD 자산용)
+    purchase_exchange_rate DECIMAL(10, 4), -- 매수 시점 USD/KRW 환율 (예: 1350.00)
+
     -- 메타 정보
     notes TEXT,                           -- 메모 (냥이 집사의 투자 일기)
     is_active BOOLEAN DEFAULT TRUE,       -- 활성 상태
@@ -109,8 +113,8 @@ CREATE INDEX idx_asset_history_portfolio_id ON asset_history(portfolio_id);
 CREATE INDEX idx_asset_history_snapshot_date ON asset_history(snapshot_date);
 
 -- ============================================
--- 5. target_allocations: 목표 배분 비율
--- 리밸런싱 계산용 목표 비율 설정
+-- 5. target_allocations: 목표 배분 비율 (레거시)
+-- 카테고리 기준 리밸런싱용 (하위 호환성 유지)
 -- ============================================
 CREATE TABLE target_allocations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -122,6 +126,46 @@ CREATE TABLE target_allocations (
 
     CONSTRAINT unique_portfolio_category UNIQUE (portfolio_id, category_id)
 );
+
+-- ============================================
+-- 6. rebalance_plans: 리밸런싱 플랜
+-- 개별 자산 기준 목표 배분 플랜 관리
+-- ============================================
+CREATE TABLE rebalance_plans (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    portfolio_id UUID NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,           -- 플랜 이름 (예: "공격형 포트폴리오", "안정형 배분")
+    description TEXT,                      -- 플랜 설명
+    is_main BOOLEAN DEFAULT FALSE,         -- 메인 플랜 여부 (포트폴리오당 1개만 true)
+    is_active BOOLEAN DEFAULT TRUE,        -- 활성 상태
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 인덱스
+CREATE INDEX idx_rebalance_plans_portfolio ON rebalance_plans(portfolio_id);
+CREATE INDEX idx_rebalance_plans_is_main ON rebalance_plans(portfolio_id, is_main) WHERE is_main = TRUE;
+
+-- ============================================
+-- 7. plan_allocations: 플랜별 목표 배분
+-- 개별 자산(티커) 기준 목표 비율 설정
+-- ============================================
+CREATE TABLE plan_allocations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    plan_id UUID NOT NULL REFERENCES rebalance_plans(id) ON DELETE CASCADE,
+    asset_id UUID REFERENCES assets(id) ON DELETE CASCADE,  -- 보유 자산 참조 (선택)
+    ticker VARCHAR(20),                    -- 또는 티커로 직접 지정 (선택)
+    target_percentage DECIMAL(5, 2) NOT NULL CHECK (target_percentage >= 0 AND target_percentage <= 100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    -- asset_id 또는 ticker 둘 중 하나는 필수
+    CONSTRAINT check_asset_or_ticker CHECK (asset_id IS NOT NULL OR ticker IS NOT NULL)
+);
+
+-- 인덱스
+CREATE INDEX idx_plan_allocations_plan ON plan_allocations(plan_id);
+CREATE INDEX idx_plan_allocations_asset ON plan_allocations(asset_id);
 
 -- ============================================
 -- Updated_at 자동 갱신 트리거
@@ -144,6 +188,14 @@ CREATE TRIGGER update_assets_updated_at
 
 CREATE TRIGGER update_target_allocations_updated_at
     BEFORE UPDATE ON target_allocations
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_rebalance_plans_updated_at
+    BEFORE UPDATE ON rebalance_plans
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_plan_allocations_updated_at
+    BEFORE UPDATE ON plan_allocations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
@@ -170,4 +222,15 @@ FROM portfolios p
 LEFT JOIN assets a ON p.id = a.portfolio_id AND a.is_active = TRUE
 GROUP BY p.id, p.name;
 
--- 냥~ 스키마 생성 완료! 🐱✨
+-- 스키마 생성 완료!
+
+-- ============================================
+-- 마이그레이션: 기존 테이블에 새 컬럼/테이블 추가
+-- 이미 테이블이 존재하는 경우 아래 쿼리 실행
+-- ============================================
+-- ALTER TABLE assets ADD COLUMN IF NOT EXISTS purchase_exchange_rate DECIMAL(10, 4);
+-- ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS target_value DECIMAL(18, 4);
+
+-- 리밸런싱 플랜 테이블 (v2)
+-- CREATE TABLE IF NOT EXISTS rebalance_plans (...);
+-- CREATE TABLE IF NOT EXISTS plan_allocations (...);

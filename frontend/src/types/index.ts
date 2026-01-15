@@ -21,6 +21,7 @@ export interface Asset {
   average_price: number
   currency: string
   current_value: number | null
+  purchase_exchange_rate: number | null
   notes: string | null
   is_active: boolean
   created_at: string
@@ -30,6 +31,8 @@ export interface Asset {
   market_value: number | null
   profit_loss: number | null
   profit_rate: number | null
+  cost_basis_krw: number | null
+  current_exchange_rate: number | null
   category_name: string | null
   category_color: string | null
 }
@@ -44,6 +47,7 @@ export interface AssetCreate {
   average_price: number
   currency?: string
   current_value?: number
+  purchase_exchange_rate?: number
   notes?: string
   portfolio_id?: string
 }
@@ -58,6 +62,7 @@ export interface AssetUpdate {
   average_price?: number
   currency?: string
   current_value?: number
+  purchase_exchange_rate?: number
   notes?: string
   is_active?: boolean
 }
@@ -123,4 +128,164 @@ export interface MeowResponse {
   success: boolean
   message: string
   data?: Record<string, unknown>
+}
+
+// 환율 응답
+export interface ExchangeRateResponse {
+  rate: number
+  from_currency: string
+  to_currency: string
+  timestamp: string
+}
+
+// 벤치마크 데이터 포인트
+export interface BenchmarkDataPoint {
+  date: string
+  close: number
+  return_rate: number | null
+}
+
+// 벤치마크 응답
+export interface BenchmarkResponse {
+  ticker: string
+  name: string
+  data: BenchmarkDataPoint[]
+}
+
+// 기간별 수익률
+export interface PeriodReturn {
+  period: string
+  return_rate: number | null
+  start_value: number | null
+  end_value: number | null
+}
+
+// 성과 지표
+export interface PerformanceMetrics {
+  period_returns: PeriodReturn[]
+  max_drawdown: number | null
+  max_drawdown_period: string | null
+  current_drawdown: number | null
+}
+
+// 리밸런싱 알림
+export interface RebalanceAlert {
+  category_name: string
+  current_percentage: number
+  target_percentage: number
+  deviation: number
+  direction: 'over' | 'under'
+}
+
+// 리밸런싱 알림 응답
+export interface RebalanceAlertsResponse {
+  alerts: RebalanceAlert[]
+  threshold: number
+  needs_rebalancing: boolean
+}
+
+// 목표 진행률
+export interface GoalProgressResponse {
+  target_value: number
+  current_value: number
+  progress_percentage: number
+  remaining_amount: number
+  is_achieved: boolean
+}
+
+// 포트폴리오
+export interface Portfolio {
+  id: string
+  name: string
+  description: string | null
+  base_currency: string
+  target_value: number | null
+  created_at: string
+  updated_at: string
+}
+
+// 티커 검증 응답
+export interface TickerValidation {
+  valid: boolean
+  ticker: string
+  name: string | null
+  current_price: number | null
+  currency: string | null
+  exchange: string | null
+  error: string | null
+}
+
+// ============================================
+// 리밸런싱 플랜 관련 타입
+// ============================================
+
+// 플랜 배분 설정
+export interface PlanAllocation {
+  id: string
+  plan_id: string
+  asset_id: string | null
+  ticker: string | null
+  target_percentage: number
+  asset_name?: string
+  current_percentage?: number
+  created_at: string
+  updated_at: string
+}
+
+// 리밸런싱 플랜
+export interface RebalancePlan {
+  id: string
+  portfolio_id: string
+  name: string
+  description: string | null
+  is_main: boolean
+  is_active: boolean
+  allocations: PlanAllocation[]
+  created_at: string
+  updated_at: string
+}
+
+// 플랜 생성 요청
+export interface RebalancePlanCreate {
+  name: string
+  description?: string
+  is_main?: boolean
+  portfolio_id?: string
+  allocations?: PlanAllocationCreate[]
+}
+
+// 플랜 수정 요청
+export interface RebalancePlanUpdate {
+  name?: string
+  description?: string
+  is_main?: boolean
+  is_active?: boolean
+}
+
+// 배분 생성 요청
+export interface PlanAllocationCreate {
+  asset_id?: string
+  ticker?: string
+  target_percentage: number
+}
+
+// 자산 기준 리밸런싱 제안
+export interface AssetRebalanceSuggestion {
+  asset_id: string | null
+  asset_name: string
+  ticker: string | null
+  current_value: number
+  current_percentage: number
+  target_percentage: number
+  difference_percentage: number
+  suggested_amount: number
+  suggested_quantity: number | null
+}
+
+// 자산 기준 리밸런싱 응답
+export interface AssetRebalanceResponse {
+  plan_id: string
+  plan_name: string
+  total_value: number
+  suggestions: AssetRebalanceSuggestion[]
 }

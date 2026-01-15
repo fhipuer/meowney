@@ -34,7 +34,7 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
       <Card className="p-8 text-center">
         <Cat className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
         <p className="text-muted-foreground">
-          냥? 아직 자산 데이터가 없다옹! 🐱
+          아직 자산 데이터가 없습니다.
         </p>
       </Card>
     )
@@ -55,7 +55,7 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
             {formatKRW(summary.total_value)}
           </div>
           <p className="text-xs text-muted-foreground">
-            {summary.asset_count}개 자산 보유 중 냥~
+            {summary.asset_count}개 자산 보유
           </p>
         </CardContent>
       </Card>
@@ -71,7 +71,7 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
             {formatKRW(summary.total_principal)}
           </div>
           <p className="text-xs text-muted-foreground">
-            열심히 모은 냥이 밥값
+            누적 투자 금액
           </p>
         </CardContent>
       </Card>
@@ -92,7 +92,7 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
             {formatKRW(summary.total_profit)}
           </div>
           <p className="text-xs text-muted-foreground">
-            {isProfitable ? '야옹~ 수익이다옹! 🎉' : '괜찮아 냥... 다음에 잘하면 돼 😿'}
+            평가손익
           </p>
         </CardContent>
       </Card>
@@ -108,11 +108,7 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
             {formatPercent(summary.profit_rate)}
           </div>
           <p className="text-xs text-muted-foreground">
-            {summary.profit_rate >= 10
-              ? '대박이다옹! 🚀'
-              : summary.profit_rate >= 0
-              ? '꾸준히 성장 중 냥~'
-              : '힘내라 냥!'}
+            원금 대비 수익률
           </p>
         </CardContent>
       </Card>

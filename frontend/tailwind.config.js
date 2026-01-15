@@ -52,7 +52,7 @@ export default {
         meow: {
           profit: "#ef4444",   // 빨간색 수익 (한국식)
           loss: "#3b82f6",     // 파란색 손실
-          cat: "#f97316",      // 고양이 오렌지
+          cat: "#3b82f6",      // 메인 블루
         },
       },
       borderRadius: {

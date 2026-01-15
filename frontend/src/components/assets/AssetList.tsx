@@ -69,7 +69,7 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
         <CardContent className="py-12 text-center">
           <PawPrint className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
           <p className="text-muted-foreground mb-4">
-            아직 등록된 자산이 없다옹! 🐱
+            아직 등록된 자산이 없습니다.
           </p>
           <AssetForm />
         </CardContent>
@@ -82,7 +82,7 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
-            🐾 자산 목록
+            자산 목록
             <span className="text-sm font-normal text-muted-foreground">
               ({assets.length}개)
             </span>
@@ -170,11 +170,11 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
       <Dialog open={!!deletingAsset} onOpenChange={(open) => !open && setDeletingAsset(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>자산 삭제 확인 🙀</DialogTitle>
+            <DialogTitle>자산 삭제 확인</DialogTitle>
             <DialogDescription>
               정말로 &quot;{deletingAsset?.name}&quot;을(를) 삭제하시겠습니까?
               <br />
-              이 작업은 되돌릴 수 없습니다 냥...
+              이 작업은 되돌릴 수 없습니다.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

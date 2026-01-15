@@ -23,6 +23,7 @@ class AssetBase(BaseModel):
     average_price: Decimal = Field(default=Decimal("0"), ge=0, description="평균 매수가")
     currency: str = Field(default="KRW", max_length=10)
     current_value: Optional[Decimal] = Field(None, description="직접 입력한 현재가치 (현금용)")
+    purchase_exchange_rate: Optional[Decimal] = Field(None, ge=0, description="매수 시점 환율 (USD자산용)")
     notes: Optional[str] = None
 
 
@@ -41,6 +42,7 @@ class AssetUpdate(BaseModel):
     average_price: Optional[Decimal] = Field(None, ge=0)
     currency: Optional[str] = None
     current_value: Optional[Decimal] = None
+    purchase_exchange_rate: Optional[Decimal] = Field(None, ge=0)
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -58,6 +60,8 @@ class AssetResponse(AssetBase):
     market_value: Optional[Decimal] = Field(None, description="평가금액")
     profit_loss: Optional[Decimal] = Field(None, description="손익금액")
     profit_rate: Optional[float] = Field(None, description="수익률 (%)")
+    cost_basis_krw: Optional[Decimal] = Field(None, description="원화 환산 매입가 (USD자산용)")
+    current_exchange_rate: Optional[Decimal] = Field(None, description="현재 환율")
     category_name: Optional[str] = None
     category_color: Optional[str] = None
 
@@ -153,3 +157,215 @@ class ErrorResponse(BaseModel):
     message: str
     error_code: Optional[str] = None
     detail: Optional[str] = None
+
+
+# ============================================
+# Portfolio (포트폴리오) 스키마
+# ============================================
+
+class PortfolioBase(BaseModel):
+    """포트폴리오 기본 스키마"""
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    base_currency: str = Field(default="KRW", max_length=10)
+    target_value: Optional[Decimal] = Field(None, ge=0, description="목표 자산 금액")
+
+
+class PortfolioUpdate(BaseModel):
+    """포트폴리오 수정 요청"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    target_value: Optional[Decimal] = Field(None, ge=0)
+
+
+class PortfolioResponse(PortfolioBase):
+    """포트폴리오 응답"""
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Exchange Rate (환율) 스키마
+# ============================================
+
+class ExchangeRateResponse(BaseModel):
+    """환율 조회 응답 냥~"""
+    rate: Decimal
+    from_currency: str = "USD"
+    to_currency: str = "KRW"
+    timestamp: datetime
+
+
+# ============================================
+# Benchmark (벤치마크) 스키마
+# ============================================
+
+class BenchmarkDataPoint(BaseModel):
+    """벤치마크 데이터 포인트"""
+    date: date
+    close: Decimal
+    return_rate: Optional[float] = Field(None, description="시작점 대비 수익률 (%)")
+
+
+class BenchmarkResponse(BaseModel):
+    """벤치마크 히스토리 응답"""
+    ticker: str
+    name: str
+    data: list[BenchmarkDataPoint]
+
+
+# ============================================
+# Performance Metrics (성과 지표) 스키마
+# ============================================
+
+class PeriodReturn(BaseModel):
+    """기간별 수익률"""
+    period: str  # 1M, 3M, 6M, YTD, 1Y
+    return_rate: Optional[float] = Field(None, description="수익률 (%)")
+    start_value: Optional[Decimal] = None
+    end_value: Optional[Decimal] = None
+
+
+class PerformanceMetrics(BaseModel):
+    """성과 지표 응답"""
+    period_returns: list[PeriodReturn]
+    max_drawdown: Optional[float] = Field(None, description="최대 드로우다운 (%)")
+    max_drawdown_period: Optional[str] = Field(None, description="MDD 발생 기간")
+    current_drawdown: Optional[float] = Field(None, description="현재 드로우다운 (%)")
+
+
+# ============================================
+# Rebalance Alert (리밸런싱 알림) 스키마
+# ============================================
+
+class RebalanceAlert(BaseModel):
+    """리밸런싱 알림"""
+    category_name: str
+    current_percentage: float
+    target_percentage: float
+    deviation: float  # 이탈도 (절대값)
+    direction: str  # "over" 또는 "under"
+
+
+class RebalanceAlertsResponse(BaseModel):
+    """리밸런싱 알림 목록 응답"""
+    alerts: list[RebalanceAlert]
+    threshold: float
+    needs_rebalancing: bool
+
+
+# ============================================
+# Goal Progress (목표 진행률) 스키마
+# ============================================
+
+class GoalProgressResponse(BaseModel):
+    """목표 진행률 응답"""
+    target_value: Decimal
+    current_value: Decimal
+    progress_percentage: float
+    remaining_amount: Decimal
+    is_achieved: bool
+
+
+# ============================================
+# Ticker Validation (티커 검증) 스키마
+# ============================================
+
+class TickerValidationResponse(BaseModel):
+    """티커 검증 응답"""
+    valid: bool
+    ticker: str
+    name: Optional[str] = None
+    current_price: Optional[Decimal] = None
+    currency: Optional[str] = None
+    exchange: Optional[str] = None
+    error: Optional[str] = None
+
+
+# ============================================
+# Rebalance Plan (리밸런싱 플랜) 스키마
+# ============================================
+
+class PlanAllocationBase(BaseModel):
+    """플랜 배분 기본"""
+    asset_id: Optional[UUID] = None
+    ticker: Optional[str] = None
+    target_percentage: float = Field(..., ge=0, le=100)
+
+
+class PlanAllocationCreate(PlanAllocationBase):
+    """플랜 배분 생성"""
+    pass
+
+
+class PlanAllocationResponse(PlanAllocationBase):
+    """플랜 배분 응답"""
+    id: UUID
+    plan_id: UUID
+    asset_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RebalancePlanBase(BaseModel):
+    """리밸런싱 플랜 기본"""
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    is_main: bool = False
+
+
+class RebalancePlanCreate(RebalancePlanBase):
+    """리밸런싱 플랜 생성"""
+    portfolio_id: Optional[UUID] = None
+    allocations: list[PlanAllocationCreate] = []
+
+
+class RebalancePlanUpdate(BaseModel):
+    """리밸런싱 플랜 수정"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    is_main: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class RebalancePlanResponse(RebalancePlanBase):
+    """리밸런싱 플랜 응답"""
+    id: UUID
+    portfolio_id: UUID
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    allocations: list[PlanAllocationResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Asset-based Rebalance (자산 기준 리밸런싱) 스키마
+# ============================================
+
+class AssetRebalanceSuggestion(BaseModel):
+    """자산 기준 리밸런싱 제안"""
+    asset_id: Optional[UUID]
+    asset_name: str
+    ticker: Optional[str]
+    current_value: Decimal
+    current_percentage: float
+    target_percentage: float
+    difference_percentage: float
+    suggested_amount: Decimal  # 양수면 매수, 음수면 매도
+    suggested_quantity: Optional[Decimal] = None  # 매수/매도 수량
+
+
+class AssetRebalanceResponse(BaseModel):
+    """자산 기준 리밸런싱 응답"""
+    plan_id: UUID
+    plan_name: str
+    total_value: Decimal
+    suggestions: list[AssetRebalanceSuggestion]

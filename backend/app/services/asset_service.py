@@ -228,8 +228,8 @@ class AssetService:
         start_date: date,
         end_date: date,
         limit: int = 30,
-    ) -> list[AssetHistoryResponse]:
-        """자산 히스토리 조회"""
+    ) -> list[dict]:
+        """자산 히스토리 조회 (날짜 오름차순)"""
         if not portfolio_id:
             portfolio_id = await self._get_default_portfolio_id()
 
@@ -239,12 +239,21 @@ class AssetService:
             .eq("portfolio_id", str(portfolio_id))
             .gte("snapshot_date", start_date.isoformat())
             .lte("snapshot_date", end_date.isoformat())
-            .order("snapshot_date", desc=True)
+            .order("snapshot_date", desc=False)
             .limit(limit)
             .execute()
         )
 
-        return [AssetHistoryResponse(**row) for row in result.data]
+        # Decimal 변환
+        history = []
+        for row in result.data:
+            item = dict(row)
+            for key in ["total_value", "total_principal", "total_profit"]:
+                if item.get(key):
+                    item[key] = Decimal(str(item[key]))
+            history.append(item)
+
+        return history
 
     async def save_snapshot(self, portfolio_id: UUID, summary: DashboardSummary) -> dict:
         """
@@ -337,3 +346,79 @@ class AssetService:
         """모든 포트폴리오 ID 조회 (스케줄러용)"""
         result = self.db.table("portfolios").select("id").execute()
         return [UUID(row["id"]) for row in result.data]
+
+    async def get_portfolio(self, portfolio_id: Optional[UUID] = None) -> dict:
+        """포트폴리오 정보 조회 냥~"""
+        if not portfolio_id:
+            portfolio_id = await self._get_default_portfolio_id()
+
+        result = (
+            self.db.table("portfolios")
+            .select("*")
+            .eq("id", str(portfolio_id))
+            .single()
+            .execute()
+        )
+
+        return result.data if result.data else {}
+
+    async def update_portfolio(
+        self,
+        portfolio_id: UUID,
+        update_data: dict,
+    ) -> dict:
+        """포트폴리오 정보 수정 냥~"""
+        result = (
+            self.db.table("portfolios")
+            .update(update_data)
+            .eq("id", str(portfolio_id))
+            .execute()
+        )
+
+        return result.data[0] if result.data else {}
+
+    async def get_target_allocations(self, portfolio_id: Optional[UUID] = None) -> list[dict]:
+        """목표 배분 조회 냥~"""
+        if not portfolio_id:
+            portfolio_id = await self._get_default_portfolio_id()
+
+        result = (
+            self.db.table("target_allocations")
+            .select("*, asset_categories(name)")
+            .eq("portfolio_id", str(portfolio_id))
+            .execute()
+        )
+
+        # 카테고리명 평탄화
+        allocations = []
+        for row in result.data:
+            allocation = dict(row)
+            category = allocation.pop("asset_categories", None)
+            if category:
+                allocation["category_name"] = category.get("name")
+            allocations.append(allocation)
+
+        return allocations
+
+    async def save_target_allocations(
+        self,
+        portfolio_id: UUID,
+        targets: list[dict],
+    ) -> list[dict]:
+        """목표 배분 저장 냥~ (UPSERT)"""
+        upsert_data = [
+            {
+                "portfolio_id": str(portfolio_id),
+                "category_id": str(target["category_id"]),
+                "target_percentage": target["target_percentage"],
+            }
+            for target in targets
+        ]
+
+        result = (
+            self.db.table("target_allocations")
+            .upsert(upsert_data, on_conflict="portfolio_id,category_id")
+            .execute()
+        )
+
+        return result.data

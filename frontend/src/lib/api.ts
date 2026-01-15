@@ -13,6 +13,17 @@ import type {
   RebalanceResponse,
   AssetCategory,
   MeowResponse,
+  ExchangeRateResponse,
+  BenchmarkResponse,
+  PerformanceMetrics,
+  RebalanceAlertsResponse,
+  GoalProgressResponse,
+  TickerValidation,
+  RebalancePlan,
+  RebalancePlanCreate,
+  RebalancePlanUpdate,
+  PlanAllocationCreate,
+  AssetRebalanceResponse,
 } from '@/types'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -84,6 +95,12 @@ export const assetsApi = {
     )
     return data
   },
+
+  // 티커 검증
+  validateTicker: async (ticker: string): Promise<TickerValidation> => {
+    const { data } = await apiClient.get<TickerValidation>(`/assets/validate-ticker/${ticker}`)
+    return data
+  },
 }
 
 // ============================================
@@ -127,6 +144,63 @@ export const dashboardApi = {
     )
     return data
   },
+
+  // 현재 환율 조회 냥~
+  getExchangeRate: async (): Promise<ExchangeRateResponse> => {
+    const { data } = await apiClient.get<ExchangeRateResponse>('/dashboard/exchange-rate')
+    return data
+  },
+
+  // 벤치마크 히스토리 조회 냥~
+  getBenchmark: async (
+    ticker: string,
+    period = '3M',
+    startDate?: string,
+    endDate?: string
+  ): Promise<BenchmarkResponse> => {
+    const params = new URLSearchParams()
+    params.append('period', period)
+    if (startDate) params.append('start_date', startDate)
+    if (endDate) params.append('end_date', endDate)
+
+    const { data } = await apiClient.get<BenchmarkResponse>(
+      `/dashboard/benchmark/${ticker}?${params}`
+    )
+    return data
+  },
+
+  // 성과 지표 조회 냥~
+  getPerformance: async (portfolioId?: string): Promise<PerformanceMetrics> => {
+    const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
+    const { data } = await apiClient.get<PerformanceMetrics>(
+      `/dashboard/performance${params}`
+    )
+    return data
+  },
+
+  // 리밸런싱 알림 조회 냥~
+  getRebalanceAlerts: async (
+    portfolioId?: string,
+    threshold = 5.0
+  ): Promise<RebalanceAlertsResponse> => {
+    const params = new URLSearchParams()
+    if (portfolioId) params.append('portfolio_id', portfolioId)
+    params.append('threshold', threshold.toString())
+
+    const { data } = await apiClient.get<RebalanceAlertsResponse>(
+      `/dashboard/rebalance-alerts?${params}`
+    )
+    return data
+  },
+
+  // 목표 진행률 조회 냥~
+  getGoalProgress: async (portfolioId?: string): Promise<GoalProgressResponse> => {
+    const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
+    const { data } = await apiClient.get<GoalProgressResponse>(
+      `/dashboard/goal-progress${params}`
+    )
+    return data
+  },
 }
 
 // ============================================
@@ -145,5 +219,72 @@ export const categoriesApi = {
       { id: '5', name: '암호화폐', color: '#8b5cf6', icon: 'sparkles', display_order: 5 },
       { id: '6', name: '기타', color: '#6b7280', icon: 'box', display_order: 6 },
     ]
+  },
+}
+
+// ============================================
+// Rebalance Plans API
+// ============================================
+
+export const rebalanceApi = {
+  // 플랜 목록 조회
+  getPlans: async (portfolioId?: string): Promise<RebalancePlan[]> => {
+    const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
+    const { data } = await apiClient.get<RebalancePlan[]>(`/rebalance/plans${params}`)
+    return data
+  },
+
+  // 플랜 상세 조회
+  getPlan: async (planId: string): Promise<RebalancePlan> => {
+    const { data } = await apiClient.get<RebalancePlan>(`/rebalance/plans/${planId}`)
+    return data
+  },
+
+  // 메인 플랜 조회
+  getMainPlan: async (portfolioId?: string): Promise<RebalancePlan | null> => {
+    const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
+    const { data } = await apiClient.get<RebalancePlan | null>(`/rebalance/main-plan${params}`)
+    return data
+  },
+
+  // 플랜 생성
+  createPlan: async (plan: RebalancePlanCreate): Promise<RebalancePlan> => {
+    const { data } = await apiClient.post<RebalancePlan>('/rebalance/plans', plan)
+    return data
+  },
+
+  // 플랜 수정
+  updatePlan: async (planId: string, plan: RebalancePlanUpdate): Promise<RebalancePlan> => {
+    const { data } = await apiClient.put<RebalancePlan>(`/rebalance/plans/${planId}`, plan)
+    return data
+  },
+
+  // 플랜 삭제
+  deletePlan: async (planId: string): Promise<MeowResponse> => {
+    const { data } = await apiClient.delete<MeowResponse>(`/rebalance/plans/${planId}`)
+    return data
+  },
+
+  // 메인 플랜 설정
+  setMainPlan: async (planId: string): Promise<RebalancePlan> => {
+    const { data } = await apiClient.post<RebalancePlan>(`/rebalance/plans/${planId}/set-main`)
+    return data
+  },
+
+  // 배분 설정 저장
+  saveAllocations: async (planId: string, allocations: PlanAllocationCreate[]): Promise<RebalancePlan> => {
+    const { data } = await apiClient.put<RebalancePlan>(
+      `/rebalance/plans/${planId}/allocations`,
+      allocations
+    )
+    return data
+  },
+
+  // 리밸런싱 계산
+  calculate: async (planId: string): Promise<AssetRebalanceResponse> => {
+    const { data } = await apiClient.post<AssetRebalanceResponse>(
+      `/rebalance/plans/${planId}/calculate`
+    )
+    return data
   },
 }
