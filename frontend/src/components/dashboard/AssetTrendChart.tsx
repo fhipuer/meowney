@@ -9,6 +9,7 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  ReferenceDot,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatKRW, formatDate, maskValue, PRIVACY_MASK } from '@/lib/utils'
@@ -70,7 +71,7 @@ export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
   const isPositive = change >= 0
 
   return (
-    <Card className="h-[400px] border-0 bg-gradient-to-br from-background to-muted/30 overflow-hidden opacity-0 animate-slide-up" style={{ animationDelay: '100ms' }}>
+    <Card className="h-[400px] border-0 bg-gradient-to-br from-background to-muted/30 opacity-0 animate-slide-up" style={{ animationDelay: '100ms' }}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="flex items-center gap-2">
@@ -134,6 +135,8 @@ export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
               strokeWidth={1.5}
               strokeDasharray="4 4"
               fill="url(#colorPrincipal)"
+              dot={false}
+              activeDot={{ r: 4, strokeWidth: 2, fill: 'hsl(var(--background))' }}
             />
             <Area
               type="monotone"
@@ -141,7 +144,20 @@ export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
               stroke="hsl(var(--primary))"
               strokeWidth={2}
               fill="url(#colorValue)"
+              dot={false}
+              activeDot={{ r: 5, strokeWidth: 2, fill: 'hsl(var(--background))' }}
             />
+            {/* 마지막 데이터 포인트 강조 냥~ */}
+            {chartData.length > 0 && (
+              <ReferenceDot
+                x={chartData[chartData.length - 1].date}
+                y={chartData[chartData.length - 1].totalValue}
+                r={6}
+                fill="hsl(var(--primary))"
+                stroke="hsl(var(--background))"
+                strokeWidth={2}
+              />
+            )}
           </AreaChart>
         </ResponsiveContainer>
         {/* 범례 */}

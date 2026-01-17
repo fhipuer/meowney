@@ -66,6 +66,10 @@ export function useUpdateAsset() {
       queryClient.invalidateQueries({ queryKey: assetKeys.lists() })
       queryClient.invalidateQueries({ queryKey: assetKeys.detail(variables.id) })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      // 리밸런싱 플랜 캐시도 무효화 냥~ (자산 가치 변경 반영)
+      queryClient.invalidateQueries({ queryKey: ['rebalancePlans'] })
+      queryClient.invalidateQueries({ queryKey: ['rebalancePlan'] })
+      queryClient.invalidateQueries({ queryKey: ['mainPlan'] })
     },
   })
 }

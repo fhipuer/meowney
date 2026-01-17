@@ -1,9 +1,9 @@
 /**
  * 목표 배분 편집기 컴포넌트 - 개별 배분 + 그룹 배분 통합 지원 냥~
- * Phase 1 개선: 실시간 파이차트, 비율 정규화, 자산 선택 UI, 자동 저장
+ * Phase 1 개선: 실시간 파이차트, 비율 정규화, 자산 선택 UI
  */
 import { useState, useMemo, useCallback, useEffect } from 'react'
-import { Save, AlertCircle, Plus, Trash2, ChevronDown, ChevronRight, Link2, Link2Off, Layers, RotateCcw, Scale } from 'lucide-react'
+import { Save, AlertCircle, Plus, Trash2, ChevronDown, ChevronRight, Link2, Link2Off, Layers, Scale } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -28,7 +28,6 @@ import {
 import { useAssets } from '@/hooks/useAssets'
 import { useExchangeRate } from '@/hooks/useDashboard'
 import { useSaveAllocations, useUpdatePlan, useSaveGroups } from '@/hooks/useRebalance'
-import { useAutoSave, formatLastSaved } from '@/hooks/useAutoSave'
 import { formatKRW, formatUSD } from '@/lib/utils'
 import { TickerSparkline } from './TickerSparkline'
 import { RealTimePieChart } from './RealTimePieChart'
@@ -252,102 +251,6 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
 
     return [...new Set(ids)]
   }, [allocations, groups])
-
-  // 자동 저장 훅 - 비교를 위해 matched_asset 제외한 데이터만 저장
-  const autoSaveData = useMemo(() => ({
-    planName,
-    planDescription,
-    planStrategyPrompt,
-    allocations: allocations.map((alloc) => ({
-      id: alloc.id,
-      asset_id: alloc.asset_id,
-      ticker: alloc.ticker,
-      alias: alloc.alias,
-      display_name: alloc.display_name,
-      target_percentage: alloc.target_percentage,
-      // matched_asset 제외 - 비교 시 문제 방지
-    })),
-    groups: groups.map((group) => ({
-      id: group.id,
-      name: group.name,
-      target_percentage: group.target_percentage,
-      items: group.items.map((item) => ({
-        id: item.id,
-        asset_id: item.asset_id,
-        ticker: item.ticker,
-        alias: item.alias,
-        // matched_asset 제외
-      })),
-      isExpanded: group.isExpanded,
-    })),
-  }), [planName, planDescription, planStrategyPrompt, allocations, groups])
-
-  // 초기 데이터 (원본과 비교용) - autoSaveData와 동일한 구조 유지
-  const initialAutoSaveData = useMemo(() => ({
-    planName: plan.name,
-    planDescription: plan.description || '',
-    planStrategyPrompt: plan.strategy_prompt || '',
-    allocations: (plan.allocations || []).map((alloc) => ({
-      id: alloc.id,
-      asset_id: alloc.asset_id ?? undefined,
-      ticker: alloc.ticker ?? undefined,
-      alias: alloc.alias ?? undefined,
-      display_name: alloc.display_name ?? undefined,
-      target_percentage: alloc.target_percentage,
-    })),
-    groups: (plan.groups || []).map((group) => ({
-      id: group.id,
-      name: group.name,
-      target_percentage: group.target_percentage,
-      items: (group.items || []).map((item) => ({
-        id: item.id,
-        asset_id: item.asset_id ?? undefined,
-        ticker: item.ticker ?? undefined,
-        alias: item.alias ?? undefined,
-      })),
-      isExpanded: true,
-    })),
-  }), [plan])
-
-  const { hasRecoveryData, recover, clearRecovery, lastSaved } = useAutoSave({
-    key: `meowney-plan-${plan.id}`,
-    data: autoSaveData,
-    initialData: initialAutoSaveData,
-    debounceMs: 1000,
-    enabled: open,
-  })
-
-  // 복구 프롬프트 상태
-  const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false)
-
-  // 모달 열릴 때 복구 데이터 확인 (hasRecoveryData 변경 시 동기화)
-  useEffect(() => {
-    if (open && hasRecoveryData) {
-      setShowRecoveryPrompt(true)
-    } else {
-      setShowRecoveryPrompt(false)
-    }
-  }, [open, hasRecoveryData])
-
-  // 복구 처리
-  const handleRecover = () => {
-    const recovered = recover()
-    if (recovered) {
-      const data = recovered as typeof autoSaveData
-      setPlanName(data.planName)
-      setPlanDescription(data.planDescription)
-      setPlanStrategyPrompt(data.planStrategyPrompt)
-      setAllocations(data.allocations)
-      setGroups(data.groups)
-    }
-    setShowRecoveryPrompt(false)
-  }
-
-  // 복구 무시
-  const handleIgnoreRecovery = () => {
-    clearRecovery()
-    setShowRecoveryPrompt(false)
-  }
 
   // 개별 배분 비율 변경
   const handleAllocationChange = (id: string, value: number) => {
@@ -692,24 +595,6 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
           </DialogHeader>
 
           <div className="space-y-6">
-            {/* 복구 프롬프트 */}
-            {showRecoveryPrompt && (
-              <Alert className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
-                <RotateCcw className="h-4 w-4 text-amber-600" />
-                <AlertDescription className="flex items-center justify-between">
-                  <span>이전에 저장되지 않은 편집 내용이 있습니다. 복구할까요?</span>
-                  <div className="flex gap-2 ml-4">
-                    <Button variant="outline" size="sm" onClick={handleIgnoreRecovery}>
-                      무시
-                    </Button>
-                    <Button size="sm" onClick={handleRecover}>
-                      복구
-                    </Button>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
-
             {/* 실시간 파이차트 + 합계 */}
             <div className="flex items-start gap-6 p-4 border rounded-lg bg-muted/30">
               <RealTimePieChart
@@ -734,11 +619,6 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                     <Scale className="h-4 w-4 mr-2" />
                     100%로 정규화
                   </Button>
-                )}
-                {lastSaved && (
-                  <p className="text-xs text-muted-foreground">
-                    💾 자동 저장됨 ({formatLastSaved(lastSaved)})
-                  </p>
                 )}
               </div>
             </div>

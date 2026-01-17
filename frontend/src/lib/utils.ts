@@ -68,7 +68,7 @@ export function formatUSDWithKRW(usdValue: number, exchangeRate: number): string
 /**
  * 프라이버시 마스킹 문자열 냥~
  */
-export const PRIVACY_MASK = '●●●●●'
+export const PRIVACY_MASK = '***,***'
 
 /**
  * 프라이버시 모드일 때 금액 마스킹 냥~

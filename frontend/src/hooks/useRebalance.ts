@@ -15,7 +15,7 @@ export function usePlans(portfolioId?: string) {
   return useQuery({
     queryKey: ['rebalancePlans', portfolioId],
     queryFn: () => rebalanceApi.getPlans(portfolioId),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 1 * 60 * 1000, // 1분
   })
 }
 
@@ -25,7 +25,7 @@ export function usePlan(planId: string) {
     queryKey: ['rebalancePlan', planId],
     queryFn: () => rebalanceApi.getPlan(planId),
     enabled: !!planId,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 1 * 60 * 1000, // 1분
   })
 }
 
@@ -34,7 +34,7 @@ export function useMainPlan(portfolioId?: string) {
   return useQuery({
     queryKey: ['mainPlan', portfolioId],
     queryFn: () => rebalanceApi.getMainPlan(portfolioId),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 1 * 60 * 1000, // 1분
   })
 }
 
