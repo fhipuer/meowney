@@ -47,6 +47,7 @@ Thumbs.db
 
 # Docker
 *.log
+*.tar.gz
 
 # Local development
 *.local
