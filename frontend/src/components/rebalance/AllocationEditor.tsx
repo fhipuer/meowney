@@ -253,18 +253,66 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     return [...new Set(ids)]
   }, [allocations, groups])
 
-  // 자동 저장 훅
+  // 자동 저장 훅 - 비교를 위해 matched_asset 제외한 데이터만 저장
   const autoSaveData = useMemo(() => ({
     planName,
     planDescription,
     planStrategyPrompt,
-    allocations,
-    groups,
+    allocations: allocations.map((alloc) => ({
+      id: alloc.id,
+      asset_id: alloc.asset_id,
+      ticker: alloc.ticker,
+      alias: alloc.alias,
+      display_name: alloc.display_name,
+      target_percentage: alloc.target_percentage,
+      // matched_asset 제외 - 비교 시 문제 방지
+    })),
+    groups: groups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      target_percentage: group.target_percentage,
+      items: group.items.map((item) => ({
+        id: item.id,
+        asset_id: item.asset_id,
+        ticker: item.ticker,
+        alias: item.alias,
+        // matched_asset 제외
+      })),
+      isExpanded: group.isExpanded,
+    })),
   }), [planName, planDescription, planStrategyPrompt, allocations, groups])
+
+  // 초기 데이터 (원본과 비교용) - autoSaveData와 동일한 구조 유지
+  const initialAutoSaveData = useMemo(() => ({
+    planName: plan.name,
+    planDescription: plan.description || '',
+    planStrategyPrompt: plan.strategy_prompt || '',
+    allocations: (plan.allocations || []).map((alloc) => ({
+      id: alloc.id,
+      asset_id: alloc.asset_id ?? undefined,
+      ticker: alloc.ticker ?? undefined,
+      alias: alloc.alias ?? undefined,
+      display_name: alloc.display_name ?? undefined,
+      target_percentage: alloc.target_percentage,
+    })),
+    groups: (plan.groups || []).map((group) => ({
+      id: group.id,
+      name: group.name,
+      target_percentage: group.target_percentage,
+      items: (group.items || []).map((item) => ({
+        id: item.id,
+        asset_id: item.asset_id ?? undefined,
+        ticker: item.ticker ?? undefined,
+        alias: item.alias ?? undefined,
+      })),
+      isExpanded: true,
+    })),
+  }), [plan])
 
   const { hasRecoveryData, recover, clearRecovery, lastSaved } = useAutoSave({
     key: `meowney-plan-${plan.id}`,
     data: autoSaveData,
+    initialData: initialAutoSaveData,
     debounceMs: 1000,
     enabled: open,
   })
@@ -272,10 +320,12 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
   // 복구 프롬프트 상태
   const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false)
 
-  // 모달 열릴 때 복구 데이터 확인
+  // 모달 열릴 때 복구 데이터 확인 (hasRecoveryData 변경 시 동기화)
   useEffect(() => {
     if (open && hasRecoveryData) {
       setShowRecoveryPrompt(true)
+    } else {
+      setShowRecoveryPrompt(false)
     }
   }, [open, hasRecoveryData])
 

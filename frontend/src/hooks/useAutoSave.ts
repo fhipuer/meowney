@@ -15,6 +15,8 @@ interface UseAutoSaveOptions<T> {
   key: string
   /** 저장할 데이터 */
   data: T
+  /** 초기 데이터 (원본과 비교하여 변경사항 있을 때만 복구 프롬프트 표시) */
+  initialData?: T
   /** 디바운스 시간 (ms, 기본 1000) */
   debounceMs?: number
   /** 데이터 만료 시간 (ms, 기본 7일) */
@@ -40,20 +42,38 @@ const STORAGE_VERSION = 1
 const DEFAULT_DEBOUNCE_MS = 1000
 const DEFAULT_EXPIRATION_MS = 7 * 24 * 60 * 60 * 1000 // 7일
 
+// 두 객체가 동일한지 깊은 비교 (JSON 문자열 비교)
+function isDataEqual<T>(a: T, b: T): boolean {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
+
 export function useAutoSave<T>({
   key,
   data,
+  initialData,
   debounceMs = DEFAULT_DEBOUNCE_MS,
   expirationMs = DEFAULT_EXPIRATION_MS,
   enabled = true,
 }: UseAutoSaveOptions<T>): UseAutoSaveReturn<T> {
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [hasRecoveryData, setHasRecoveryData] = useState(false)
+  // 복구 확인 완료 여부 - 완료 전에는 자동 저장 비활성화
+  const [hasCheckedRecovery, setHasCheckedRecovery] = useState(false)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
   const dataRef = useRef(data)
+  const initialDataRef = useRef(initialData)
+  // 무시 플래그 - clearRecovery 호출 시 세션 동안 복구 프롬프트 비활성화
+  const dismissedRef = useRef(false)
+  // 첫 데이터 변경 스킵 플래그 - 복구 후 첫 번째 저장 방지
+  const isFirstChangeRef = useRef(true)
 
   // 데이터 레퍼런스 업데이트
   dataRef.current = data
+  initialDataRef.current = initialData
 
   // 저장 로직
   const saveToStorage = useCallback(() => {
@@ -81,9 +101,16 @@ export function useAutoSave<T>({
     saveToStorage()
   }, [saveToStorage])
 
-  // 디바운스 저장
+  // 디바운스 저장 - 복구 확인 완료 후에만 저장
   useEffect(() => {
-    if (!enabled) return
+    // 복구 확인 전이거나 비활성화 상태면 저장하지 않음
+    if (!enabled || !hasCheckedRecovery) return
+
+    // 첫 번째 변경은 스킵 (초기 데이터 로드)
+    if (isFirstChangeRef.current) {
+      isFirstChangeRef.current = false
+      return
+    }
 
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current)
@@ -98,10 +125,24 @@ export function useAutoSave<T>({
         clearTimeout(timeoutRef.current)
       }
     }
-  }, [data, debounceMs, enabled, saveToStorage])
+  }, [data, debounceMs, enabled, hasCheckedRecovery, saveToStorage])
 
-  // 초기 복구 데이터 확인
+  // 초기 복구 데이터 확인 - enabled가 true일 때만 실행
   useEffect(() => {
+    if (!enabled) {
+      // 비활성화되면 상태 초기화
+      setHasCheckedRecovery(false)
+      isFirstChangeRef.current = true
+      return
+    }
+
+    // 무시 플래그가 설정되어 있으면 복구 프롬프트 표시 안함
+    if (dismissedRef.current) {
+      setHasRecoveryData(false)
+      setHasCheckedRecovery(true)
+      return
+    }
+
     try {
       const stored = localStorage.getItem(key)
       if (stored) {
@@ -111,6 +152,7 @@ export function useAutoSave<T>({
         if (parsed.version !== STORAGE_VERSION) {
           localStorage.removeItem(key)
           setHasRecoveryData(false)
+          setHasCheckedRecovery(true)
           return
         }
 
@@ -118,16 +160,31 @@ export function useAutoSave<T>({
         if (Date.now() - parsed.savedAt > expirationMs) {
           localStorage.removeItem(key)
           setHasRecoveryData(false)
+          setHasCheckedRecovery(true)
           return
+        }
+
+        // 초기 데이터와 비교 - 동일하면 복구할 필요 없음
+        if (initialDataRef.current !== undefined) {
+          if (isDataEqual(parsed.data, initialDataRef.current)) {
+            // 저장된 데이터가 원본과 동일하면 복구 프롬프트 표시 안함
+            setHasRecoveryData(false)
+            setLastSaved(new Date(parsed.savedAt))
+            setHasCheckedRecovery(true)
+            return
+          }
         }
 
         setHasRecoveryData(true)
         setLastSaved(new Date(parsed.savedAt))
+      } else {
+        setHasRecoveryData(false)
       }
     } catch {
       setHasRecoveryData(false)
     }
-  }, [key, expirationMs])
+    setHasCheckedRecovery(true)
+  }, [key, expirationMs, enabled])
 
   // 복구 함수
   const recover = useCallback((): T | null => {
@@ -147,12 +204,14 @@ export function useAutoSave<T>({
     }
   }, [key, expirationMs])
 
-  // 복구 데이터 삭제
+  // 복구 데이터 삭제 (무시 버튼 클릭 시)
   const clearRecovery = useCallback(() => {
     try {
       localStorage.removeItem(key)
       setHasRecoveryData(false)
       setLastSaved(null)
+      // 무시 플래그 설정 - 이 세션 동안은 복구 프롬프트 표시 안함
+      dismissedRef.current = true
     } catch (error) {
       console.error('복구 데이터 삭제 실패 냥:', error)
     }

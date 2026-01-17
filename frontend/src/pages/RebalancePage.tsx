@@ -279,6 +279,9 @@ export function RebalancePage() {
                                       <div className={diff >= 0 ? 'text-red-500' : 'text-blue-500'}>
                                         {diff >= 0 ? '+' : ''}{diff.toFixed(1)}%p
                                       </div>
+                                      <div className="text-xs text-muted-foreground mt-1">
+                                        {groupSuggestion.suggested_amount >= 0 ? '+' : ''}{formatKRW(groupSuggestion.suggested_amount)}
+                                      </div>
                                     </>
                                   )}
                                 </div>
