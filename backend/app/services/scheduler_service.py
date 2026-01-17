@@ -37,14 +37,20 @@ async def take_daily_snapshot():
         # 모든 포트폴리오 조회
         portfolio_ids = await asset_service.get_all_portfolio_ids()
 
+        # 현재 환율 조회 (모든 포트폴리오에 동일하게 적용)
+        from decimal import Decimal
+        exchange_rate = await finance_service.get_exchange_rate()
+
         for portfolio_id in portfolio_ids:
             try:
                 # 자산 조회 및 가격 조회
                 assets = await asset_service.get_assets(portfolio_id)
                 enriched_assets = await finance_service.enrich_assets_with_prices(assets)
 
-                # 요약 계산
-                summary = await asset_service.calculate_summary(enriched_assets, portfolio_id)
+                # 요약 계산 (환율 전달)
+                summary = await asset_service.calculate_summary(
+                    enriched_assets, portfolio_id, Decimal(str(exchange_rate))
+                )
 
                 # 스냅샷 저장
                 await asset_service.save_snapshot(portfolio_id, summary)

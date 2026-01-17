@@ -37,6 +37,7 @@ export function DashboardPage() {
         <PortfolioDonut
           allocations={summary?.allocations}
           isLoading={summaryLoading}
+          totalValueFromApi={summary?.total_value ? Number(summary.total_value) : undefined}
         />
         <AssetTrendChart history={history} isLoading={historyLoading} />
       </div>

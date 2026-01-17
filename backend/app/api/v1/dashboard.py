@@ -34,7 +34,7 @@ async def get_dashboard_summary(
 ):
     """
     대시보드 요약 정보 조회 냥~ 🐱
-    - 총 자산가치, 수익률
+    - 총 자산가치, 수익률 (USD 자산은 원화 환산)
     - 카테고리별 배분 비율
     - 메인 플랜 정보 포함
     """
@@ -50,8 +50,15 @@ async def get_dashboard_summary(
     # 현재가 조회 및 계산
     enriched_assets = await finance_service.enrich_assets_with_prices(assets)
 
-    # 요약 정보 계산
-    summary = await asset_service.calculate_summary(enriched_assets, portfolio_id)
+    # 현재 환율 조회 (USD 자산 원화 환산용)
+    exchange_rate = await finance_service.get_exchange_rate()
+    print(f"[DEBUG] exchange_rate: {exchange_rate}")
+
+    # 요약 정보 계산 (환율 전달)
+    summary = await asset_service.calculate_summary(
+        enriched_assets, portfolio_id, Decimal(str(exchange_rate))
+    )
+    print(f"[DEBUG] summary.total_value: {summary.total_value}")
 
     # 메인 플랜 정보 추가 냥~
     main_plan = await rebalance_service.get_main_plan(portfolio_id)
@@ -356,8 +363,13 @@ async def _get_legacy_alerts(
     assets = await asset_service.get_assets(portfolio_id)
     enriched_assets = await finance_service.enrich_assets_with_prices(assets)
 
+    # 현재 환율 조회
+    exchange_rate = await finance_service.get_exchange_rate()
+
     # 요약 정보 계산 (현재 배분 포함)
-    summary = await asset_service.calculate_summary(enriched_assets, portfolio_id)
+    summary = await asset_service.calculate_summary(
+        enriched_assets, portfolio_id, Decimal(str(exchange_rate))
+    )
 
     # 목표 배분 조회
     target_allocations = await asset_service.get_target_allocations(portfolio_id)
@@ -414,7 +426,13 @@ async def get_goal_progress(
     # 현재 자산 가치 조회
     assets = await asset_service.get_assets(portfolio_id)
     enriched_assets = await finance_service.enrich_assets_with_prices(assets)
-    summary = await asset_service.calculate_summary(enriched_assets, portfolio_id)
+
+    # 현재 환율 조회
+    exchange_rate = await finance_service.get_exchange_rate()
+
+    summary = await asset_service.calculate_summary(
+        enriched_assets, portfolio_id, Decimal(str(exchange_rate))
+    )
 
     current_value = summary.total_value
     remaining = target_value - current_value if target_value > 0 else Decimal("0")

@@ -161,10 +161,20 @@ class AssetService:
         self,
         enriched_assets: list[dict],
         portfolio_id: Optional[UUID] = None,
+        exchange_rate: Optional[Decimal] = None,
     ) -> DashboardSummary:
         """
         대시보드 요약 계산 냥~ 🐱
+        USD 자산은 전달받은 환율로 원화 환산하여 합산
+
+        Args:
+            enriched_assets: 현재가가 포함된 자산 목록
+            portfolio_id: 포트폴리오 ID
+            exchange_rate: USD/KRW 환율 (없으면 기본값 1300 사용)
         """
+        # 기본 환율 설정
+        rate = exchange_rate if exchange_rate else Decimal("1300")
+
         total_value = Decimal("0")
         total_principal = Decimal("0")
         category_totals: dict[str, dict] = {}
@@ -174,6 +184,12 @@ class AssetService:
             quantity = Decimal(str(asset.get("quantity", 0)))
             avg_price = Decimal(str(asset.get("average_price", 0)))
             principal = quantity * avg_price
+            currency = asset.get("currency", "KRW")
+
+            # USD 자산은 원화로 환산 냥~
+            if currency == "USD":
+                market_value = market_value * rate
+                principal = principal * rate
 
             total_value += market_value
             total_principal += principal

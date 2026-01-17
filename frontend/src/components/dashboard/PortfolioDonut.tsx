@@ -2,16 +2,24 @@
  * 포트폴리오 도넛 차트 컴포넌트 냥~ 🐱
  * 글래스모피즘 & 애니메이션 적용
  * 플랜 기반 배분 표시 지원
+ * v0.6.0: 미배정 자산 경고색 표시, 플랜 상태별 안내
+ * v0.6.1: 백엔드에서 원화 환산된 total_value 사용 (프론트 환율 계산 제거)
  */
 import { useMemo } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { formatKRW, cn, maskValue, PRIVACY_MASK } from '@/lib/utils'
 import { useStore } from '@/store/useStore'
 import { usePlans } from '@/hooks/useRebalance'
 import { useAssets } from '@/hooks/useAssets'
-import { useExchangeRate } from '@/hooks/useDashboard'
+import { useNavigate } from 'react-router-dom'
+import { PlusCircle, Settings } from 'lucide-react'
 import type { CategoryAllocation, Asset, RebalancePlan } from '@/types'
+
+// 미배정 자산 상수 냥~
+const UNASSIGNED_LABEL = '미배정 자산'
+const UNASSIGNED_COLOR = '#f97316' // orange-500 (경고색)
 
 // 플랜 기반 차트 데이터 항목
 interface PlanChartItem {
@@ -20,6 +28,7 @@ interface PlanChartItem {
   percentage: number
   color: string
   isGroup?: boolean
+  isUnassigned?: boolean
 }
 
 // 색상 팔레트 (플랜 배분용)
@@ -39,6 +48,8 @@ const PLAN_COLORS = [
 interface PortfolioDonutProps {
   allocations: CategoryAllocation[] | undefined
   isLoading: boolean
+  /** 백엔드에서 계산된 총 자산 (원화 환산 포함) */
+  totalValueFromApi?: number
 }
 
 // 자산 매칭 함수
@@ -76,7 +87,13 @@ function safeNumber(value: unknown): number {
   return isFinite(num) ? num : 0
 }
 
-// 플랜 기반 차트 데이터 생성
+/**
+ * 플랜 기반 차트 데이터 생성
+ * 백엔드에서 이미 원화 환산된 market_value를 사용 (v0.6.1)
+ *
+ * 주의: 현재 assets API는 USD 자산의 market_value를 달러로 반환하므로,
+ * 비율 계산 시 불일치가 발생할 수 있음. 백엔드 total_value를 별도로 받아 표시.
+ */
 function buildChartFromPlan(
   plan: RebalancePlan,
   assets: Asset[],
@@ -95,6 +112,7 @@ function buildChartFromPlan(
     if (matched) {
       matchedAssetIds.add(matched.id)
       value = safeNumber(matched.market_value)
+      // USD 자산은 원화로 환산 (assets API가 달러로 반환하므로)
       if (matched.currency === 'USD') {
         value = value * safeRate
       }
@@ -120,6 +138,7 @@ function buildChartFromPlan(
       if (matched) {
         matchedAssetIds.add(matched.id)
         let itemValue = safeNumber(matched.market_value)
+        // USD 자산은 원화로 환산 (assets API가 달러로 반환하므로)
         if (matched.currency === 'USD') {
           itemValue = itemValue * safeRate
         }
@@ -138,26 +157,28 @@ function buildChartFromPlan(
     totalValue += groupValue
   })
 
-  // 3. 플랜에 포함되지 않은 자산 처리 ("기타")
-  let otherValue = 0
+  // 3. 플랜에 포함되지 않은 자산 처리 ("미배정 자산")
+  let unassignedValue = 0
   assets.forEach((asset) => {
     if (!matchedAssetIds.has(asset.id)) {
       let value = safeNumber(asset.market_value)
+      // USD 자산은 원화로 환산 (assets API가 달러로 반환하므로)
       if (asset.currency === 'USD') {
         value = value * safeRate
       }
-      otherValue += value
+      unassignedValue += value
     }
   })
 
-  if (otherValue > 0) {
+  if (unassignedValue > 0) {
     result.push({
-      name: '기타',
-      value: otherValue,
+      name: UNASSIGNED_LABEL,
+      value: unassignedValue,
       percentage: 0,
-      color: '#6b7280',
+      color: UNASSIGNED_COLOR,
+      isUnassigned: true,
     })
-    totalValue += otherValue
+    totalValue += unassignedValue
   }
 
   // 퍼센티지 계산
@@ -171,28 +192,42 @@ function buildChartFromPlan(
   return result.filter((item) => item.value > 0)
 }
 
-export function PortfolioDonut({ allocations, isLoading }: PortfolioDonutProps) {
+export function PortfolioDonut({ allocations, isLoading, totalValueFromApi }: PortfolioDonutProps) {
   const { isPrivacyMode } = useStore()
   const { data: plans } = usePlans()
   const { data: assets } = useAssets()
-  const { data: exchangeRateData } = useExchangeRate()
+  const navigate = useNavigate()
 
   // 메인 플랜 찾기
   const mainPlan = useMemo(() => {
     return plans?.find((p: RebalancePlan) => p.is_main)
   }, [plans])
 
+  // 플랜 상태 확인
+  const planStatus = useMemo(() => {
+    if (!plans || plans.length === 0) return 'no-plans'
+    if (!mainPlan) return 'no-main-plan'
+    return 'ready'
+  }, [plans, mainPlan])
+
   // 차트 데이터 생성 (플랜 기반 또는 카테고리 기반)
   const { chartData, totalValue, usePlanMode } = useMemo(() => {
-    const rate = exchangeRateData?.rate || 1300
+    // 백엔드에서 전달받은 총 자산을 우선 사용
+    const apiTotal = totalValueFromApi ? Number(totalValueFromApi) : 0
 
     // 메인 플랜이 있고, 배분 항목이나 그룹이 있으면 플랜 기반으로 표시
+    // 주의: buildChartFromPlan은 assets API 데이터를 사용하므로 환율 계산 필요
+    // TODO: 향후 백엔드 API 개선 시 환율 계산 로직 제거 가능
     if (mainPlan && ((mainPlan.allocations && mainPlan.allocations.length > 0) || (mainPlan.groups && mainPlan.groups.length > 0))) {
+      // 임시로 assets의 current_exchange_rate 사용 (첫 번째 USD 자산에서 가져오기)
+      const usdAsset = assets?.find(a => a.currency === 'USD')
+      const rate = usdAsset?.current_exchange_rate ? Number(usdAsset.current_exchange_rate) : 1300
+
       const planData = buildChartFromPlan(mainPlan, assets || [], rate)
       // 플랜 데이터가 있으면 사용, 없으면 카테고리 기반으로 폴백 냥~
       if (planData.length > 0) {
-        const total = planData.reduce((sum, item) => sum + item.value, 0)
-        return { chartData: planData, totalValue: total, usePlanMode: true }
+        // 차트 내부 계산 값 대신 백엔드 total_value 사용 (일관성 보장)
+        return { chartData: planData, totalValue: apiTotal || planData.reduce((sum, item) => sum + item.value, 0), usePlanMode: true }
       }
       // 플랜 항목이 매칭 실패한 경우 - 카테고리 기반으로 폴백
     }
@@ -205,12 +240,12 @@ export function PortfolioDonut({ allocations, isLoading }: PortfolioDonutProps) 
         percentage: alloc.percentage,
         color: alloc.color,
       }))
-      const total = catData.reduce((sum, item) => sum + item.value, 0)
-      return { chartData: catData, totalValue: total, usePlanMode: false }
+      // 백엔드 total_value 사용 (원화 환산 포함)
+      return { chartData: catData, totalValue: apiTotal || catData.reduce((sum, item) => sum + item.value, 0), usePlanMode: false }
     }
 
-    return { chartData: [], totalValue: 0, usePlanMode: false }
-  }, [mainPlan, assets, allocations, exchangeRateData])
+    return { chartData: [], totalValue: apiTotal, usePlanMode: false }
+  }, [mainPlan, assets, allocations, totalValueFromApi])
 
   if (isLoading) {
     return (
@@ -225,14 +260,40 @@ export function PortfolioDonut({ allocations, isLoading }: PortfolioDonutProps) 
     )
   }
 
-  if (chartData.length === 0) {
+  // 플랜 상태별 빈 차트 표시
+  if (chartData.length === 0 || planStatus !== 'ready') {
+    let message = '자산을 추가해주세요 냥~ 🐱'
+    let buttonText = ''
+    let buttonAction = () => {}
+
+    if (planStatus === 'no-plans') {
+      message = '리밸런싱 플랜을 생성해주세요 냥~ 🐱'
+      buttonText = '플랜 생성하기'
+      buttonAction = () => navigate('/rebalance/plans')
+    } else if (planStatus === 'no-main-plan') {
+      message = '메인 플랜을 선택해주세요 냥~ 🐱'
+      buttonText = '플랜 설정하기'
+      buttonAction = () => navigate('/rebalance/plans')
+    } else if (!assets || assets.length === 0) {
+      message = '자산을 추가해주세요 냥~ 🐱'
+      buttonText = '자산 추가하기'
+      buttonAction = () => navigate('/assets')
+    }
+
     return (
       <Card className="h-[450px] border-0 bg-gradient-to-br from-background to-muted/30">
         <CardHeader>
           <CardTitle>포트폴리오 배분</CardTitle>
         </CardHeader>
-        <CardContent className="flex items-center justify-center h-[350px]">
-          <p className="text-muted-foreground">자산을 추가해주세요 냥~ 🐱</p>
+        <CardContent className="flex flex-col items-center justify-center h-[350px] gap-4">
+          <div className="text-6xl">🐱</div>
+          <p className="text-muted-foreground text-center">{message}</p>
+          {buttonText && (
+            <Button variant="outline" onClick={buttonAction} className="gap-2">
+              {planStatus === 'no-plans' ? <PlusCircle className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
+              {buttonText}
+            </Button>
+          )}
         </CardContent>
       </Card>
     )
@@ -304,22 +365,35 @@ export function PortfolioDonut({ allocations, isLoading }: PortfolioDonutProps) 
                 className={cn(
                   'flex items-center justify-between p-2 rounded-lg',
                   'hover:bg-muted/50 transition-colors cursor-default',
-                  'opacity-0 animate-slide-in-right'
+                  'opacity-0 animate-slide-in-right',
+                  (item as PlanChartItem).isUnassigned && 'border border-orange-300 bg-orange-50/50 dark:bg-orange-950/20'
                 )}
                 style={{ animationDelay: `${index * 50 + 200}ms` }}
+                title={(item as PlanChartItem).isUnassigned ? '이 자산들은 현재 플랜에 포함되어 있지 않습니다' : undefined}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <div
-                    className="h-3 w-3 rounded-full shadow-sm flex-shrink-0"
+                    className={cn(
+                      "h-3 w-3 rounded-full shadow-sm flex-shrink-0",
+                      (item as PlanChartItem).isUnassigned && "ring-2 ring-orange-400 ring-offset-1"
+                    )}
                     style={{ backgroundColor: item.color }}
                   />
-                  <span className="text-sm font-medium truncate">{item.name}</span>
+                  <span className={cn(
+                    "text-sm font-medium truncate",
+                    (item as PlanChartItem).isUnassigned && "text-orange-600 dark:text-orange-400"
+                  )}>
+                    {item.name}
+                  </span>
                   {(item as PlanChartItem).isGroup && (
                     <span className="text-xs text-muted-foreground">(그룹)</span>
                   )}
                 </div>
                 <div className="text-right flex-shrink-0 ml-2">
-                  <span className="text-sm font-semibold">
+                  <span className={cn(
+                    "text-sm font-semibold",
+                    (item as PlanChartItem).isUnassigned && "text-orange-600 dark:text-orange-400"
+                  )}>
                     {item.percentage.toFixed(1)}%
                   </span>
                 </div>
