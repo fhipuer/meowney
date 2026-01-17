@@ -780,15 +780,9 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
 
             <Separator />
 
-            {/* 빠른 설정 + 추가 버튼 */}
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={handleEqualDistribution}>
-                균등 배분
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleCurrentRatio}>
-                현재 비율 적용
-              </Button>
-              <div className="flex-1" />
+            {/* 추가 버튼 + 빠른 설정 */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* 추가 버튼 그룹 (왼쪽) */}
               <Button variant="default" size="sm" onClick={openAssetSelectorForIndividual}>
                 <Plus className="h-4 w-4 mr-1" />
                 보유 자산 선택
@@ -801,6 +795,16 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                 <Layers className="h-4 w-4 mr-1" />
                 그룹 추가
               </Button>
+              <div className="flex-1 min-w-0" />
+              {/* 빠른 설정 그룹 (오른쪽) - 항상 함께 유지 */}
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handleEqualDistribution}>
+                  균등 배분
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleCurrentRatio}>
+                  현재 비율 적용
+                </Button>
+              </div>
             </div>
 
             {/* 개별 배분 항목들 */}
@@ -1069,12 +1073,11 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
         </DialogContent>
       </Dialog>
 
-      {/* 항목 추가 모달 */}
+      {/* 항목 추가 모달 (티커/별칭 전용) */}
       <AddAllocationModal
         open={showAddAllocation}
         onOpenChange={setShowAddAllocation}
         onAdd={handleAddAllocation}
-        assets={assets || []}
         existingAllocations={allocations}
       />
 

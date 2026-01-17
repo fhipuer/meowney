@@ -1,8 +1,9 @@
 /**
- * 개별 배분 항목 추가 모달 냥~
+ * 개별 배분 항목 추가 모달 냥~ (티커/별칭 전용)
+ * 보유 자산 선택은 별도의 AssetSelectorModal에서 처리
  */
 import { useState } from 'react'
-import { Plus, Search, Package, Hash, FileText } from 'lucide-react'
+import { Plus, Hash, FileText } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -15,14 +16,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import type { Asset } from '@/types'
 
 interface AllocationItem {
   id: string
@@ -34,63 +27,37 @@ interface AllocationItem {
 interface AddAllocationModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onAdd: (data: { type: 'asset' | 'ticker' | 'alias'; value: string; display_name?: string }) => void
-  assets: Asset[]
+  onAdd: (data: { type: 'ticker' | 'alias'; value: string; display_name?: string }) => void
   existingAllocations: AllocationItem[]
 }
 
-type AddType = 'asset' | 'ticker' | 'alias'
+type AddType = 'ticker' | 'alias'
 
 export function AddAllocationModal({
   open,
   onOpenChange,
   onAdd,
-  assets,
   existingAllocations,
 }: AddAllocationModalProps) {
-  const [addType, setAddType] = useState<AddType>('asset')
-  const [selectedAssetId, setSelectedAssetId] = useState<string>('')
+  const [addType, setAddType] = useState<AddType>('ticker')
   const [tickerValue, setTickerValue] = useState('')
   const [aliasValue, setAliasValue] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [searchTerm, setSearchTerm] = useState('')
 
-  // 이미 추가된 자산 필터링
-  const existingAssetIds = existingAllocations
-    .map((a) => a.asset_id)
-    .filter(Boolean) as string[]
+  // 이미 추가된 티커 목록
   const existingTickers = existingAllocations
     .map((a) => a.ticker?.toUpperCase())
     .filter(Boolean) as string[]
 
-  // 검색 필터링된 자산 목록
-  const filteredAssets = assets.filter((asset) => {
-    // 이미 추가된 자산 제외
-    if (existingAssetIds.includes(asset.id)) return false
-    // 검색어 필터
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase()
-      return (
-        asset.name.toLowerCase().includes(term) ||
-        (asset.ticker?.toLowerCase().includes(term) ?? false)
-      )
-    }
-    return true
-  })
-
   const handleReset = () => {
-    setAddType('asset')
-    setSelectedAssetId('')
+    setAddType('ticker')
     setTickerValue('')
     setAliasValue('')
     setDisplayName('')
-    setSearchTerm('')
   }
 
   const handleSubmit = () => {
-    if (addType === 'asset' && selectedAssetId) {
-      onAdd({ type: 'asset', value: selectedAssetId })
-    } else if (addType === 'ticker' && tickerValue.trim()) {
+    if (addType === 'ticker' && tickerValue.trim()) {
       onAdd({
         type: 'ticker',
         value: tickerValue.trim().toUpperCase(),
@@ -107,7 +74,6 @@ export function AddAllocationModal({
   }
 
   const isValid = () => {
-    if (addType === 'asset') return !!selectedAssetId
     if (addType === 'ticker') {
       const ticker = tickerValue.trim().toUpperCase()
       return ticker.length > 0 && !existingTickers.includes(ticker)
@@ -138,18 +104,8 @@ export function AddAllocationModal({
           <RadioGroup
             value={addType}
             onValueChange={(v: string) => setAddType(v as AddType)}
-            className="grid grid-cols-3 gap-2"
+            className="grid grid-cols-2 gap-2"
           >
-            <Label
-              htmlFor="type-asset"
-              className={`flex flex-col items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors ${
-                addType === 'asset' ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
-              }`}
-            >
-              <RadioGroupItem value="asset" id="type-asset" className="sr-only" />
-              <Package className="h-5 w-5" />
-              <span className="text-sm font-medium">보유 자산</span>
-            </Label>
             <Label
               htmlFor="type-ticker"
               className={`flex flex-col items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors ${
@@ -171,49 +127,6 @@ export function AddAllocationModal({
               <span className="text-sm font-medium">별칭</span>
             </Label>
           </RadioGroup>
-
-          {/* 보유 자산 선택 */}
-          {addType === 'asset' && (
-            <div className="space-y-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="자산 검색..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
-              <Select value={selectedAssetId} onValueChange={setSelectedAssetId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="자산을 선택하세요" />
-                </SelectTrigger>
-                <SelectContent>
-                  {filteredAssets.length === 0 ? (
-                    <div className="py-6 text-center text-sm text-muted-foreground">
-                      {searchTerm ? '검색 결과가 없습니다' : '추가 가능한 자산이 없습니다'}
-                    </div>
-                  ) : (
-                    filteredAssets.map((asset) => (
-                      <SelectItem key={asset.id} value={asset.id}>
-                        <div className="flex items-center gap-2">
-                          <span>{asset.name}</span>
-                          {asset.ticker && (
-                            <span className="text-xs text-muted-foreground">
-                              ({asset.ticker})
-                            </span>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                현재 보유 중인 자산을 직접 선택합니다. 자동으로 연결됩니다.
-              </p>
-            </div>
-          )}
 
           {/* 티커 입력 */}
           {addType === 'ticker' && (

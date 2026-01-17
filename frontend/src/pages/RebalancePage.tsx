@@ -7,6 +7,8 @@ import { Link } from 'react-router-dom'
 import { TrendingUp, TrendingDown, Settings2, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -23,6 +25,7 @@ export function RebalancePage() {
   const calculateMutation = useCalculateRebalance()
 
   const [selectedPlanId, setSelectedPlanId] = useState<string>('')
+  const [tolerancePercent, setTolerancePercent] = useState<number>(0.5)
 
   // 메인 플랜 자동 선택
   const mainPlan = plans?.find((p) => p.is_main)
@@ -100,7 +103,7 @@ export function RebalancePage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex gap-4">
+              <div className="flex flex-wrap items-end gap-4">
                 <Select
                   value={effectivePlanId}
                   onValueChange={setSelectedPlanId}
@@ -117,6 +120,20 @@ export function RebalancePage() {
                     ))}
                   </SelectContent>
                 </Select>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="tolerance" className="text-sm whitespace-nowrap">허용 오차</Label>
+                  <Input
+                    id="tolerance"
+                    type="number"
+                    min="0"
+                    max="10"
+                    step="0.1"
+                    value={tolerancePercent}
+                    onChange={(e) => setTolerancePercent(parseFloat(e.target.value) || 0.5)}
+                    className="w-20"
+                  />
+                  <span className="text-sm text-muted-foreground">%</span>
+                </div>
                 <Button
                   onClick={handleCalculate}
                   disabled={!effectivePlanId || calculateMutation.isPending}
@@ -160,7 +177,7 @@ export function RebalancePage() {
                           <h4 className="font-semibold text-sm text-muted-foreground mb-2">개별 배분</h4>
                           {calculateMutation.data.suggestions.map((suggestion, index) => {
                             const isBuy = suggestion.suggested_amount > 0
-                            const isHold = Math.abs(suggestion.difference_percentage) < 0.5
+                            const isHold = Math.abs(suggestion.difference_percentage) < tolerancePercent
 
                             return (
                               <div
@@ -229,8 +246,8 @@ export function RebalancePage() {
                           <h4 className="font-semibold text-sm text-muted-foreground mb-2 mt-4">그룹 배분</h4>
                           {calculateMutation.data.group_suggestions.map((groupSuggestion, index) => {
                             const diff = (groupSuggestion.target_percentage - (groupSuggestion.current_percentage ?? 0))
-                            const isOverweight = diff < -0.5
-                            const isUnderweight = diff > 0.5
+                            const isOverweight = diff < -tolerancePercent
+                            const isUnderweight = diff > tolerancePercent
                             const isBalanced = !isOverweight && !isUnderweight
 
                             return (

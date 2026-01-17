@@ -88,7 +88,7 @@ export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
       </CardHeader>
       <CardContent className="pt-0">
         <ResponsiveContainer width="100%" height={290}>
-          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
             <defs>
               <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
@@ -111,7 +111,7 @@ export function AssetTrendChart({ history, isLoading }: AssetTrendChartProps) {
               tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
               axisLine={false}
               tickLine={false}
-              dx={-5}
+              width={45}
             />
             <Tooltip
               formatter={(value: number, name: string) => [
