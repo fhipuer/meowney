@@ -147,73 +147,147 @@ export function RebalancePage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {calculateMutation.data.suggestions.length === 0 ? (
+                  {(calculateMutation.data.suggestions?.length ?? 0) === 0 &&
+                   (calculateMutation.data.group_suggestions?.length ?? 0) === 0 ? (
                     <p className="text-muted-foreground text-center py-4">
                       플랜에 목표 배분이 설정되지 않았습니다.
                     </p>
                   ) : (
-                    calculateMutation.data.suggestions.map((suggestion, index) => {
-                      const isBuy = suggestion.suggested_amount > 0
-                      const isHold = Math.abs(suggestion.difference_percentage) < 0.5
+                    <>
+                      {/* 개별 배분 제안 */}
+                      {calculateMutation.data.suggestions && calculateMutation.data.suggestions.length > 0 && (
+                        <>
+                          <h4 className="font-semibold text-sm text-muted-foreground mb-2">개별 배분</h4>
+                          {calculateMutation.data.suggestions.map((suggestion, index) => {
+                            const isBuy = suggestion.suggested_amount > 0
+                            const isHold = Math.abs(suggestion.difference_percentage) < 0.5
 
-                      return (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between p-4 border rounded-lg"
-                        >
-                          <div>
-                            <div className="font-medium flex items-center gap-2">
-                              {suggestion.asset_name}
-                              {suggestion.ticker && (
-                                <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                                  {suggestion.ticker}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              현재: {suggestion.current_percentage.toFixed(1)}% → 목표: {suggestion.target_percentage.toFixed(1)}%
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              평가금액: {formatKRW(suggestion.current_value)}
-                            </div>
-                          </div>
+                            return (
+                              <div
+                                key={`suggestion-${index}`}
+                                className="flex items-center justify-between p-4 border rounded-lg"
+                              >
+                                <div>
+                                  <div className="font-medium flex items-center gap-2">
+                                    {suggestion.asset_name}
+                                    {suggestion.ticker && (
+                                      <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                                        {suggestion.ticker}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-sm text-muted-foreground">
+                                    현재: {suggestion.current_percentage.toFixed(1)}% → 목표: {suggestion.target_percentage.toFixed(1)}%
+                                  </div>
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    평가금액: {formatKRW(suggestion.current_value)}
+                                  </div>
+                                </div>
 
-                          <div className="text-right">
-                            {isHold ? (
-                              <div className="text-muted-foreground">유지</div>
-                            ) : (
-                              <>
-                                <div
-                                  className={`flex items-center gap-1 font-bold ${
-                                    isBuy ? 'text-red-500' : 'text-blue-500'
-                                  }`}
-                                >
-                                  {isBuy ? (
-                                    <>
-                                      <TrendingUp className="h-4 w-4" />
-                                      매수
-                                    </>
+                                <div className="text-right">
+                                  {isHold ? (
+                                    <div className="text-muted-foreground">유지</div>
                                   ) : (
                                     <>
-                                      <TrendingDown className="h-4 w-4" />
-                                      매도
+                                      <div
+                                        className={`flex items-center gap-1 font-bold ${
+                                          isBuy ? 'text-red-500' : 'text-blue-500'
+                                        }`}
+                                      >
+                                        {isBuy ? (
+                                          <>
+                                            <TrendingUp className="h-4 w-4" />
+                                            매수
+                                          </>
+                                        ) : (
+                                          <>
+                                            <TrendingDown className="h-4 w-4" />
+                                            매도
+                                          </>
+                                        )}
+                                      </div>
+                                      <div className={getProfitClass(suggestion.suggested_amount)}>
+                                        {formatKRW(Math.abs(suggestion.suggested_amount))}
+                                      </div>
+                                      {suggestion.suggested_quantity && (
+                                        <div className="text-xs text-muted-foreground">
+                                          약 {Math.abs(suggestion.suggested_quantity).toFixed(2)}주
+                                        </div>
+                                      )}
                                     </>
                                   )}
                                 </div>
-                                <div className={getProfitClass(suggestion.suggested_amount)}>
-                                  {formatKRW(Math.abs(suggestion.suggested_amount))}
-                                </div>
-                                {suggestion.suggested_quantity && (
-                                  <div className="text-xs text-muted-foreground">
-                                    약 {Math.abs(suggestion.suggested_quantity).toFixed(2)}주
+                              </div>
+                            )
+                          })}
+                        </>
+                      )}
+
+                      {/* 그룹 배분 제안 */}
+                      {calculateMutation.data.group_suggestions && calculateMutation.data.group_suggestions.length > 0 && (
+                        <>
+                          <h4 className="font-semibold text-sm text-muted-foreground mb-2 mt-4">그룹 배분</h4>
+                          {calculateMutation.data.group_suggestions.map((groupSuggestion, index) => {
+                            const diff = (groupSuggestion.target_percentage - (groupSuggestion.current_percentage ?? 0))
+                            const isOverweight = diff < -0.5
+                            const isUnderweight = diff > 0.5
+                            const isBalanced = !isOverweight && !isUnderweight
+
+                            return (
+                              <div
+                                key={`group-${index}`}
+                                className="flex items-center justify-between p-4 border rounded-lg"
+                              >
+                                <div>
+                                  <div className="font-medium flex items-center gap-2">
+                                    <span className="text-primary">◆</span>
+                                    {groupSuggestion.group_name}
+                                    <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                                      그룹
+                                    </span>
                                   </div>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })
+                                  <div className="text-sm text-muted-foreground">
+                                    현재: {(groupSuggestion.current_percentage ?? 0).toFixed(1)}% → 목표: {groupSuggestion.target_percentage.toFixed(1)}%
+                                  </div>
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    평가금액: {formatKRW(groupSuggestion.current_value ?? 0)}
+                                  </div>
+                                </div>
+
+                                <div className="text-right">
+                                  {isBalanced ? (
+                                    <div className="text-muted-foreground">균형</div>
+                                  ) : (
+                                    <>
+                                      <div
+                                        className={`flex items-center gap-1 font-bold ${
+                                          isUnderweight ? 'text-red-500' : 'text-blue-500'
+                                        }`}
+                                      >
+                                        {isUnderweight ? (
+                                          <>
+                                            <TrendingUp className="h-4 w-4" />
+                                            비중 확대
+                                          </>
+                                        ) : (
+                                          <>
+                                            <TrendingDown className="h-4 w-4" />
+                                            비중 축소
+                                          </>
+                                        )}
+                                      </div>
+                                      <div className={diff >= 0 ? 'text-red-500' : 'text-blue-500'}>
+                                        {diff >= 0 ? '+' : ''}{diff.toFixed(1)}%p
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </>
+                      )}
+                    </>
                   )}
                 </div>
               </CardContent>

@@ -1,7 +1,7 @@
 /**
  * 목표 배분 편집기 컴포넌트 - 개별 배분 + 그룹 배분 통합 지원 냥~
  */
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { Save, AlertCircle, Plus, Trash2, ChevronDown, ChevronRight, Link2, Link2Off, Layers } from 'lucide-react'
 import {
   Dialog,
@@ -25,8 +25,9 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { useAssets } from '@/hooks/useAssets'
+import { useExchangeRate } from '@/hooks/useDashboard'
 import { useSaveAllocations, useUpdatePlan, useSaveGroups } from '@/hooks/useRebalance'
-import { formatKRW } from '@/lib/utils'
+import { formatKRW, formatUSD } from '@/lib/utils'
 import { TickerSparkline } from './TickerSparkline'
 import { AddAllocationModal } from './AddAllocationModal'
 import { AddGroupModal } from './AddGroupModal'
@@ -48,13 +49,12 @@ interface AllocationItem {
   matched_asset?: Asset
 }
 
-// 그룹 아이템 내부 상태
+// 그룹 아이템 내부 상태 (weight 제거됨 - 단순 소속 관계만)
 interface GroupItem {
   id: string
   asset_id?: string
   ticker?: string
   alias?: string
-  weight: number
   matched_asset?: Asset
 }
 
@@ -78,6 +78,7 @@ const generateId = () => Math.random().toString(36).substr(2, 9)
 
 export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorProps) {
   const { data: assets } = useAssets()
+  const { data: exchangeRate } = useExchangeRate()
   const saveAllocationsMutation = useSaveAllocations()
   const saveGroupsMutation = useSaveGroups()
   const updatePlanMutation = useUpdatePlan()
@@ -111,7 +112,6 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
         asset_id: item.asset_id || undefined,
         ticker: item.ticker || undefined,
         alias: item.alias || undefined,
-        weight: item.weight,
         matched_asset: matchItemToAsset(item, assets || []),
       })),
       isExpanded: true,
@@ -121,6 +121,30 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
   // 모달 상태
   const [showAddAllocation, setShowAddAllocation] = useState(false)
   const [showAddGroup, setShowAddGroup] = useState(false)
+
+  // assets가 로드되면 자산 매칭 재수행 냥~
+  useEffect(() => {
+    if (!assets || assets.length === 0) return
+
+    // 개별 배분 아이템 재매칭
+    setAllocations((prev) =>
+      prev.map((alloc) => ({
+        ...alloc,
+        matched_asset: matchItemToAsset(alloc, assets),
+      }))
+    )
+
+    // 그룹 아이템 재매칭
+    setGroups((prev) =>
+      prev.map((group) => ({
+        ...group,
+        items: group.items.map((item) => ({
+          ...item,
+          matched_asset: matchItemToAsset(item, assets),
+        })),
+      }))
+    )
+  }, [assets])
 
   // 매칭 로직
   function matchItemToAsset(
@@ -194,22 +218,6 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     )
   }
 
-  // 그룹 내 아이템 비중 변경
-  const handleGroupItemWeightChange = (groupId: string, itemId: string, weight: number) => {
-    setGroups((prev) =>
-      prev.map((g) =>
-        g.id === groupId
-          ? {
-              ...g,
-              items: g.items.map((item) =>
-                item.id === itemId ? { ...item, weight: Math.min(100, Math.max(1, weight)) } : item
-              ),
-            }
-          : g
-      )
-    )
-  }
-
   // 그룹 내 아이템 삭제
   const handleRemoveGroupItem = (groupId: string, itemId: string) => {
     setGroups((prev) =>
@@ -248,18 +256,17 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     [assets]
   )
 
-  // 새 그룹 추가 (모달에서 호출)
+  // 새 그룹 추가 (모달에서 호출) - weight 제거됨
   const handleAddGroup = useCallback(
-    (data: { name: string; items: Array<{ type: 'ticker' | 'alias'; value: string; weight: number }> }) => {
+    (data: { name: string; target_percentage: number; items: Array<{ type: 'ticker' | 'alias'; value: string }> }) => {
       const newGroup: GroupState = {
         id: generateId(),
         name: data.name,
-        target_percentage: 0,
+        target_percentage: data.target_percentage,
         isExpanded: true,
         items: data.items.map((item) => {
           const groupItem: GroupItem = {
             id: generateId(),
-            weight: item.weight,
           }
           if (item.type === 'ticker') {
             groupItem.ticker = item.value
@@ -358,9 +365,9 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
       allocations: allocationData,
     })
 
-    // 3. 그룹 배분 저장
+    // 3. 그룹 배분 저장 (비율이 0이어도 그룹 자체는 저장) - weight 제거됨
     const groupData: AllocationGroupCreate[] = groups
-      .filter((g) => g.target_percentage > 0)
+      .filter((g) => g.items.length > 0) // 아이템이 있는 그룹만 저장
       .map((g) => ({
         name: g.name,
         target_percentage: g.target_percentage,
@@ -368,7 +375,7 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
           asset_id: item.asset_id,
           ticker: item.ticker,
           alias: item.alias,
-          weight: item.weight,
+          // weight 제거됨 - 그룹 내 비중은 더 이상 사용하지 않음
         })),
       }))
 
@@ -389,18 +396,35 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     return '미확인 자산'
   }
 
-  // 현재가치 계산 (개별)
+  // 현재가치 계산 (개별) - USD 자산은 환율 적용하여 KRW로 변환
   const getCurrentValue = (item: AllocationItem): number => {
-    if (item.matched_asset?.market_value) return item.matched_asset.market_value
-    return 0
+    const asset = item.matched_asset
+    if (!asset?.market_value) return 0
+
+    // USD 자산은 환율 적용
+    if (asset.currency === 'USD' && exchangeRate?.rate) {
+      return asset.market_value * exchangeRate.rate
+    }
+    return asset.market_value
+  }
+
+  // 그룹 내 아이템 현재가치 계산 (KRW 변환 포함, NaN 체크)
+  const getItemValueInKRW = (item: GroupItem): number => {
+    const asset = item.matched_asset
+    const value = asset?.market_value
+    // NaN 또는 undefined 체크 냥~
+    if (!value || isNaN(value)) return 0
+
+    if (asset.currency === 'USD' && exchangeRate?.rate) {
+      const converted = value * exchangeRate.rate
+      return isNaN(converted) ? 0 : converted
+    }
+    return value
   }
 
   // 그룹 현재가치 계산
   const getGroupCurrentValue = (group: GroupState): number => {
-    return group.items.reduce((sum, item) => {
-      if (item.matched_asset?.market_value) return sum + item.matched_asset.market_value
-      return sum
-    }, 0)
+    return group.items.reduce((sum, item) => sum + getItemValueInKRW(item), 0)
   }
 
   const isSaving = saveAllocationsMutation.isPending || saveGroupsMutation.isPending || updatePlanMutation.isPending
@@ -510,9 +534,21 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                               height={24}
                             />
                           )}
-                          <span className="text-sm text-muted-foreground min-w-[70px] text-right">
-                            {formatKRW(value)}
-                          </span>
+                          {/* USD 자산은 달러/원화 이중 표시 */}
+                          {alloc.matched_asset?.currency === 'USD' && exchangeRate ? (
+                            <div className="text-sm text-right min-w-[90px]">
+                              <div className="text-emerald-600 dark:text-emerald-400 font-medium">
+                                {formatUSD(alloc.matched_asset.market_value || 0)}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {formatKRW(value)}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground min-w-[70px] text-right">
+                              {formatKRW(value)}
+                            </span>
+                          )}
                           <div className="flex items-center gap-1">
                             <Input
                               type="number"
@@ -550,7 +586,6 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                 <h4 className="text-sm font-medium text-muted-foreground">그룹 배분</h4>
                 {groups.map((group) => {
                   const groupValue = getGroupCurrentValue(group)
-                  const totalWeight = group.items.reduce((sum, item) => sum + item.weight, 0)
 
                   return (
                     <Collapsible
@@ -610,8 +645,9 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                           <div className="px-3 pb-3 pt-1 space-y-2 border-t bg-muted/30">
                             {group.items.map((item) => {
                               const isMatched = !!item.matched_asset
-                              const itemValue = item.matched_asset?.market_value || 0
-                              const weightPct = totalWeight > 0 ? (item.weight / totalWeight) * 100 : 0
+                              const itemValueKRW = getItemValueInKRW(item)
+                              const itemValueUSD = item.matched_asset?.market_value || 0
+                              const isUSD = item.matched_asset?.currency === 'USD'
 
                               return (
                                 <div
@@ -632,29 +668,25 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                                         {item.ticker}
                                       </Badge>
                                     )}
+                                    {isUSD && (
+                                      <Badge variant="outline" className="text-xs text-emerald-600">
+                                        USD
+                                      </Badge>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-2 flex-shrink-0">
-                                    <span className="text-muted-foreground">{formatKRW(itemValue)}</span>
-                                    <span className="text-muted-foreground text-xs">
-                                      ({weightPct.toFixed(0)}%)
-                                    </span>
-                                    <div className="flex items-center gap-1">
-                                      <Input
-                                        type="number"
-                                        min="1"
-                                        max="100"
-                                        step="1"
-                                        className="w-14 h-7 text-right text-xs"
-                                        value={item.weight}
-                                        onChange={(e) =>
-                                          handleGroupItemWeightChange(
-                                            group.id,
-                                            item.id,
-                                            parseFloat(e.target.value) || 1
-                                          )
-                                        }
-                                      />
-                                    </div>
+                                    {isUSD && exchangeRate ? (
+                                      <div className="text-right">
+                                        <div className="text-emerald-600 dark:text-emerald-400 text-xs">
+                                          {formatUSD(itemValueUSD)}
+                                        </div>
+                                        <div className="text-muted-foreground text-xs">
+                                          {formatKRW(itemValueKRW)}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground">{formatKRW(itemValueKRW)}</span>
+                                    )}
                                     <Button
                                       variant="ghost"
                                       size="icon"

@@ -36,9 +36,13 @@ async def get_dashboard_summary(
     대시보드 요약 정보 조회 냥~ 🐱
     - 총 자산가치, 수익률
     - 카테고리별 배분 비율
+    - 메인 플랜 정보 포함
     """
+    from app.services.rebalance_service import RebalanceService
+
     asset_service = AssetService(db)
     finance_service = FinanceService()
+    rebalance_service = RebalanceService()
 
     # 자산 목록 조회
     assets = await asset_service.get_assets(portfolio_id)
@@ -48,6 +52,12 @@ async def get_dashboard_summary(
 
     # 요약 정보 계산
     summary = await asset_service.calculate_summary(enriched_assets, portfolio_id)
+
+    # 메인 플랜 정보 추가 냥~
+    main_plan = await rebalance_service.get_main_plan(portfolio_id)
+    if main_plan:
+        summary.main_plan_id = UUID(main_plan["id"])
+        summary.main_plan_name = main_plan["name"]
 
     return summary
 
@@ -267,8 +277,78 @@ async def get_rebalance_alerts(
     """
     리밸런싱 알림 조회 냥~ 🐱
 
-    목표 비율 대비 {threshold}% 이상 이탈한 카테고리 반환
+    메인 플랜 기반 목표 비율 대비 {threshold}% 이상 이탈 반환
+    메인 플랜이 없으면 레거시 카테고리 기반 폴백
     """
+    from app.services.rebalance_service import RebalanceService
+
+    rebalance_service = RebalanceService()
+
+    # 메인 플랜 조회
+    main_plan = await rebalance_service.get_main_plan(portfolio_id)
+
+    if main_plan:
+        # 메인 플랜 기반 리밸런싱 알림
+        return await _get_main_plan_alerts(main_plan, portfolio_id, threshold, rebalance_service)
+    else:
+        # 레거시 카테고리 기반 폴백
+        return await _get_legacy_alerts(db, portfolio_id, threshold)
+
+
+async def _get_main_plan_alerts(
+    main_plan: dict,
+    portfolio_id: Optional[UUID],
+    threshold: float,
+    rebalance_service,
+) -> RebalanceAlertsResponse:
+    """메인 플랜 기반 리밸런싱 알림 냥~"""
+    # 리밸런싱 계산
+    result = await rebalance_service.calculate_rebalance_by_plan(
+        UUID(main_plan["id"]), portfolio_id
+    )
+
+    alerts = []
+
+    # 개별 배분 알림
+    for suggestion in result.get("suggestions", []):
+        deviation = abs(suggestion["target_percentage"] - suggestion["current_percentage"])
+        if deviation >= threshold:
+            alerts.append(RebalanceAlert(
+                category_name=suggestion["asset_name"],
+                current_percentage=round(suggestion["current_percentage"], 2),
+                target_percentage=round(suggestion["target_percentage"], 2),
+                deviation=round(deviation, 2),
+                direction="over" if suggestion["current_percentage"] > suggestion["target_percentage"] else "under",
+            ))
+
+    # 그룹 배분 알림
+    for group_sugg in result.get("group_suggestions", []):
+        deviation = abs(group_sugg["target_percentage"] - group_sugg["current_percentage"])
+        if deviation >= threshold:
+            alerts.append(RebalanceAlert(
+                category_name=f"{group_sugg['group_name']}",
+                current_percentage=round(group_sugg["current_percentage"], 2),
+                target_percentage=round(group_sugg["target_percentage"], 2),
+                deviation=round(deviation, 2),
+                direction="over" if group_sugg["current_percentage"] > group_sugg["target_percentage"] else "under",
+            ))
+
+    # 이탈도가 큰 순으로 정렬
+    alerts.sort(key=lambda x: x.deviation, reverse=True)
+
+    return RebalanceAlertsResponse(
+        alerts=alerts,
+        threshold=threshold,
+        needs_rebalancing=len(alerts) > 0,
+    )
+
+
+async def _get_legacy_alerts(
+    db,
+    portfolio_id: Optional[UUID],
+    threshold: float,
+) -> RebalanceAlertsResponse:
+    """레거시 카테고리 기반 알림 (폴백) 냥~"""
     asset_service = AssetService(db)
     finance_service = FinanceService()
 

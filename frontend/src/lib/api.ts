@@ -309,6 +309,15 @@ export const rebalanceApi = {
     return data
   },
 
+  // 메인 플랜 자동 리밸런싱 계산 냥~
+  calculateMain: async (portfolioId?: string): Promise<AssetRebalanceResponse> => {
+    const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
+    const { data } = await apiClient.post<AssetRebalanceResponse>(
+      `/rebalance/calculate-main${params}`
+    )
+    return data
+  },
+
   // ============================================
   // 배분 그룹 API 냥~
   // ============================================

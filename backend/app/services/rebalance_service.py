@@ -68,6 +68,8 @@ class RebalanceService:
             plan = response.data[0]
             # plan_allocations -> allocations 키 변환
             plan["allocations"] = plan.pop("plan_allocations", [])
+            # groups도 조회해서 추가 냥~
+            plan["groups"] = await self.get_groups(UUID(plan["id"]))
             return plan
         return None
 
@@ -237,7 +239,7 @@ class RebalanceService:
             group_response = self.supabase.table("allocation_groups").insert(group_data).execute()
             saved_group = group_response.data[0]
 
-            # 그룹 아이템 생성
+            # 그룹 아이템 생성 (weight 없이 단순 소속 관계만)
             items = group.get("items", [])
             saved_items = []
             if items:
@@ -245,7 +247,7 @@ class RebalanceService:
                 for item in items:
                     item_data = {
                         "group_id": saved_group["id"],
-                        "weight": item.get("weight", 100),
+                        # weight는 더 이상 사용하지 않음 냥~
                     }
                     if item.get("asset_id"):
                         item_data["asset_id"] = str(item["asset_id"])
@@ -466,39 +468,35 @@ class RebalanceService:
     async def _calculate_group_suggestion(
         self, group: dict, assets: list[dict], asset_values: dict, total_value: Decimal
     ) -> dict:
-        """그룹 배분 제안 계산 냥~"""
+        """그룹 배분 제안 계산 냥~ (단순화: weight 없이 합산만)"""
         target_pct = Decimal(str(group["target_percentage"]))
         target_value = total_value * target_pct / Decimal("100")
 
         items = group.get("items", [])
-        total_weight = sum(Decimal(str(item.get("weight", 100))) for item in items)
-
         group_current_value = Decimal("0")
-        item_suggestions = []
+        item_details = []
 
+        # 그룹 내 모든 자산의 시가를 단순 합산
         for item in items:
             matched_asset = self.match_item_to_asset(item, assets)
             item_current_value = Decimal("0")
+            asset_name = None
 
             if matched_asset:
                 asset_data = asset_values.get(matched_asset["id"])
                 if asset_data:
                     item_current_value = asset_data["market_value"]
+                asset_name = matched_asset.get("name")
 
             group_current_value += item_current_value
 
-            # 그룹 내 비중에 따른 개별 목표
-            weight = Decimal(str(item.get("weight", 100)))
-            item_target = target_value * (weight / total_weight) if total_weight > 0 else Decimal("0")
-
-            item_suggestions.append({
+            # 아이템 정보만 기록 (개별 목표 없음)
+            item_details.append({
                 "asset_id": matched_asset["id"] if matched_asset else None,
+                "asset_name": asset_name,
                 "ticker": item.get("ticker"),
                 "alias": item.get("alias"),
-                "weight": float(weight),
                 "current_value": item_current_value,
-                "target_value": item_target,
-                "suggested_amount": item_target - item_current_value,
                 "is_matched": matched_asset is not None,
             })
 
@@ -516,5 +514,5 @@ class RebalanceService:
             "current_value": group_current_value,
             "target_value": target_value,
             "suggested_amount": target_value - group_current_value,
-            "items": item_suggestions,
+            "items": item_details,
         }

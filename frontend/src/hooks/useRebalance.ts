@@ -118,6 +118,13 @@ export function useCalculateRebalance() {
   })
 }
 
+// 메인 플랜 자동 리밸런싱 계산 냥~
+export function useCalculateMainPlanRebalance() {
+  return useMutation({
+    mutationFn: (portfolioId?: string) => rebalanceApi.calculateMain(portfolioId),
+  })
+}
+
 // 배분 그룹 저장 냥~
 export function useSaveGroups() {
   const queryClient = useQueryClient()

@@ -115,6 +115,27 @@ async def calculate_rebalance(plan_id: UUID, portfolio_id: Optional[UUID] = None
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/calculate-main", response_model=AssetRebalanceResponse)
+async def calculate_main_plan_rebalance(portfolio_id: Optional[UUID] = None):
+    """메인 플랜 기준 리밸런싱 자동 계산 냥~
+
+    메인 플랜을 자동으로 찾아서 리밸런싱 계산을 수행합니다.
+    """
+    service = RebalanceService()
+    main_plan = await service.get_main_plan(portfolio_id)
+
+    if not main_plan:
+        raise HTTPException(status_code=404, detail="메인 플랜이 없다옹! 🙀")
+
+    try:
+        result = await service.calculate_rebalance_by_plan(
+            UUID(main_plan["id"]), portfolio_id
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ============================================
 # 배분 그룹 API 냥~
 # ============================================

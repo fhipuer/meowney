@@ -378,16 +378,31 @@ class AssetService:
         return result.data[0] if result.data else {}
 
     async def get_target_allocations(self, portfolio_id: Optional[UUID] = None) -> list[dict]:
-        """목표 배분 조회 냥~"""
+        """[DEPRECATED] 레거시 목표 배분 조회 냥~
+
+        주의: 이 메서드는 폐기 예정입니다.
+        대신 RebalanceService.get_main_plan()을 사용하세요.
+        """
+        import warnings
+        warnings.warn(
+            "get_target_allocations is deprecated. Use RebalanceService.get_main_plan() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         if not portfolio_id:
             portfolio_id = await self._get_default_portfolio_id()
 
-        result = (
-            self.db.table("target_allocations")
-            .select("*, asset_categories(name)")
-            .eq("portfolio_id", str(portfolio_id))
-            .execute()
-        )
+        try:
+            result = (
+                self.db.table("target_allocations")
+                .select("*, asset_categories(name)")
+                .eq("portfolio_id", str(portfolio_id))
+                .execute()
+            )
+        except Exception:
+            # 테이블이 폐기된 경우 빈 목록 반환
+            return []
 
         # 카테고리명 평탄화
         allocations = []
@@ -405,7 +420,18 @@ class AssetService:
         portfolio_id: UUID,
         targets: list[dict],
     ) -> list[dict]:
-        """목표 배분 저장 냥~ (UPSERT)"""
+        """[DEPRECATED] 레거시 목표 배분 저장 냥~
+
+        주의: 이 메서드는 폐기 예정입니다.
+        대신 RebalanceService의 플랜 기반 배분을 사용하세요.
+        """
+        import warnings
+        warnings.warn(
+            "save_target_allocations is deprecated. Use RebalanceService plan-based allocation instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         upsert_data = [
             {
                 "portfolio_id": str(portfolio_id),
@@ -415,10 +441,13 @@ class AssetService:
             for target in targets
         ]
 
-        result = (
-            self.db.table("target_allocations")
-            .upsert(upsert_data, on_conflict="portfolio_id,category_id")
-            .execute()
-        )
-
-        return result.data
+        try:
+            result = (
+                self.db.table("target_allocations")
+                .upsert(upsert_data, on_conflict="portfolio_id,category_id")
+                .execute()
+            )
+            return result.data
+        except Exception:
+            # 테이블이 폐기된 경우 빈 목록 반환
+            return []

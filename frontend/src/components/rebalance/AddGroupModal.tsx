@@ -1,5 +1,5 @@
 /**
- * 배분 그룹 추가 모달 냥~
+ * 배분 그룹 추가 모달 냥~ (weight 제거됨 - 단순화)
  */
 import { useState } from 'react'
 import { Plus, Trash2, Layers, Hash, FileText } from 'lucide-react'
@@ -18,11 +18,11 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Badge } from '@/components/ui/badge'
 import type { Asset } from '@/types'
 
+// weight 제거됨 - 단순 소속 관계만
 interface GroupItemInput {
   id: string
   type: 'ticker' | 'alias'
   value: string
-  weight: number
 }
 
 interface AddGroupModalProps {
@@ -30,7 +30,8 @@ interface AddGroupModalProps {
   onOpenChange: (open: boolean) => void
   onAdd: (data: {
     name: string
-    items: Array<{ type: 'ticker' | 'alias'; value: string; weight: number }>
+    target_percentage: number
+    items: Array<{ type: 'ticker' | 'alias'; value: string }>
   }) => void
   assets: Asset[]
 }
@@ -42,21 +43,21 @@ export function AddGroupModal({
   assets,
 }: AddGroupModalProps) {
   const [groupName, setGroupName] = useState('')
+  const [targetPercentage, setTargetPercentage] = useState<number>(10)
   const [items, setItems] = useState<GroupItemInput[]>([])
 
   // 새 아이템 추가용 상태
   const [addItemType, setAddItemType] = useState<'ticker' | 'alias'>('ticker')
   const [newItemValue, setNewItemValue] = useState('')
-  const [newItemWeight, setNewItemWeight] = useState(100)
 
   const generateId = () => Math.random().toString(36).substr(2, 9)
 
   const handleReset = () => {
     setGroupName('')
+    setTargetPercentage(10)
     setItems([])
     setAddItemType('ticker')
     setNewItemValue('')
-    setNewItemWeight(100)
   }
 
   const handleAddItem = () => {
@@ -66,41 +67,31 @@ export function AddGroupModal({
       id: generateId(),
       type: addItemType,
       value: addItemType === 'ticker' ? newItemValue.trim().toUpperCase() : newItemValue.trim(),
-      weight: newItemWeight,
     }
 
     setItems((prev) => [...prev, newItem])
     setNewItemValue('')
-    setNewItemWeight(100)
   }
 
   const handleRemoveItem = (id: string) => {
     setItems((prev) => prev.filter((item) => item.id !== id))
   }
 
-  const handleItemWeightChange = (id: string, weight: number) => {
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, weight: Math.min(100, Math.max(1, weight)) } : item
-      )
-    )
-  }
-
   const handleSubmit = () => {
-    if (!groupName.trim() || items.length === 0) return
+    if (!groupName.trim() || items.length === 0 || targetPercentage <= 0) return
 
     onAdd({
       name: groupName.trim(),
+      target_percentage: targetPercentage,
       items: items.map((item) => ({
         type: item.type,
         value: item.value,
-        weight: item.weight,
       })),
     })
     handleReset()
   }
 
-  const isValid = groupName.trim().length > 0 && items.length > 0
+  const isValid = groupName.trim().length > 0 && items.length > 0 && targetPercentage > 0
 
   const handleOpenChange = (newOpen: boolean) => {
     if (!newOpen) {
@@ -122,9 +113,6 @@ export function AddGroupModal({
     }
   }
 
-  // 총 가중치 계산
-  const totalWeight = items.reduce((sum, item) => sum + item.weight, 0)
-
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-lg">
@@ -132,19 +120,38 @@ export function AddGroupModal({
           <DialogTitle>그룹 추가</DialogTitle>
           <DialogDescription>
             여러 자산을 묶어서 하나의 목표 비율로 관리합니다.
+            그룹 내 자산들의 합계가 그룹의 현재 가치가 됩니다.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6 py-4">
-          {/* 그룹 이름 */}
-          <div className="space-y-2">
-            <Label htmlFor="groupName">그룹 이름</Label>
-            <Input
-              id="groupName"
-              placeholder="예: 단기채, 금현물, 배당주"
-              value={groupName}
-              onChange={(e) => setGroupName(e.target.value)}
-            />
+          {/* 그룹 이름 및 목표 비율 */}
+          <div className="flex gap-4">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="groupName">그룹 이름</Label>
+              <Input
+                id="groupName"
+                placeholder="예: 단기채, 금현물, 배당주"
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+              />
+            </div>
+            <div className="w-28 space-y-2">
+              <Label htmlFor="targetPct">목표 비율</Label>
+              <div className="flex items-center gap-1">
+                <Input
+                  id="targetPct"
+                  type="number"
+                  min="0.1"
+                  max="100"
+                  step="0.1"
+                  className="text-right"
+                  value={targetPercentage}
+                  onChange={(e) => setTargetPercentage(parseFloat(e.target.value) || 0)}
+                />
+                <span className="text-sm text-muted-foreground">%</span>
+              </div>
+            </div>
           </div>
 
           {/* 추가된 아이템 목록 */}
@@ -154,7 +161,6 @@ export function AddGroupModal({
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 {items.map((item) => {
                   const matched = checkMatched(item.type, item.value)
-                  const weightPct = totalWeight > 0 ? (item.weight / totalWeight) * 100 : 0
 
                   return (
                     <div
@@ -174,30 +180,14 @@ export function AddGroupModal({
                           </Badge>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className="text-xs text-muted-foreground">
-                          ({weightPct.toFixed(0)}%)
-                        </span>
-                        <Input
-                          type="number"
-                          min="1"
-                          max="100"
-                          step="1"
-                          className="w-14 h-7 text-right text-xs"
-                          value={item.weight}
-                          onChange={(e) =>
-                            handleItemWeightChange(item.id, parseFloat(e.target.value) || 1)
-                          }
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => handleRemoveItem(item.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 flex-shrink-0"
+                        onClick={() => handleRemoveItem(item.id)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     </div>
                   )
                 })}
@@ -245,16 +235,6 @@ export function AddGroupModal({
                   }
                 }}
               />
-              <Input
-                type="number"
-                min="1"
-                max="100"
-                step="1"
-                className="w-16 text-right"
-                value={newItemWeight}
-                onChange={(e) => setNewItemWeight(parseFloat(e.target.value) || 100)}
-                placeholder="비중"
-              />
               <Button
                 variant="outline"
                 size="icon"
@@ -265,7 +245,7 @@ export function AddGroupModal({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              비중(Weight)은 그룹 내 자산들의 상대적 비율입니다. 예: SGOV(50), SHY(50) = 1:1 배분
+              그룹에 포함된 자산들의 시가 합계가 그룹의 현재 가치로 계산됩니다.
             </p>
           </div>
         </div>

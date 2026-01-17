@@ -86,6 +86,9 @@ export interface DashboardSummary {
   asset_count: number
   allocations: CategoryAllocation[]
   last_updated: string
+  // 메인 플랜 정보 냥~
+  main_plan_id?: string
+  main_plan_name?: string
 }
 
 // 자산 히스토리
@@ -235,14 +238,14 @@ export interface PlanAllocation {
   updated_at: string
 }
 
-// 배분 그룹 아이템 냥~
+// 배분 그룹 아이템 냥~ (weight 제거됨 - 단순 소속 관계만)
 export interface AllocationGroupItem {
   id?: string
   asset_id?: string
   ticker?: string
   alias?: string
-  weight: number
   matched_asset?: Asset
+  // weight 필드 제거: 그룹 내 비중은 더 이상 사용하지 않음
 }
 
 // 배분 그룹 냥~
@@ -302,12 +305,12 @@ export interface PlanAllocationCreate {
   target_percentage: number
 }
 
-// 그룹 아이템 생성 요청
+// 그룹 아이템 생성 요청 (weight 제거됨)
 export interface AllocationGroupItemCreate {
   asset_id?: string
   ticker?: string
   alias?: string
-  weight?: number
+  // weight 필드 제거: 그룹 내 비중은 더 이상 사용하지 않음
 }
 
 // 그룹 생성 요청
@@ -333,16 +336,15 @@ export interface AssetRebalanceSuggestion {
   is_matched: boolean  // 보유 자산과 매칭 여부 냥~
 }
 
-// 그룹 아이템 리밸런싱 제안
+// 그룹 아이템 정보 (단순화: 개별 목표 없음)
 export interface GroupItemSuggestion {
   asset_id: string | null
+  asset_name?: string | null
   ticker: string | null
   alias: string | null
-  weight: number
   current_value: number
-  target_value: number
-  suggested_amount: number
   is_matched: boolean
+  // weight, target_value, suggested_amount 제거됨 - 그룹 단위 계산만 수행
 }
 
 // 그룹 리밸런싱 제안

@@ -92,6 +92,9 @@ class DashboardSummary(BaseModel):
     asset_count: int = Field(..., description="보유 자산 수")
     allocations: list[CategoryAllocation] = Field(default_factory=list)
     last_updated: datetime
+    # 메인 플랜 정보 냥~
+    main_plan_id: Optional[UUID] = Field(None, description="메인 플랜 ID")
+    main_plan_name: Optional[str] = Field(None, description="메인 플랜 이름")
 
 
 # ============================================
@@ -320,11 +323,11 @@ class PlanAllocationResponse(PlanAllocationBase):
 # ============================================
 
 class AllocationGroupItemBase(BaseModel):
-    """그룹 아이템 기본"""
+    """그룹 아이템 기본 (weight 제거됨 - 단순 소속 관계만)"""
     asset_id: Optional[UUID] = None
     ticker: Optional[str] = None
     alias: Optional[str] = None
-    weight: float = Field(default=100, gt=0, le=100)
+    # weight 필드 제거: 그룹 내 비중은 더 이상 사용하지 않음 냥~
 
 
 class AllocationGroupItemCreate(AllocationGroupItemBase):
@@ -428,15 +431,14 @@ class AssetRebalanceSuggestion(BaseModel):
 # ============================================
 
 class GroupItemSuggestion(BaseModel):
-    """그룹 아이템 리밸런싱 제안"""
+    """그룹 아이템 정보 (단순화: 개별 목표 없음)"""
     asset_id: Optional[UUID]
+    asset_name: Optional[str] = None
     ticker: Optional[str]
     alias: Optional[str]
-    weight: float
     current_value: Decimal
-    target_value: Decimal
-    suggested_amount: Decimal
     is_matched: bool = False
+    # weight, target_value, suggested_amount 제거됨 - 그룹 단위 계산만 수행
 
 
 class GroupRebalanceSuggestion(BaseModel):
