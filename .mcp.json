@@ -3,7 +3,7 @@
     "playwright": {
       "type": "stdio",
       "command": "cmd",
-      "args": ["/c", "npx", "-y", "@anthropic-ai/mcp-playwright"]
+      "args": ["/c", "npx", "-y", "@playwright/mcp@latest"]
     }
   }
 }
