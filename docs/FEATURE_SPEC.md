@@ -1,10 +1,12 @@
 # Meowney 기능 스펙 문서
 
-> 최종 업데이트: 2026-01-17
+> 최종 업데이트: 2026-01-18 (v0.5.0 Docker 배포 지원)
 
 ## 1. 프로젝트 개요
 
 **Meowney (먀우니)** - 고양이 집사를 위한 자산 배분 관리 대시보드
+
+**버전**: 0.5.0
 
 ### 핵심 기능
 - 개인 자산 포트폴리오 관리
@@ -22,6 +24,7 @@
 | 차트 | Recharts |
 | 시세 | yfinance |
 | 스케줄러 | APScheduler |
+| 배포 | Docker & Docker Compose, Synology NAS |
 
 ---
 
@@ -57,6 +60,7 @@
 | 리밸런싱 계산 | ✅ | 메인 플랜 기준 매수/매도 수량 계산 |
 | 추가 투자금 입력 | ✅ | 추가 투자 시 배분 계산 |
 | 현재 vs 목표 비교 | ✅ | 현재 비율과 목표 비율 비교 표시 |
+| **허용 오차 입력** | ✅ | 리밸런싱 허용 오차 비율 설정 (v0.5.0) |
 
 ### 2.4 플랜 설정 (`/rebalance/plans`)
 
@@ -73,6 +77,10 @@
 | 균등 배분 | ✅ | 모든 항목 동일 비율 자동 설정 |
 | 현재 비율 적용 | ✅ | 현재 보유 비율을 목표로 설정 |
 | 자산 매칭 | ✅ | 티커/이름 기반 자동 매칭 |
+| **실시간 파이차트** | ✅ | 목표 비율 변경 시 즉시 시각화 (Phase 1) |
+| **비율 정규화** | ✅ | 100%에 맞게 비율 자동 조정 버튼 (Phase 1) |
+| **보유 자산 선택 UI** | ✅ | 체크박스 기반 자산 선택 모달 (Phase 1) |
+| **자동 저장/복구** | ✅ | localStorage 자동 저장 및 복구 프롬프트 (Phase 1) |
 
 ### 2.5 분석 (`/analytics`)
 
@@ -87,6 +95,15 @@
 |------|------|------|
 | 다크 모드 | ✅ | 테마 토글 |
 | 포트폴리오 관리 | ✅ | 포트폴리오 선택/관리 |
+
+### 2.7 배포 (v0.5.0)
+
+| 기능 | 상태 | 설명 |
+|------|------|------|
+| Docker 이미지 빌드 | ✅ | docker-compose를 통한 빌드 |
+| NAS 배포 | ✅ | Synology NAS 이미지 전송 방식 |
+| 외부 접속 | ✅ | DDNS + 포트포워딩 설정 |
+| 배포 스크립트 | ✅ | start.sh, stop.sh, update.sh, logs.sh |
 
 ---
 
@@ -202,6 +219,57 @@ interface GroupAllocation {
 - Frontend: Build successful
 - UI: Playwright MCP로 검증 완료
 
+### 2026-01-17: 플랜 편집 UX 개선 (Phase 1)
+
+**커밋**: `fcb71d9`
+
+**개선 내용**:
+1. 실시간 파이차트로 목표 비율 시각화
+2. "100%로 정규화" 버튼으로 비율 자동 조정
+3. 체크박스 기반 보유 자산 선택 UI
+4. localStorage 자동 저장 및 복구 기능
+
+**추가된 컴포넌트**:
+- `frontend/src/components/rebalance/RealTimePieChart.tsx` - 실시간 파이차트
+- `frontend/src/components/rebalance/AssetSelectorModal.tsx` - 자산 선택 모달
+- `frontend/src/hooks/useAutoSave.ts` - 자동 저장 훅
+- `frontend/src/components/ui/checkbox.tsx` - shadcn/ui 체크박스
+- `frontend/src/components/ui/scroll-area.tsx` - shadcn/ui 스크롤 영역
+
+**수정된 파일**:
+- `frontend/src/components/rebalance/AllocationEditor.tsx`
+  - 파이차트 섹션 추가 (상단)
+  - 정규화 버튼 추가 (100% 미만/초과 시 표시)
+  - "보유 자산 선택" 버튼 추가 (개별 배분, 그룹 내)
+  - 자동 저장 표시 및 복구 프롬프트
+
+**테스트 결과**:
+- Frontend: Build successful
+- UI: Playwright MCP로 검증 완료
+  - 복구 프롬프트 표시/무시/복구 동작 확인
+  - 파이차트 실시간 업데이트 확인
+  - 보유 자산 선택 모달 동작 확인
+  - 정규화 버튼 동작 확인 (30%:50% → 37.5%:62.5%)
+
+### 2026-01-18: v0.5.0 Docker 배포 및 UI 개선
+
+**커밋**: `d1c0655`, `6ef48ab`
+
+**개선 내용**:
+1. Docker 배포 지원 (Synology NAS)
+2. 외부 접속 설정 (DDNS + 포트포워딩)
+3. UI 개선
+   - 대시보드 환율 중복 표시 제거
+   - 자산 추이 차트 Y축 잘림 수정
+   - 리밸런싱 허용 오차 입력 UI 추가
+   - 플랜 편집 버튼 배치 재정렬
+
+**추가된 파일**:
+- `deploy/docker-compose.yml` - NAS용 프로덕션 설정
+- `deploy/.env.example` - 환경변수 템플릿
+- `deploy/README.md` - 배포 가이드
+- `deploy/start.sh`, `stop.sh`, `update.sh`, `logs.sh` - 관리 스크립트
+
 ---
 
 ## 6. 개발 환경 설정
@@ -241,11 +309,26 @@ cd frontend && npm run build
 
 | 기능 | 우선순위 | 설명 |
 |------|----------|------|
+| **클립보드 데이터 가져오기** | 높음 | 증권사 MTS/HTS에서 복사한 보유종목 데이터 파싱 (Phase 2) |
 | AI 분석 | 중간 | 전략 프롬프트 기반 AI 리밸런싱 조언 |
 | 알림 기능 | 낮음 | 목표 편차 임계값 초과 시 알림 |
 | 다중 포트폴리오 | 낮음 | 여러 포트폴리오 동시 관리 |
 | 배당 추적 | 낮음 | 배당금 수령 내역 관리 |
 | 거래 기록 | 낮음 | 매수/매도 히스토리 |
+
+### Phase 2: 클립보드 데이터 가져오기 (대기 중)
+
+**상태**: 샘플 데이터 필요
+
+**계획된 기능**:
+- 미래에셋증권 등 MTS/HTS에서 보유종목 데이터 복사
+- 텍스트 영역에 붙여넣기 → 자동 파싱
+- 파싱 결과 미리보기 → 가져오기 확인
+- 기존 자산과 중복 시 자동 업데이트
+
+**대기 이유**:
+- 미래에셋증권 클립보드 데이터 형식 샘플 필요
+- 웹 검색으로 구체적인 형식 찾지 못함
 
 ---
 
