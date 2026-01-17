@@ -399,25 +399,35 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
   // 현재가치 계산 (개별) - USD 자산은 환율 적용하여 KRW로 변환
   const getCurrentValue = (item: AllocationItem): number => {
     const asset = item.matched_asset
-    if (!asset?.market_value) return 0
+    if (!asset) return 0
+
+    const value = Number(asset.market_value)
+    if (!value || !isFinite(value)) return 0
 
     // USD 자산은 환율 적용
-    if (asset.currency === 'USD' && exchangeRate?.rate) {
-      return asset.market_value * exchangeRate.rate
+    if (asset.currency === 'USD') {
+      const rate = Number(exchangeRate?.rate)
+      if (!rate || !isFinite(rate)) return value
+      const converted = value * rate
+      return isFinite(converted) ? converted : 0
     }
-    return asset.market_value
+    return value
   }
 
   // 그룹 내 아이템 현재가치 계산 (KRW 변환 포함, NaN 체크)
   const getItemValueInKRW = (item: GroupItem): number => {
     const asset = item.matched_asset
-    const value = asset?.market_value
-    // NaN 또는 undefined 체크 냥~
-    if (!value || isNaN(value)) return 0
+    if (!asset) return 0
 
-    if (asset.currency === 'USD' && exchangeRate?.rate) {
-      const converted = value * exchangeRate.rate
-      return isNaN(converted) ? 0 : converted
+    // 명시적으로 숫자 변환 (string일 수 있음)
+    const value = Number(asset.market_value)
+    if (!value || !isFinite(value)) return 0
+
+    if (asset.currency === 'USD') {
+      const rate = Number(exchangeRate?.rate)
+      if (!rate || !isFinite(rate)) return value // 환율 없으면 원본 값 반환
+      const converted = value * rate
+      return isFinite(converted) ? converted : 0
     }
     return value
   }
