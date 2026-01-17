@@ -1,8 +1,9 @@
 /**
  * 목표 배분 편집기 컴포넌트 - 개별 배분 + 그룹 배분 통합 지원 냥~
+ * Phase 1 개선: 실시간 파이차트, 비율 정규화, 자산 선택 UI, 자동 저장
  */
 import { useState, useMemo, useCallback, useEffect } from 'react'
-import { Save, AlertCircle, Plus, Trash2, ChevronDown, ChevronRight, Link2, Link2Off, Layers } from 'lucide-react'
+import { Save, AlertCircle, Plus, Trash2, ChevronDown, ChevronRight, Link2, Link2Off, Layers, RotateCcw, Scale } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -27,8 +28,11 @@ import {
 import { useAssets } from '@/hooks/useAssets'
 import { useExchangeRate } from '@/hooks/useDashboard'
 import { useSaveAllocations, useUpdatePlan, useSaveGroups } from '@/hooks/useRebalance'
+import { useAutoSave, formatLastSaved } from '@/hooks/useAutoSave'
 import { formatKRW, formatUSD } from '@/lib/utils'
 import { TickerSparkline } from './TickerSparkline'
+import { RealTimePieChart } from './RealTimePieChart'
+import { AssetSelectorModal } from './AssetSelectorModal'
 import { AddAllocationModal } from './AddAllocationModal'
 import { AddGroupModal } from './AddGroupModal'
 import type {
@@ -121,6 +125,9 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
   // 모달 상태
   const [showAddAllocation, setShowAddAllocation] = useState(false)
   const [showAddGroup, setShowAddGroup] = useState(false)
+  const [showAssetSelector, setShowAssetSelector] = useState(false)
+  const [assetSelectorMode, setAssetSelectorMode] = useState<'individual' | 'group'>('individual')
+  const [selectedGroupIdForAsset, setSelectedGroupIdForAsset] = useState<string | null>(null)
 
   // assets가 로드되면 자산 매칭 재수행 냥~
   useEffect(() => {
@@ -186,6 +193,111 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
   }, [allocations, groups])
 
   const isValid = Math.abs(totalPercentage - 100) < 0.1
+
+  // 표시명 결정 (chartData에서 사용하므로 먼저 정의)
+  const getDisplayName = (item: AllocationItem | GroupItem): string => {
+    if ('display_name' in item && item.display_name) return item.display_name
+    if (item.matched_asset) return item.matched_asset.name
+    if (item.ticker) return item.ticker
+    if (item.alias) return item.alias
+    return '미확인 자산'
+  }
+
+  // 파이차트용 데이터 생성
+  const chartData = useMemo(() => {
+    const data: Array<{ name: string; value: number; isGroup?: boolean }> = []
+
+    // 개별 배분
+    allocations.forEach((alloc) => {
+      if (alloc.target_percentage > 0) {
+        data.push({
+          name: getDisplayName(alloc),
+          value: alloc.target_percentage,
+          isGroup: false,
+        })
+      }
+    })
+
+    // 그룹 배분
+    groups.forEach((group) => {
+      if (group.target_percentage > 0) {
+        data.push({
+          name: group.name,
+          value: group.target_percentage,
+          isGroup: true,
+        })
+      }
+    })
+
+    return data
+  }, [allocations, groups])
+
+  // 이미 플랜에 추가된 자산 ID 목록
+  const alreadyAddedAssetIds = useMemo(() => {
+    const ids: string[] = []
+
+    // 개별 배분에서
+    allocations.forEach((alloc) => {
+      if (alloc.asset_id) ids.push(alloc.asset_id)
+      if (alloc.matched_asset?.id) ids.push(alloc.matched_asset.id)
+    })
+
+    // 그룹 내 아이템에서
+    groups.forEach((group) => {
+      group.items.forEach((item) => {
+        if (item.asset_id) ids.push(item.asset_id)
+        if (item.matched_asset?.id) ids.push(item.matched_asset.id)
+      })
+    })
+
+    return [...new Set(ids)]
+  }, [allocations, groups])
+
+  // 자동 저장 훅
+  const autoSaveData = useMemo(() => ({
+    planName,
+    planDescription,
+    planStrategyPrompt,
+    allocations,
+    groups,
+  }), [planName, planDescription, planStrategyPrompt, allocations, groups])
+
+  const { hasRecoveryData, recover, clearRecovery, lastSaved } = useAutoSave({
+    key: `meowney-plan-${plan.id}`,
+    data: autoSaveData,
+    debounceMs: 1000,
+    enabled: open,
+  })
+
+  // 복구 프롬프트 상태
+  const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false)
+
+  // 모달 열릴 때 복구 데이터 확인
+  useEffect(() => {
+    if (open && hasRecoveryData) {
+      setShowRecoveryPrompt(true)
+    }
+  }, [open, hasRecoveryData])
+
+  // 복구 처리
+  const handleRecover = () => {
+    const recovered = recover()
+    if (recovered) {
+      const data = recovered as typeof autoSaveData
+      setPlanName(data.planName)
+      setPlanDescription(data.planDescription)
+      setPlanStrategyPrompt(data.planStrategyPrompt)
+      setAllocations(data.allocations)
+      setGroups(data.groups)
+    }
+    setShowRecoveryPrompt(false)
+  }
+
+  // 복구 무시
+  const handleIgnoreRecovery = () => {
+    clearRecovery()
+    setShowRecoveryPrompt(false)
+  }
 
   // 개별 배분 비율 변경
   const handleAllocationChange = (id: string, value: number) => {
@@ -296,6 +408,94 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     setGroups((prev) => prev.map((g) => ({ ...g, target_percentage: equalPct })))
   }
 
+  // 비율 정규화 (100%에 맞춤)
+  const handleNormalize = () => {
+    if (totalPercentage === 0) return
+
+    // 모든 항목 수집
+    const allItems = [
+      ...allocations.map((a) => ({ type: 'allocation' as const, id: a.id, ratio: a.target_percentage })),
+      ...groups.map((g) => ({ type: 'group' as const, id: g.id, ratio: g.target_percentage })),
+    ].filter((item) => item.ratio > 0)
+
+    if (allItems.length === 0) return
+
+    // 비례 배분 계산
+    let remaining = 100
+    const normalized: Map<string, number> = new Map()
+
+    allItems.slice(0, -1).forEach((item) => {
+      const newRatio = Math.round((item.ratio / totalPercentage) * 100 * 10) / 10
+      normalized.set(item.id, newRatio)
+      remaining -= newRatio
+    })
+
+    // 마지막 항목은 나머지로 (반올림 오차 보정)
+    if (allItems.length > 0) {
+      normalized.set(allItems[allItems.length - 1].id, Math.round(remaining * 10) / 10)
+    }
+
+    // 상태 업데이트
+    setAllocations((prev) =>
+      prev.map((a) => ({
+        ...a,
+        target_percentage: normalized.get(a.id) ?? a.target_percentage,
+      }))
+    )
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        target_percentage: normalized.get(g.id) ?? g.target_percentage,
+      }))
+    )
+  }
+
+  // 보유 자산에서 선택하여 개별 배분 추가
+  const handleSelectAssetsForIndividual = (selectedAssets: Asset[]) => {
+    const newAllocations: AllocationItem[] = selectedAssets.map((asset) => ({
+      id: generateId(),
+      asset_id: asset.id,
+      ticker: asset.ticker || undefined,
+      display_name: asset.name,
+      target_percentage: 0,
+      matched_asset: asset,
+    }))
+    setAllocations((prev) => [...prev, ...newAllocations])
+  }
+
+  // 보유 자산에서 선택하여 그룹에 추가
+  const handleSelectAssetsForGroup = (selectedAssets: Asset[]) => {
+    if (!selectedGroupIdForAsset) return
+
+    const newItems: GroupItem[] = selectedAssets.map((asset) => ({
+      id: generateId(),
+      asset_id: asset.id,
+      ticker: asset.ticker || undefined,
+      matched_asset: asset,
+    }))
+
+    setGroups((prev) =>
+      prev.map((g) =>
+        g.id === selectedGroupIdForAsset ? { ...g, items: [...g.items, ...newItems] } : g
+      )
+    )
+    setSelectedGroupIdForAsset(null)
+  }
+
+  // 개별 배분에 보유 자산 추가 모달 열기
+  const openAssetSelectorForIndividual = () => {
+    setAssetSelectorMode('individual')
+    setSelectedGroupIdForAsset(null)
+    setShowAssetSelector(true)
+  }
+
+  // 그룹에 보유 자산 추가 모달 열기
+  const openAssetSelectorForGroup = (groupId: string) => {
+    setAssetSelectorMode('group')
+    setSelectedGroupIdForAsset(groupId)
+    setShowAssetSelector(true)
+  }
+
   // 현재 비율 적용 (기존 배분 구조 유지하면서 현재 시장가치 기준으로 업데이트)
   const handleCurrentRatio = () => {
     if (!assets || assets.length === 0) return
@@ -387,15 +587,6 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     onOpenChange(false)
   }
 
-  // 표시명 결정
-  const getDisplayName = (item: AllocationItem | GroupItem): string => {
-    if ('display_name' in item && item.display_name) return item.display_name
-    if (item.matched_asset) return item.matched_asset.name
-    if (item.ticker) return item.ticker
-    if (item.alias) return item.alias
-    return '미확인 자산'
-  }
-
   // 현재가치 계산 (개별) - USD 자산은 환율 적용하여 KRW로 변환
   const getCurrentValue = (item: AllocationItem): number => {
     const asset = item.matched_asset
@@ -451,6 +642,59 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
           </DialogHeader>
 
           <div className="space-y-6">
+            {/* 복구 프롬프트 */}
+            {showRecoveryPrompt && (
+              <Alert className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
+                <RotateCcw className="h-4 w-4 text-amber-600" />
+                <AlertDescription className="flex items-center justify-between">
+                  <span>이전에 저장되지 않은 편집 내용이 있습니다. 복구할까요?</span>
+                  <div className="flex gap-2 ml-4">
+                    <Button variant="outline" size="sm" onClick={handleIgnoreRecovery}>
+                      무시
+                    </Button>
+                    <Button size="sm" onClick={handleRecover}>
+                      복구
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {/* 실시간 파이차트 + 합계 */}
+            <div className="flex items-start gap-6 p-4 border rounded-lg bg-muted/30">
+              <RealTimePieChart
+                data={chartData}
+                totalPercentage={totalPercentage}
+                className="flex-shrink-0"
+              />
+              <div className="flex-1 space-y-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">목표 비율 합계</p>
+                  <p className={`text-2xl font-bold ${isValid ? 'text-green-600' : 'text-amber-600'}`}>
+                    {totalPercentage.toFixed(1)}%
+                  </p>
+                </div>
+                {!isValid && totalPercentage > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleNormalize}
+                    className="w-full"
+                  >
+                    <Scale className="h-4 w-4 mr-2" />
+                    100%로 정규화
+                  </Button>
+                )}
+                {lastSaved && (
+                  <p className="text-xs text-muted-foreground">
+                    💾 자동 저장됨 ({formatLastSaved(lastSaved)})
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <Separator />
+
             {/* 플랜 기본 정보 */}
             <div className="space-y-4">
               <div className="space-y-2">
@@ -495,9 +739,13 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                 현재 비율 적용
               </Button>
               <div className="flex-1" />
+              <Button variant="default" size="sm" onClick={openAssetSelectorForIndividual}>
+                <Plus className="h-4 w-4 mr-1" />
+                보유 자산 선택
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setShowAddAllocation(true)}>
                 <Plus className="h-4 w-4 mr-1" />
-                항목 추가
+                티커/별칭 추가
               </Button>
               <Button variant="outline" size="sm" onClick={() => setShowAddGroup(true)}>
                 <Layers className="h-4 w-4 mr-1" />
@@ -653,6 +901,16 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
 
                         <CollapsibleContent>
                           <div className="px-3 pb-3 pt-1 space-y-2 border-t bg-muted/30">
+                            {/* 그룹에 자산 추가 버튼 */}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full h-7 text-xs"
+                              onClick={() => openAssetSelectorForGroup(group.id)}
+                            >
+                              <Plus className="h-3 w-3 mr-1" />
+                              보유 자산 추가
+                            </Button>
                             {group.items.map((item) => {
                               const isMatched = !!item.matched_asset
                               const itemValueKRW = getItemValueInKRW(item)
@@ -776,6 +1034,29 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
         onOpenChange={setShowAddGroup}
         onAdd={handleAddGroup}
         assets={assets || []}
+      />
+
+      {/* 보유 자산 선택 모달 */}
+      <AssetSelectorModal
+        open={showAssetSelector}
+        onOpenChange={setShowAssetSelector}
+        assets={assets || []}
+        alreadyAddedAssetIds={alreadyAddedAssetIds}
+        onSelect={
+          assetSelectorMode === 'individual'
+            ? handleSelectAssetsForIndividual
+            : handleSelectAssetsForGroup
+        }
+        title={
+          assetSelectorMode === 'individual'
+            ? '개별 배분에 자산 추가'
+            : '그룹에 자산 추가'
+        }
+        description={
+          assetSelectorMode === 'individual'
+            ? '플랜에 추가할 보유 자산을 선택하세요.'
+            : '그룹에 추가할 보유 자산을 선택하세요.'
+        }
       />
     </>
   )
