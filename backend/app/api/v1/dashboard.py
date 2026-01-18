@@ -11,8 +11,6 @@ from app.api.deps import SupabaseDep
 from app.models.schemas import (
     DashboardSummary,
     AssetHistoryResponse,
-    RebalanceTarget,
-    RebalanceResponse,
     ExchangeRateResponse,
     BenchmarkResponse,
     BenchmarkDataPoint,
@@ -114,29 +112,6 @@ async def get_asset_history(
     )
 
     return [AssetHistoryResponse(**h) for h in history]
-
-
-@router.post("/rebalance", response_model=RebalanceResponse)
-async def calculate_rebalance(
-    db: SupabaseDep,
-    targets: list[RebalanceTarget],
-    portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
-):
-    """
-    리밸런싱 계산 냥~ 🐱
-    목표 비율에 맞추기 위한 매수/매도 금액 계산
-    """
-    asset_service = AssetService(db)
-    finance_service = FinanceService()
-
-    # 현재 자산 조회
-    assets = await asset_service.get_assets(portfolio_id)
-    enriched_assets = await finance_service.enrich_assets_with_prices(assets)
-
-    # 리밸런싱 계산
-    result = await asset_service.calculate_rebalance(enriched_assets, targets)
-
-    return result
 
 
 @router.get("/exchange-rate", response_model=ExchangeRateResponse)

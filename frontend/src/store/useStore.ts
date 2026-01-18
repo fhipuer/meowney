@@ -21,11 +21,6 @@ interface AppState {
   // 프라이버시 모드 (금액 숨김) 냥~
   isPrivacyMode: boolean
   togglePrivacyMode: () => void
-
-  // 리밸런싱 목표 비율 (임시 저장)
-  rebalanceTargets: Record<string, number>
-  setRebalanceTarget: (categoryId: string, percentage: number) => void
-  clearRebalanceTargets: () => void
 }
 
 export const useStore = create<AppState>()(
@@ -57,17 +52,6 @@ export const useStore = create<AppState>()(
       // 프라이버시 모드 냥~
       isPrivacyMode: false,
       togglePrivacyMode: () => set((state) => ({ isPrivacyMode: !state.isPrivacyMode })),
-
-      // 리밸런싱
-      rebalanceTargets: {},
-      setRebalanceTarget: (categoryId, percentage) =>
-        set((state) => ({
-          rebalanceTargets: {
-            ...state.rebalanceTargets,
-            [categoryId]: percentage,
-          },
-        })),
-      clearRebalanceTargets: () => set({ rebalanceTargets: {} }),
     }),
     {
       name: 'meowney-storage', // localStorage 키

@@ -7,10 +7,9 @@ import type {
   Asset,
   AssetCreate,
   AssetUpdate,
+  AssetsListResponse,
   DashboardSummary,
   AssetHistory,
-  RebalanceTarget,
-  RebalanceResponse,
   AssetCategory,
   MeowResponse,
   ExchangeRateResponse,
@@ -71,13 +70,13 @@ apiClient.interceptors.response.use(
 // ============================================
 
 export const assetsApi = {
-  // 자산 목록 조회
-  getAll: async (portfolioId?: string, includeInactive = false): Promise<Asset[]> => {
+  // 자산 목록 조회 (v0.7.0 - summary 포함)
+  getAll: async (portfolioId?: string, includeInactive = false): Promise<AssetsListResponse> => {
     const params = new URLSearchParams()
     if (portfolioId) params.append('portfolio_id', portfolioId)
     if (includeInactive) params.append('include_inactive', 'true')
 
-    const { data } = await apiClient.get<Asset[]>(`/assets?${params}`)
+    const { data } = await apiClient.get<AssetsListResponse>(`/assets?${params}`)
     return data
   },
 
@@ -140,19 +139,6 @@ export const dashboardApi = {
     params.append('limit', limit.toString())
 
     const { data } = await apiClient.get<AssetHistory[]>(`/dashboard/history?${params}`)
-    return data
-  },
-
-  // 리밸런싱 계산
-  calculateRebalance: async (
-    targets: RebalanceTarget[],
-    portfolioId?: string
-  ): Promise<RebalanceResponse> => {
-    const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
-    const { data } = await apiClient.post<RebalanceResponse>(
-      `/dashboard/rebalance${params}`,
-      targets
-    )
     return data
   },
 

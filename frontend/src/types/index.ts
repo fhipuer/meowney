@@ -37,6 +37,20 @@ export interface Asset {
   category_color: string | null
 }
 
+// 자산 목록 요약 (v0.7.0)
+export interface AssetsSummary {
+  total_value: number
+  total_principal: number
+  total_profit: number
+  profit_rate: number
+}
+
+// 자산 목록 API 응답 (v0.7.0)
+export interface AssetsListResponse {
+  assets: Asset[]
+  summary: AssetsSummary
+}
+
 // 자산 생성 요청
 export interface AssetCreate {
   name: string
@@ -102,28 +116,6 @@ export interface AssetHistory {
   profit_rate: number | null
   category_breakdown: Record<string, number> | null
   created_at: string
-}
-
-// 리밸런싱 목표
-export interface RebalanceTarget {
-  category_id: string
-  target_percentage: number
-}
-
-// 리밸런싱 제안
-export interface RebalanceSuggestion {
-  category_name: string
-  current_value: number
-  current_percentage: number
-  target_percentage: number
-  difference_percentage: number
-  suggested_amount: number
-}
-
-// 리밸런싱 응답
-export interface RebalanceResponse {
-  total_value: number
-  suggestions: RebalanceSuggestion[]
 }
 
 // API 공통 응답

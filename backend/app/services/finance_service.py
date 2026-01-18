@@ -19,6 +19,9 @@ class FinanceService:
     yfinance를 사용하여 실시간 주가 조회
     """
 
+    # 클래스 레벨 환율 캐시 (인스턴스 간 공유)
+    _exchange_rate_cache: dict[str, dict] = {}
+
     def __init__(self):
         self._executor = ThreadPoolExecutor(max_workers=5)
         self._price_cache: dict[str, dict] = {}  # 간단한 메모리 캐시
@@ -232,14 +235,31 @@ class FinanceService:
     async def get_exchange_rate(self, from_currency: str = "USD", to_currency: str = "KRW") -> float:
         """
         환율 조회 냥~ (USDKRW=X 티커 사용)
+        실패 시 캐시된 환율 사용, 캐시도 없으면 기본값 사용
         """
-        ticker = f"{from_currency}{to_currency}=X"
+        cache_key = f"{from_currency}{to_currency}"
+        ticker = f"{cache_key}=X"
+
         result = await self.get_stock_price(ticker)
 
         if result.get("valid") and result.get("current_price"):
-            return float(result["current_price"])
+            rate = float(result["current_price"])
+            # 성공 시 캐시 업데이트
+            FinanceService._exchange_rate_cache[cache_key] = {
+                "rate": rate,
+                "timestamp": datetime.now(),
+                "source": "yfinance"
+            }
+            return rate
 
-        # 실패시 기본값 반환
+        # 실패 시 캐시된 환율 사용
+        cached = FinanceService._exchange_rate_cache.get(cache_key)
+        if cached:
+            print(f"⚠️ 환율 조회 실패, 캐시된 환율 사용 냥: {cached['rate']} ({cached['source']})")
+            return cached["rate"]
+
+        # 캐시도 없으면 기본값 반환
+        print(f"⚠️ 환율 조회 실패, 기본값 사용 냥: {settings.default_usd_krw_rate}")
         return settings.default_usd_krw_rate
 
     def _get_benchmark_history_sync(

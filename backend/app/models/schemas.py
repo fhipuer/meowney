@@ -69,6 +69,20 @@ class AssetResponse(AssetBase):
         from_attributes = True
 
 
+class AssetsSummary(BaseModel):
+    """자산 목록 요약 정보 (v0.7.0) 냥~"""
+    total_value: Decimal = Field(..., description="총 평가금액 (KRW)")
+    total_principal: Decimal = Field(..., description="총 투자원금 (KRW)")
+    total_profit: Decimal = Field(..., description="총 손익 (KRW)")
+    profit_rate: float = Field(..., description="수익률 (%)")
+
+
+class AssetsListResponse(BaseModel):
+    """자산 목록 응답 (v0.7.0) - summary 포함 냥~"""
+    assets: list[AssetResponse]
+    summary: AssetsSummary
+
+
 # ============================================
 # Dashboard (대시보드) 스키마
 # ============================================

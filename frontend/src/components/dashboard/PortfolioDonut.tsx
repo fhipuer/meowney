@@ -195,7 +195,8 @@ function buildChartFromPlan(
 export function PortfolioDonut({ allocations, isLoading, totalValueFromApi }: PortfolioDonutProps) {
   const { isPrivacyMode } = useStore()
   const { data: plans } = usePlans()
-  const { data: assets } = useAssets()
+  const { data: assetsData } = useAssets()
+  const assets = assetsData?.assets
   const navigate = useNavigate()
 
   // 메인 플랜 찾기

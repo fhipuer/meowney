@@ -1,7 +1,7 @@
 /**
  * 자산 목록 페이지 냥~ 🐱
+ * v0.7.0: API 응답의 summary 사용 (프론트엔드 재계산 제거)
  */
-import { useMemo } from 'react'
 import { Wallet, TrendingUp, TrendingDown } from 'lucide-react'
 import { AssetList } from '@/components/assets/AssetList'
 import { useAssets } from '@/hooks/useAssets'
@@ -9,24 +9,14 @@ import { useStore } from '@/store/useStore'
 import { formatKRW, formatPercent, getProfitClass, maskValue } from '@/lib/utils'
 
 export function AssetsPage() {
-  const { data: assets, isLoading } = useAssets()
+  const { data, isLoading } = useAssets()
   const { isPrivacyMode } = useStore()
 
-  // 총 자산가치 및 수익률 계산
-  const summary = useMemo(() => {
-    if (!assets || assets.length === 0) {
-      return { totalValue: 0, totalCost: 0, profitRate: 0, profit: 0 }
-    }
+  // API 응답에서 assets와 summary 추출
+  const assets = data?.assets
+  const summary = data?.summary
 
-    const totalValue = assets.reduce((sum, a) => sum + (Number(a.market_value) || 0), 0)
-    const totalCost = assets.reduce((sum, a) => sum + (a.quantity * a.average_price), 0)
-    const profit = totalValue - totalCost
-    const profitRate = totalCost > 0 ? (profit / totalCost) * 100 : 0
-
-    return { totalValue, totalCost, profitRate, profit }
-  }, [assets])
-
-  const TrendIcon = summary.profit >= 0 ? TrendingUp : TrendingDown
+  const TrendIcon = (summary?.total_profit ?? 0) >= 0 ? TrendingUp : TrendingDown
 
   return (
     <div className="space-y-6">
@@ -38,18 +28,18 @@ export function AssetsPage() {
         </p>
       </div>
 
-      {/* 총 자산가치 요약 */}
-      {assets && assets.length > 0 && (
+      {/* 총 자산가치 요약 - API에서 계산된 값 사용 */}
+      {summary && assets && assets.length > 0 && (
         <div className="flex items-center gap-4 p-4 bg-muted/30 rounded-lg border">
           <Wallet className="h-5 w-5 text-muted-foreground" />
           <div className="flex items-center gap-3">
             <span className="text-lg font-semibold">
-              총 자산: {maskValue(formatKRW(summary.totalValue), isPrivacyMode)}
+              총 자산: {maskValue(formatKRW(summary.total_value), isPrivacyMode)}
             </span>
-            <div className={`flex items-center gap-1 ${getProfitClass(summary.profitRate)}`}>
+            <div className={`flex items-center gap-1 ${getProfitClass(summary.profit_rate)}`}>
               <TrendIcon className="h-4 w-4" />
               <span className="font-medium">
-                {maskValue(formatPercent(summary.profitRate), isPrivacyMode)}
+                {maskValue(formatPercent(summary.profit_rate), isPrivacyMode)}
               </span>
             </div>
           </div>

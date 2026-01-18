@@ -5,16 +5,21 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
+from decimal import Decimal
+
 from app.api.deps import SupabaseDep
 from app.models.schemas import (
     AssetCreate,
     AssetUpdate,
     AssetResponse,
+    AssetsListResponse,
+    AssetsSummary,
     MeowResponse,
     TickerValidationResponse,
 )
 from app.services.asset_service import AssetService
 from app.services.finance_service import FinanceService
+from app.config import settings
 
 router = APIRouter()
 
@@ -30,15 +35,16 @@ async def validate_ticker(ticker: str):
     return TickerValidationResponse(**result)
 
 
-@router.get("", response_model=list[AssetResponse])
+@router.get("", response_model=AssetsListResponse)
 async def get_assets(
     db: SupabaseDep,
     portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID (없으면 기본 포트폴리오)"),
     include_inactive: bool = Query(False, description="비활성 자산 포함 여부"),
 ):
     """
-    자산 목록 조회 냥~ 🐱
+    자산 목록 조회 냥~ 🐱 (v0.7.0)
     yfinance로 현재가를 실시간 조회하여 평가액 계산 포함
+    summary에 총자산, 수익률 정보 포함
     """
     asset_service = AssetService(db)
     finance_service = FinanceService()
@@ -49,7 +55,25 @@ async def get_assets(
     # 실시간 가격 조회 및 계산
     enriched_assets = await finance_service.enrich_assets_with_prices(assets)
 
-    return enriched_assets
+    # 환율 조회 (summary 계산용)
+    exchange_rate = await finance_service.get_exchange_rate()
+
+    # summary 계산
+    summary_data = await asset_service.calculate_summary(
+        enriched_assets,
+        portfolio_id,
+        Decimal(str(exchange_rate))
+    )
+
+    return AssetsListResponse(
+        assets=enriched_assets,
+        summary=AssetsSummary(
+            total_value=summary_data.total_value,
+            total_principal=summary_data.total_principal,
+            total_profit=summary_data.total_profit,
+            profit_rate=summary_data.profit_rate,
+        )
+    )
 
 
 @router.get("/{asset_id}", response_model=AssetResponse)

@@ -18,6 +18,7 @@ from app.models.schemas import (
     RebalanceResponse,
     RebalanceSuggestion,
 )
+from app.config import settings
 
 
 class AssetService:
@@ -168,28 +169,35 @@ class AssetService:
         USD 자산은 전달받은 환율로 원화 환산하여 합산
 
         Args:
-            enriched_assets: 현재가가 포함된 자산 목록
+            enriched_assets: 현재가가 포함된 자산 목록 (finance_service에서 이미 원화 환산됨)
             portfolio_id: 포트폴리오 ID
-            exchange_rate: USD/KRW 환율 (없으면 기본값 1300 사용)
+            exchange_rate: USD/KRW 현재 환율 (폴백용)
         """
-        # 기본 환율 설정
-        rate = exchange_rate if exchange_rate else Decimal("1300")
+        # 기본 환율 설정 (settings에서 가져옴)
+        current_rate = exchange_rate if exchange_rate else Decimal(str(settings.default_usd_krw_rate))
 
         total_value = Decimal("0")
         total_principal = Decimal("0")
         category_totals: dict[str, dict] = {}
 
         for asset in enriched_assets:
+            # finance_service.enrich_assets_with_prices()에서 이미 원화 환산된 market_value 사용
             market_value = Decimal(str(asset.get("market_value", 0)))
             quantity = Decimal(str(asset.get("quantity", 0)))
             avg_price = Decimal(str(asset.get("average_price", 0)))
-            principal = quantity * avg_price
             currency = asset.get("currency", "KRW")
 
-            # USD 자산은 원화로 환산 냥~
+            # 원금 계산: USD 자산은 매수시점 환율 사용
             if currency == "USD":
-                market_value = market_value * rate
-                principal = principal * rate
+                # 매수시점 환율, 없으면 현재 환율로 폴백
+                purchase_rate = asset.get("purchase_exchange_rate")
+                if purchase_rate:
+                    purchase_rate = Decimal(str(purchase_rate))
+                else:
+                    purchase_rate = current_rate
+                principal = quantity * avg_price * purchase_rate
+            else:
+                principal = quantity * avg_price
 
             total_value += market_value
             total_principal += principal

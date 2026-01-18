@@ -3,7 +3,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { dashboardApi } from '@/lib/api'
-import type { RebalanceTarget, ManualHistoryEntry } from '@/types'
+import type { ManualHistoryEntry } from '@/types'
 import type { Period } from '@/components/dashboard/PeriodSelector'
 
 // Query Keys
@@ -38,21 +38,6 @@ export function useAssetHistory(limit = 30, portfolioId?: string) {
     queryKey: [...dashboardKeys.history(portfolioId), limit],
     queryFn: () => dashboardApi.getHistory(portfolioId, undefined, undefined, limit),
     staleTime: 1000 * 60 * 5, // 5분간 캐시 (히스토리는 자주 안 바뀜)
-  })
-}
-
-/**
- * 리밸런싱 계산 훅 냥~
- */
-export function useRebalanceCalculation() {
-  return useMutation({
-    mutationFn: ({
-      targets,
-      portfolioId,
-    }: {
-      targets: RebalanceTarget[]
-      portfolioId?: string
-    }) => dashboardApi.calculateRebalance(targets, portfolioId),
   })
 }
 

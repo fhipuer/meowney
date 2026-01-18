@@ -80,7 +80,8 @@ interface AllocationEditorProps {
 const generateId = () => Math.random().toString(36).substr(2, 9)
 
 export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorProps) {
-  const { data: assets } = useAssets()
+  const { data: assetsData } = useAssets()
+  const assets = assetsData?.assets
   const { data: exchangeRate } = useExchangeRate()
   const saveAllocationsMutation = useSaveAllocations()
   const saveGroupsMutation = useSaveGroups()
