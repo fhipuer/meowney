@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store/useStore'
+import { APP_VERSION } from '@/lib/version'
 
 interface NavItem {
   title: string
@@ -92,9 +93,9 @@ export function Sidebar() {
             <div className="flex items-center gap-2 text-sm">
               <Cat className="h-5 w-5 text-primary" />
               <div>
-                <p className="font-medium">Meowney v1.0</p>
+                <p className="font-medium">Meowney v{APP_VERSION}</p>
                 <p className="text-xs text-muted-foreground">
-                  냥이와 함께하는 자산관리
+                  스마트한 집사의 투자 비서
                 </p>
               </div>
             </div>

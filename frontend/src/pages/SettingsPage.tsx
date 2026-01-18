@@ -3,6 +3,7 @@
  */
 import { useState, useRef } from 'react'
 import { Moon, Sun, Cat, Eye, EyeOff, Download, Upload, FileJson, Loader2, Plus, Trash2, History, Calendar } from 'lucide-react'
+import { APP_VERSION } from '@/lib/version'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -433,7 +434,7 @@ export function SettingsPage() {
             <div>
               <h3 className="font-bold text-xl">Meowney</h3>
               <p className="text-muted-foreground">냥이 집사의 자산 관리</p>
-              <p className="text-sm text-muted-foreground">버전 1.0.0</p>
+              <p className="text-sm text-muted-foreground">버전 {APP_VERSION}</p>
             </div>
           </div>
 

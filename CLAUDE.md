@@ -146,3 +146,47 @@ types/
 | GET | `/api/v1/dashboard/summary` | 대시보드 요약 |
 | GET | `/api/v1/dashboard/history` | 자산 추이 |
 | POST | `/api/v1/dashboard/rebalance` | 리밸런싱 계산 |
+
+## 버전 관리
+
+**중요**: 버전 업데이트 시 아래 파일을 수정해야 합니다.
+
+### 버전 업데이트 방법
+1. **`frontend/package.json`** - `version` 필드 수정
+   ```json
+   "version": "0.6.1"
+   ```
+   - Vite가 빌드 시 이 버전을 `__APP_VERSION__`으로 주입
+   - UI에서 `APP_VERSION` 상수로 자동 표시됨
+
+2. **`deploy/README.md`** - 버전 및 변경 이력 업데이트
+   - 상단 "버전" 섹션 업데이트
+   - 하단 "변경 이력" 테이블에 추가
+
+### 버전 표시 위치
+- 사이드바 하단: `Meowney v{VERSION}`
+- 설정 페이지 앱 정보: `버전 {VERSION}`
+
+### 버전 관련 파일
+- `frontend/src/lib/version.ts` - 버전 상수 정의
+- `frontend/vite.config.ts` - 빌드 시 버전 주입
+
+## 커스텀 스킬
+
+### /deploy - NAS 배포
+NAS에 Docker 이미지를 빌드하고 배포합니다.
+
+```bash
+# Git Bash에서 실행
+./deploy/deploy-to-nas.sh
+```
+
+**배포 단계:**
+1. Docker 이미지 빌드 (`docker-compose build`)
+2. 이미지 압축 (`meowney-images.tar.gz`)
+3. SCP로 NAS 업로드
+4. SSH로 NAS에서 `update.sh` 실행
+
+**NAS 정보:**
+- Host: 192.168.0.9:1024
+- Path: `/volume1/homes/fhipuer/meowney/`
