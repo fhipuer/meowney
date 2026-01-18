@@ -7,7 +7,6 @@ import {
   Wallet,
   Calculator,
   Target,
-  BarChart3,
   Settings,
   Cat,
 } from 'lucide-react'
@@ -41,11 +40,6 @@ const navItems: NavItem[] = [
     title: '플랜 설정',
     href: '/rebalance/plans',
     icon: Target,
-  },
-  {
-    title: '분석',
-    href: '/analytics',
-    icon: BarChart3,
   },
   {
     title: '설정',

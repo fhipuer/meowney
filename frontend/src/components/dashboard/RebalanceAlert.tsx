@@ -46,9 +46,9 @@ export function RebalanceAlert() {
             {topAlert.direction === 'over' ? '초과' : '부족'}했습니다.
             {alerts.alerts.length > 1 && ` (외 ${alerts.alerts.length - 1}개)`}
           </p>
-          <Link to="/analytics" className="inline-block mt-2">
+          <Link to="/rebalance" className="inline-block mt-2">
             <Button variant="outline" size="sm" className="text-yellow-700 border-yellow-500/50 hover:bg-yellow-100">
-              분석 페이지에서 확인하기
+              리밸런싱 페이지에서 확인하기
             </Button>
           </Link>
         </div>

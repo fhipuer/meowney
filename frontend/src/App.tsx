@@ -9,7 +9,6 @@ import { DashboardPage } from '@/pages/DashboardPage'
 import { AssetsPage } from '@/pages/AssetsPage'
 import { RebalancePage } from '@/pages/RebalancePage'
 import { RebalancePlanPage } from '@/pages/RebalancePlanPage'
-import { AnalyticsPage } from '@/pages/AnalyticsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 
 // React Query 클라이언트 설정
@@ -32,7 +31,6 @@ function App() {
             <Route path="/assets" element={<AssetsPage />} />
             <Route path="/rebalance" element={<RebalancePage />} />
             <Route path="/rebalance/plans" element={<RebalancePlanPage />} />
-            <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>

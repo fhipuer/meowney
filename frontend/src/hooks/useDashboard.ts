@@ -12,7 +12,6 @@ export const dashboardKeys = {
   summary: (portfolioId?: string) => [...dashboardKeys.all, 'summary', portfolioId] as const,
   history: (portfolioId?: string) => [...dashboardKeys.all, 'history', portfolioId] as const,
   historyByPeriod: (period: string, portfolioId?: string) => [...dashboardKeys.all, 'history', period, portfolioId] as const,
-  benchmarkHistory: (tickers: string[], period: string) => [...dashboardKeys.all, 'benchmarkHistory', tickers, period] as const,
   manualHistory: (portfolioId?: string) => [...dashboardKeys.all, 'manualHistory', portfolioId] as const,
   exchangeRate: () => [...dashboardKeys.all, 'exchangeRate'] as const,
 }
@@ -74,20 +73,6 @@ export function useAssetHistoryByPeriod(period: Period, portfolioId?: string) {
     queryKey: dashboardKeys.historyByPeriod(period, portfolioId),
     queryFn: () => dashboardApi.getHistoryByPeriod(period, portfolioId),
     staleTime: 1000 * 60 * 5, // 5분간 캐시
-  })
-}
-
-/**
- * 벤치마크 히스토리 조회 훅 냥~ 📊
- * @param tickers - 벤치마크 티커 배열
- * @param period - 기간
- */
-export function useBenchmarkHistory(tickers: string[], period: Period, enabled = true) {
-  return useQuery({
-    queryKey: dashboardKeys.benchmarkHistory(tickers, period),
-    queryFn: () => dashboardApi.getBenchmarkHistory(tickers, period),
-    staleTime: 1000 * 60 * 10, // 10분간 캐시
-    enabled: enabled && tickers.length > 0,
   })
 }
 

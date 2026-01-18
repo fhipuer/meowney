@@ -13,9 +13,6 @@ import type {
   AssetCategory,
   MeowResponse,
   ExchangeRateResponse,
-  BenchmarkResponse,
-  BenchmarkHistoryResponse,
-  PerformanceMetrics,
   RebalanceAlertsResponse,
   GoalProgressResponse,
   TickerValidation,
@@ -148,33 +145,6 @@ export const dashboardApi = {
     return data
   },
 
-  // 벤치마크 히스토리 조회 냥~
-  getBenchmark: async (
-    ticker: string,
-    period = '3M',
-    startDate?: string,
-    endDate?: string
-  ): Promise<BenchmarkResponse> => {
-    const params = new URLSearchParams()
-    params.append('period', period)
-    if (startDate) params.append('start_date', startDate)
-    if (endDate) params.append('end_date', endDate)
-
-    const { data } = await apiClient.get<BenchmarkResponse>(
-      `/dashboard/benchmark/${ticker}?${params}`
-    )
-    return data
-  },
-
-  // 성과 지표 조회 냥~
-  getPerformance: async (portfolioId?: string): Promise<PerformanceMetrics> => {
-    const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
-    const { data } = await apiClient.get<PerformanceMetrics>(
-      `/dashboard/performance${params}`
-    )
-    return data
-  },
-
   // 리밸런싱 알림 조회 냥~
   getRebalanceAlerts: async (
     portfolioId?: string,
@@ -223,25 +193,6 @@ export const dashboardApi = {
     if (portfolioId) params.append('portfolio_id', portfolioId)
 
     const { data } = await apiClient.get<AssetHistory[]>(`/dashboard/history?${params}`)
-    return data
-  },
-
-  // 벤치마크 히스토리 조회 (DB 기반) 냥~
-  getBenchmarkHistory: async (
-    tickers: string[],
-    period = '1M',
-    startDate?: string,
-    endDate?: string
-  ): Promise<BenchmarkHistoryResponse> => {
-    const params = new URLSearchParams()
-    params.append('tickers', tickers.join(','))
-    params.append('period', period)
-    if (startDate) params.append('start_date', startDate)
-    if (endDate) params.append('end_date', endDate)
-
-    const { data } = await apiClient.get<BenchmarkHistoryResponse>(
-      `/dashboard/benchmark-history?${params}`
-    )
     return data
   },
 

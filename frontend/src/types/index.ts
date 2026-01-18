@@ -134,36 +134,6 @@ export interface ExchangeRateResponse {
   timestamp: string
 }
 
-// 벤치마크 데이터 포인트
-export interface BenchmarkDataPoint {
-  date: string
-  close: number
-  return_rate: number | null
-}
-
-// 벤치마크 응답
-export interface BenchmarkResponse {
-  ticker: string
-  name: string
-  data: BenchmarkDataPoint[]
-}
-
-// 기간별 수익률
-export interface PeriodReturn {
-  period: string
-  return_rate: number | null
-  start_value: number | null
-  end_value: number | null
-}
-
-// 성과 지표
-export interface PerformanceMetrics {
-  period_returns: PeriodReturn[]
-  max_drawdown: number | null
-  max_drawdown_period: string | null
-  current_drawdown: number | null
-}
-
 // 리밸런싱 알림
 export interface RebalanceAlert {
   category_name: string
@@ -457,26 +427,6 @@ export interface MarketIndicator {
 export interface MarketIndicatorsResponse {
   indicators: MarketIndicator[]
   timestamp: string
-}
-
-// ============================================
-// 벤치마크 히스토리 타입 (v0.6.0) 냥~
-// ============================================
-
-export interface BenchmarkHistoryDataPoint {
-  date: string
-  close: number
-  return_rate: number
-}
-
-export interface BenchmarkHistoryItem {
-  ticker: string
-  name: string
-  data: BenchmarkHistoryDataPoint[]
-}
-
-export interface BenchmarkHistoryResponse {
-  data: Record<string, BenchmarkHistoryItem>
 }
 
 // ============================================

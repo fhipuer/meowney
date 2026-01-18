@@ -219,44 +219,6 @@ class ExchangeRateResponse(BaseModel):
 
 
 # ============================================
-# Benchmark (벤치마크) 스키마
-# ============================================
-
-class BenchmarkDataPoint(BaseModel):
-    """벤치마크 데이터 포인트"""
-    date: date
-    close: Decimal
-    return_rate: Optional[float] = Field(None, description="시작점 대비 수익률 (%)")
-
-
-class BenchmarkResponse(BaseModel):
-    """벤치마크 히스토리 응답"""
-    ticker: str
-    name: str
-    data: list[BenchmarkDataPoint]
-
-
-# ============================================
-# Performance Metrics (성과 지표) 스키마
-# ============================================
-
-class PeriodReturn(BaseModel):
-    """기간별 수익률"""
-    period: str  # 1M, 3M, 6M, YTD, 1Y
-    return_rate: Optional[float] = Field(None, description="수익률 (%)")
-    start_value: Optional[Decimal] = None
-    end_value: Optional[Decimal] = None
-
-
-class PerformanceMetrics(BaseModel):
-    """성과 지표 응답"""
-    period_returns: list[PeriodReturn]
-    max_drawdown: Optional[float] = Field(None, description="최대 드로우다운 (%)")
-    max_drawdown_period: Optional[str] = Field(None, description="MDD 발생 기간")
-    current_drawdown: Optional[float] = Field(None, description="현재 드로우다운 (%)")
-
-
-# ============================================
 # Rebalance Alert (리밸런싱 알림) 스키마
 # ============================================
 
@@ -521,8 +483,3 @@ class BenchmarkHistoryRequest(BaseModel):
     end_date: Optional[date] = None
 
 
-class BenchmarkHistoryDataPoint(BaseModel):
-    """벤치마크 히스토리 데이터 포인트"""
-    date: date
-    close: Decimal
-    return_rate: float = Field(0.0, description="시작점 대비 수익률 (%)")
