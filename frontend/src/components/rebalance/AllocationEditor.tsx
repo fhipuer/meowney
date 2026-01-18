@@ -541,7 +541,8 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     onOpenChange(false)
   }
 
-  // 현재가치 계산 (개별) - USD 자산은 환율 적용하여 KRW로 변환
+  // 현재가치 계산 (개별)
+  // v0.7.0: market_value는 이미 KRW로 환산된 값 (finance_service에서 처리)
   const getCurrentValue = (item: AllocationItem): number => {
     const asset = item.matched_asset
     if (!asset) return 0
@@ -549,17 +550,11 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     const value = Number(asset.market_value)
     if (!value || !isFinite(value)) return 0
 
-    // USD 자산은 환율 적용
-    if (asset.currency === 'USD') {
-      const rate = Number(exchangeRate?.rate)
-      if (!rate || !isFinite(rate)) return value
-      const converted = value * rate
-      return isFinite(converted) ? converted : 0
-    }
     return value
   }
 
-  // 그룹 내 아이템 현재가치 계산 (KRW 변환 포함, NaN 체크)
+  // 그룹 내 아이템 현재가치 계산 (NaN 체크)
+  // v0.7.0: market_value는 이미 KRW로 환산된 값 (finance_service에서 처리)
   const getItemValueInKRW = (item: GroupItem): number => {
     const asset = item.matched_asset
     if (!asset) return 0
@@ -568,12 +563,6 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     const value = Number(asset.market_value)
     if (!value || !isFinite(value)) return 0
 
-    if (asset.currency === 'USD') {
-      const rate = Number(exchangeRate?.rate)
-      if (!rate || !isFinite(rate)) return value // 환율 없으면 원본 값 반환
-      const converted = value * rate
-      return isFinite(converted) ? converted : 0
-    }
     return value
   }
 
@@ -731,7 +720,7 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                           {alloc.matched_asset?.currency === 'USD' && exchangeRate ? (
                             <div className="text-sm text-right min-w-[90px]">
                               <div className="text-emerald-600 dark:text-emerald-400 font-medium">
-                                {formatUSD(alloc.matched_asset.market_value || 0)}
+                                {formatUSD(alloc.matched_asset.market_value_usd || 0)}
                               </div>
                               <div className="text-xs text-muted-foreground">
                                 {formatKRW(value)}
@@ -849,7 +838,7 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                             {group.items.map((item) => {
                               const isMatched = !!item.matched_asset
                               const itemValueKRW = getItemValueInKRW(item)
-                              const itemValueUSD = item.matched_asset?.market_value || 0
+                              const itemValueUSD = item.matched_asset?.market_value_usd || 0
                               const isUSD = item.matched_asset?.currency === 'USD'
 
                               return (

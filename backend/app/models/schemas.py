@@ -57,7 +57,8 @@ class AssetResponse(AssetBase):
 
     # 계산된 필드 (yfinance에서 실시간 조회)
     current_price: Optional[Decimal] = Field(None, description="현재가 (실시간)")
-    market_value: Optional[Decimal] = Field(None, description="평가금액")
+    market_value: Optional[Decimal] = Field(None, description="평가금액 (KRW)")
+    market_value_usd: Optional[Decimal] = Field(None, description="USD 자산의 달러 원본 금액")
     profit_loss: Optional[Decimal] = Field(None, description="손익금액")
     profit_rate: Optional[float] = Field(None, description="수익률 (%)")
     cost_basis_krw: Optional[Decimal] = Field(None, description="원화 환산 매입가 (USD자산용)")

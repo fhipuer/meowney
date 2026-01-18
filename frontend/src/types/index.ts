@@ -29,6 +29,7 @@ export interface Asset {
   // 계산된 필드 (API에서 반환)
   current_price: number | null
   market_value: number | null
+  market_value_usd: number | null  // USD 자산의 달러 원본 금액
   profit_loss: number | null
   profit_rate: number | null
   cost_basis_krw: number | null

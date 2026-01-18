@@ -187,6 +187,9 @@ class FinanceService:
 
                 # USD 자산인 경우 원화 환산
                 if currency == "USD":
+                    # USD 원본 금액 저장 (달러 표시용) 냥~
+                    asset_copy["market_value_usd"] = market_value
+                    # 원화 환산
                     market_value_krw = market_value * Decimal(str(current_exchange_rate))
                     # 원금도 원화 환산 (매수 시점 환율 사용)
                     purchase_rate = asset.get("purchase_exchange_rate")
