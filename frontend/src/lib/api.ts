@@ -15,6 +15,7 @@ import type {
   MeowResponse,
   ExchangeRateResponse,
   BenchmarkResponse,
+  BenchmarkHistoryResponse,
   PerformanceMetrics,
   RebalanceAlertsResponse,
   GoalProgressResponse,
@@ -31,6 +32,9 @@ import type {
   ImportResponse,
   SchemaInfo,
   MarketIndicatorsResponse,
+  ManualHistoryEntry,
+  ManualHistoryItem,
+  ManualHistoryCreateResponse,
 } from '@/types'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -220,6 +224,68 @@ export const dashboardApi = {
   // 시장 지표 조회 냥~
   getMarketIndicators: async (): Promise<MarketIndicatorsResponse> => {
     const { data } = await apiClient.get<MarketIndicatorsResponse>('/dashboard/market-indicators')
+    return data
+  },
+
+  // 자산 히스토리 조회 (기간 파라미터 지원) 냥~
+  getHistoryByPeriod: async (
+    period: string,
+    portfolioId?: string
+  ): Promise<AssetHistory[]> => {
+    const params = new URLSearchParams()
+    params.append('period', period)
+    if (portfolioId) params.append('portfolio_id', portfolioId)
+
+    const { data } = await apiClient.get<AssetHistory[]>(`/dashboard/history?${params}`)
+    return data
+  },
+
+  // 벤치마크 히스토리 조회 (DB 기반) 냥~
+  getBenchmarkHistory: async (
+    tickers: string[],
+    period = '1M',
+    startDate?: string,
+    endDate?: string
+  ): Promise<BenchmarkHistoryResponse> => {
+    const params = new URLSearchParams()
+    params.append('tickers', tickers.join(','))
+    params.append('period', period)
+    if (startDate) params.append('start_date', startDate)
+    if (endDate) params.append('end_date', endDate)
+
+    const { data } = await apiClient.get<BenchmarkHistoryResponse>(
+      `/dashboard/benchmark-history?${params}`
+    )
+    return data
+  },
+
+  // 과거 데이터 수동 입력 냥~
+  createManualHistory: async (
+    entries: ManualHistoryEntry[],
+    portfolioId?: string
+  ): Promise<ManualHistoryCreateResponse> => {
+    const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
+    const { data } = await apiClient.post<ManualHistoryCreateResponse>(
+      `/dashboard/asset-history/manual${params}`,
+      { entries }
+    )
+    return data
+  },
+
+  // 수동 입력된 과거 데이터 조회 냥~
+  getManualHistory: async (portfolioId?: string): Promise<ManualHistoryItem[]> => {
+    const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''
+    const { data } = await apiClient.get<ManualHistoryItem[]>(
+      `/dashboard/asset-history/manual${params}`
+    )
+    return data
+  },
+
+  // 자산 히스토리 삭제 냥~
+  deleteAssetHistory: async (historyId: string): Promise<MeowResponse> => {
+    const { data } = await apiClient.delete<MeowResponse>(
+      `/dashboard/asset-history/${historyId}`
+    )
     return data
   },
 }

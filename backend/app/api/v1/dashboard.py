@@ -15,11 +15,15 @@ from app.models.schemas import (
     RebalanceResponse,
     ExchangeRateResponse,
     BenchmarkResponse,
+    BenchmarkDataPoint,
+    BenchmarkHistoryDataPoint,
     PerformanceMetrics,
     PeriodReturn,
     RebalanceAlertsResponse,
     RebalanceAlert,
     GoalProgressResponse,
+    ManualHistoryCreate,
+    ManualHistoryResponse,
 )
 from app.services.asset_service import AssetService
 from app.services.finance_service import FinanceService
@@ -73,21 +77,37 @@ async def get_dashboard_summary(
 async def get_asset_history(
     db: SupabaseDep,
     portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
+    period: Optional[str] = Query(None, description="기간 (1W, 1M, 3M, 6M, 1Y)"),
     start_date: Optional[date] = Query(None, description="시작일"),
     end_date: Optional[date] = Query(None, description="종료일"),
-    limit: int = Query(30, ge=1, le=365, description="조회 개수"),
+    limit: int = Query(365, ge=1, le=365, description="조회 개수"),
 ):
     """
     자산 히스토리 조회 냥~ 🐱
     일별 자산 추이 데이터
+
+    - period 파라미터로 기간 지정 가능 (1W, 1M, 3M, 6M, 1Y)
+    - 또는 start_date/end_date로 직접 지정
     """
     asset_service = AssetService(db)
 
-    # 기본값: 최근 30일
+    # 기간 매핑 (일 수)
+    period_days = {
+        "1W": 7,
+        "1M": 30,
+        "3M": 90,
+        "6M": 180,
+        "1Y": 365,
+    }
+
+    # 기본값: 최근 1개월
     if not end_date:
         end_date = date.today()
-    if not start_date:
-        start_date = end_date - timedelta(days=limit)
+
+    if period and period in period_days:
+        start_date = end_date - timedelta(days=period_days[period])
+    elif not start_date:
+        start_date = end_date - timedelta(days=30)  # 기본 1개월
 
     history = await asset_service.get_asset_history(
         portfolio_id, start_date, end_date, limit
@@ -517,3 +537,195 @@ async def get_market_indicators():
         "indicators": results,
         "timestamp": datetime.now().isoformat()
     }
+
+
+@router.get("/benchmark-history")
+async def get_benchmark_history_from_db(
+    db: SupabaseDep,
+    tickers: str = Query(..., description="콤마로 구분된 티커 목록 (예: ^KS11,^GSPC,^IXIC)"),
+    period: Optional[str] = Query("1M", description="기간 (1W, 1M, 3M, 6M, 1Y)"),
+    start_date: Optional[date] = Query(None, description="시작일"),
+    end_date: Optional[date] = Query(None, description="종료일"),
+):
+    """
+    벤치마크 히스토리 조회 (DB 기반) 냥~ 📊
+
+    - DB에 저장된 벤치마크 데이터 조회
+    - DB에 없는 기간은 yfinance에서 조회하여 보완
+    - 시작점 대비 상대 수익률 계산
+    """
+    ticker_list = [t.strip() for t in tickers.split(",")]
+
+    # 기간 매핑
+    period_days = {
+        "1W": 7,
+        "1M": 30,
+        "3M": 90,
+        "6M": 180,
+        "1Y": 365,
+    }
+
+    if not end_date:
+        end_date = date.today()
+
+    if period and period in period_days:
+        start_date = end_date - timedelta(days=period_days[period])
+    elif not start_date:
+        start_date = end_date - timedelta(days=30)
+
+    finance_service = FinanceService()
+    benchmark_names = {
+        "^KS11": "KOSPI",
+        "^GSPC": "S&P 500",
+        "^IXIC": "NASDAQ",
+    }
+
+    result = {}
+
+    for ticker in ticker_list:
+        # 1. DB에서 조회
+        db_response = db.table("benchmark_history").select("*").eq(
+            "ticker", ticker
+        ).gte(
+            "snapshot_date", start_date.isoformat()
+        ).lte(
+            "snapshot_date", end_date.isoformat()
+        ).order("snapshot_date").execute()
+
+        db_data = db_response.data if db_response.data else []
+
+        # 2. DB 데이터가 부족하면 yfinance에서 보완
+        if len(db_data) < 5:  # 데이터가 5일 미만이면 yfinance 사용
+            yf_result = await finance_service.get_benchmark_history(ticker, start_date, end_date)
+            data = yf_result.get("data", [])
+        else:
+            # DB 데이터 사용 - 상대 수익률 계산
+            data = []
+            first_close = None
+
+            for row in db_data:
+                close = float(row["close_price"])
+                if first_close is None:
+                    first_close = close
+
+                return_rate = ((close - first_close) / first_close) * 100 if first_close else 0
+
+                data.append({
+                    "date": row["snapshot_date"],
+                    "close": Decimal(str(close)),
+                    "return_rate": round(return_rate, 2)
+                })
+
+        result[ticker] = {
+            "ticker": ticker,
+            "name": benchmark_names.get(ticker, ticker),
+            "data": data
+        }
+
+    return {"data": result}
+
+
+@router.post("/asset-history/manual")
+async def create_manual_history(
+    db: SupabaseDep,
+    request: ManualHistoryCreate,
+    portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
+):
+    """
+    과거 데이터 수동 입력 냥~ 📝
+
+    여러 날짜의 총자산/투자원금 데이터를 한 번에 입력
+    기존 데이터가 있으면 덮어쓰기
+    """
+    asset_service = AssetService(db)
+
+    # 포트폴리오 ID 확인
+    if not portfolio_id:
+        portfolios = await asset_service.get_all_portfolio_ids()
+        portfolio_id = portfolios[0] if portfolios else None
+
+    if not portfolio_id:
+        return {"success": False, "message": "포트폴리오가 없다옹! 🙀"}
+
+    created_entries = []
+
+    for entry in request.entries:
+        total_profit = entry.total_value - entry.total_principal
+        profit_rate = float((total_profit / entry.total_principal) * 100) if entry.total_principal > 0 else 0.0
+
+        # upsert로 저장 (기존 데이터 덮어쓰기)
+        result = db.table("asset_history").upsert(
+            {
+                "portfolio_id": str(portfolio_id),
+                "snapshot_date": entry.snapshot_date.isoformat(),
+                "total_value": float(entry.total_value),
+                "total_principal": float(entry.total_principal),
+                "total_profit": float(total_profit),
+                "profit_rate": profit_rate,
+                "category_breakdown": None,  # 수동 입력은 카테고리 없음
+            },
+            on_conflict="portfolio_id,snapshot_date"
+        ).execute()
+
+        if result.data:
+            created_entries.append(result.data[0])
+
+    return {
+        "success": True,
+        "message": f"냥~ {len(created_entries)}개의 데이터가 저장되었다옹! 🐱",
+        "entries": created_entries
+    }
+
+
+@router.get("/asset-history/manual", response_model=list[ManualHistoryResponse])
+async def get_manual_history(
+    db: SupabaseDep,
+    portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
+):
+    """
+    수동 입력된 과거 데이터 조회 냥~ 📋
+    """
+    asset_service = AssetService(db)
+
+    # 포트폴리오 ID 확인
+    if not portfolio_id:
+        portfolios = await asset_service.get_all_portfolio_ids()
+        portfolio_id = portfolios[0] if portfolios else None
+
+    if not portfolio_id:
+        return []
+
+    result = db.table("asset_history").select("*").eq(
+        "portfolio_id", str(portfolio_id)
+    ).order("snapshot_date", desc=True).execute()
+
+    return [
+        ManualHistoryResponse(
+            id=row["id"],
+            portfolio_id=row["portfolio_id"],
+            snapshot_date=row["snapshot_date"],
+            total_value=Decimal(str(row["total_value"])),
+            total_principal=Decimal(str(row["total_principal"])),
+            total_profit=Decimal(str(row["total_profit"])),
+            profit_rate=row.get("profit_rate"),
+            is_manual=row.get("category_breakdown") is None,  # 카테고리 없으면 수동 입력
+            created_at=row["created_at"]
+        )
+        for row in (result.data or [])
+    ]
+
+
+@router.delete("/asset-history/{history_id}")
+async def delete_asset_history(
+    db: SupabaseDep,
+    history_id: UUID,
+):
+    """
+    자산 히스토리 삭제 냥~ 🗑️
+    """
+    result = db.table("asset_history").delete().eq("id", str(history_id)).execute()
+
+    if result.data:
+        return {"success": True, "message": "냥~ 삭제 완료다옹! 🐱"}
+    else:
+        return {"success": False, "message": "삭제할 데이터가 없다옹! 🙀"}

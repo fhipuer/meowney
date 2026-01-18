@@ -7,11 +7,10 @@ import { AssetTrendChart } from '@/components/dashboard/AssetTrendChart'
 import { RebalanceAlert } from '@/components/dashboard/RebalanceAlert'
 import { GoalProgress } from '@/components/dashboard/GoalProgress'
 import { MarketIndicators } from '@/components/dashboard/MarketIndicators'
-import { useDashboardSummary, useAssetHistory } from '@/hooks/useDashboard'
+import { useDashboardSummary } from '@/hooks/useDashboard'
 
 export function DashboardPage() {
   const { data: summary, isLoading: summaryLoading } = useDashboardSummary()
-  const { data: history, isLoading: historyLoading } = useAssetHistory()
 
   return (
     <div className="space-y-6">
@@ -39,7 +38,8 @@ export function DashboardPage() {
           isLoading={summaryLoading}
           totalValueFromApi={summary?.total_value ? Number(summary.total_value) : undefined}
         />
-        <AssetTrendChart history={history} isLoading={historyLoading} />
+        {/* v0.6.0: 자체 데이터 로딩 및 기간 선택 지원 */}
+        <AssetTrendChart />
       </div>
 
       {/* 목표 진행률 (목표가 설정된 경우에만 표시) */}

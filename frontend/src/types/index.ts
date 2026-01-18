@@ -465,3 +465,51 @@ export interface MarketIndicatorsResponse {
   indicators: MarketIndicator[]
   timestamp: string
 }
+
+// ============================================
+// 벤치마크 히스토리 타입 (v0.6.0) 냥~
+// ============================================
+
+export interface BenchmarkHistoryDataPoint {
+  date: string
+  close: number
+  return_rate: number
+}
+
+export interface BenchmarkHistoryItem {
+  ticker: string
+  name: string
+  data: BenchmarkHistoryDataPoint[]
+}
+
+export interface BenchmarkHistoryResponse {
+  data: Record<string, BenchmarkHistoryItem>
+}
+
+// ============================================
+// 과거 데이터 수동 입력 타입 (v0.6.0) 냥~
+// ============================================
+
+export interface ManualHistoryEntry {
+  snapshot_date: string
+  total_value: number
+  total_principal: number
+}
+
+export interface ManualHistoryItem {
+  id: string
+  portfolio_id: string
+  snapshot_date: string
+  total_value: number
+  total_principal: number
+  total_profit: number
+  profit_rate: number | null
+  is_manual: boolean
+  created_at: string
+}
+
+export interface ManualHistoryCreateResponse {
+  success: boolean
+  message: string
+  entries: ManualHistoryItem[]
+}

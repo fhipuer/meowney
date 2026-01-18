@@ -460,3 +460,54 @@ class AssetRebalanceResponse(BaseModel):
     total_value: Decimal
     suggestions: list[AssetRebalanceSuggestion]
     group_suggestions: list[GroupRebalanceSuggestion] = []  # 그룹 제안 냥~
+
+
+# ============================================
+# Manual Asset History (과거 데이터 수동 입력) 스키마
+# ============================================
+
+class ManualHistoryEntry(BaseModel):
+    """과거 데이터 수동 입력 항목"""
+    snapshot_date: date
+    total_value: Decimal = Field(..., ge=0, description="총 자산")
+    total_principal: Decimal = Field(..., ge=0, description="투자 원금")
+
+
+class ManualHistoryCreate(BaseModel):
+    """과거 데이터 수동 입력 요청"""
+    entries: list[ManualHistoryEntry]
+
+
+class ManualHistoryResponse(BaseModel):
+    """과거 데이터 조회 응답"""
+    id: UUID
+    portfolio_id: UUID
+    snapshot_date: date
+    total_value: Decimal
+    total_principal: Decimal
+    total_profit: Decimal
+    profit_rate: Optional[float]
+    is_manual: bool = True
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Benchmark History (벤치마크 히스토리 - DB 기반) 스키마
+# ============================================
+
+class BenchmarkHistoryRequest(BaseModel):
+    """벤치마크 히스토리 조회 요청"""
+    tickers: list[str] = Field(..., description="티커 목록 (예: ['^KS11', '^GSPC', '^IXIC'])")
+    period: Optional[str] = Field("1M", description="기간 (1W, 1M, 3M, 6M, 1Y)")
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+
+class BenchmarkHistoryDataPoint(BaseModel):
+    """벤치마크 히스토리 데이터 포인트"""
+    date: date
+    close: Decimal
+    return_rate: float = Field(0.0, description="시작점 대비 수익률 (%)")

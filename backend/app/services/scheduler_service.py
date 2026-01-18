@@ -1,9 +1,9 @@
 """
 Scheduler Service - 백그라운드 작업 스케줄러 냥~ 🐱
-매일 밤 11시에 자산 스냅샷 저장
+매일 밤 11시에 자산 스냅샷 및 벤치마크 데이터 저장
 """
 import pytz
-from datetime import datetime
+from datetime import datetime, date
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -11,6 +11,14 @@ from app.config import settings
 from app.db.supabase import get_supabase_client
 from app.services.asset_service import AssetService
 from app.services.finance_service import FinanceService
+
+
+# 벤치마크 티커 목록 냥~
+BENCHMARK_TICKERS = [
+    "^KS11",   # KOSPI
+    "^GSPC",   # S&P 500
+    "^IXIC",   # NASDAQ
+]
 
 
 # 스케줄러 인스턴스
@@ -91,10 +99,10 @@ def start_scheduler():
     )
 
     scheduler.add_job(
-        take_daily_snapshot,
+        take_all_snapshots,
         trigger=trigger,
         id="daily_snapshot",
-        name="일일 자산 스냅샷 냥~",
+        name="일일 자산/벤치마크 스냅샷 냥~",
         replace_existing=True,
     )
 
@@ -118,3 +126,56 @@ async def run_snapshot_now():
     """
     print("🖐️ 수동 스냅샷 실행 냥~")
     await take_daily_snapshot()
+
+
+async def take_benchmark_snapshot():
+    """
+    벤치마크 일별 종가 스냅샷 저장 냥~ 📊
+
+    KOSPI, S&P 500, NASDAQ의 당일 종가를 benchmark_history 테이블에 저장
+    """
+    print(f"📊 [{datetime.now()}] 벤치마크 스냅샷 시작 냥~!")
+
+    try:
+        db = get_supabase_client()
+        finance_service = FinanceService()
+
+        today = date.today()
+
+        for ticker in BENCHMARK_TICKERS:
+            try:
+                # 현재 종가 조회
+                result = await finance_service.get_stock_price(ticker)
+
+                if result.get("valid") and result.get("current_price"):
+                    close_price = float(result["current_price"])
+
+                    # DB에 저장 (upsert)
+                    db.table("benchmark_history").upsert(
+                        {
+                            "ticker": ticker,
+                            "snapshot_date": today.isoformat(),
+                            "close_price": close_price,
+                        },
+                        on_conflict="ticker,snapshot_date"
+                    ).execute()
+
+                    print(f"✅ {ticker} 종가 저장: {close_price:,.2f}")
+                else:
+                    print(f"⚠️ {ticker} 가격 조회 실패 냥")
+
+            except Exception as e:
+                print(f"❌ {ticker} 스냅샷 실패 냥: {e}")
+
+        print(f"🎉 [{datetime.now()}] 벤치마크 스냅샷 완료 냥~!")
+
+    except Exception as e:
+        print(f"🙀 벤치마크 스냅샷 전체 실패 냥: {e}")
+
+
+async def take_all_snapshots():
+    """
+    자산 스냅샷 + 벤치마크 스냅샷 모두 실행 냥~
+    """
+    await take_daily_snapshot()
+    await take_benchmark_snapshot()

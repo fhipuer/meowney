@@ -253,8 +253,7 @@ GROUP BY p.id, p.name;
 -- );
 
 -- 배분 그룹 테이블 (신규)
-/*
-CREATE TABLE allocation_groups (
+CREATE TABLE IF NOT EXISTS allocation_groups (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     plan_id UUID NOT NULL REFERENCES rebalance_plans(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
@@ -264,7 +263,7 @@ CREATE TABLE allocation_groups (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE TABLE allocation_group_items (
+CREATE TABLE IF NOT EXISTS allocation_group_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     group_id UUID NOT NULL REFERENCES allocation_groups(id) ON DELETE CASCADE,
     asset_id UUID REFERENCES assets(id) ON DELETE SET NULL,
@@ -277,10 +276,32 @@ CREATE TABLE allocation_group_items (
     )
 );
 
-CREATE INDEX idx_allocation_groups_plan ON allocation_groups(plan_id);
-CREATE INDEX idx_allocation_group_items_group ON allocation_group_items(group_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_groups_plan ON allocation_groups(plan_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_group_items_group ON allocation_group_items(group_id);
 
-CREATE TRIGGER update_allocation_groups_updated_at
-    BEFORE UPDATE ON allocation_groups
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-*/
+-- 트리거가 없으면 생성
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_allocation_groups_updated_at') THEN
+        CREATE TRIGGER update_allocation_groups_updated_at
+            BEFORE UPDATE ON allocation_groups
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END
+$$;
+
+-- ============================================
+-- 벤치마크 히스토리 테이블 (v0.6.0)
+-- KOSPI, S&P 500, NASDAQ 일별 종가 저장 냥~
+-- ============================================
+CREATE TABLE IF NOT EXISTS benchmark_history (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    ticker VARCHAR(20) NOT NULL,        -- '^KS11' (KOSPI), '^GSPC' (S&P 500), '^IXIC' (NASDAQ)
+    snapshot_date DATE NOT NULL,
+    close_price DECIMAL(15, 2) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    CONSTRAINT unique_benchmark_ticker_date UNIQUE (ticker, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_benchmark_history_ticker_date ON benchmark_history(ticker, snapshot_date);
