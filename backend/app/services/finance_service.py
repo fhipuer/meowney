@@ -181,14 +181,30 @@ class FinanceService:
                 # 티커가 있는 자산: 현재가 × 수량
                 current_price = Decimal(str(asset_copy["current_price"]))
                 market_value = current_price * quantity
-                principal = avg_price * quantity
-                profit_loss = market_value - principal
 
-                asset_copy["market_value"] = market_value
+                # USD 자산인 경우 원화 환산
+                if currency == "USD":
+                    market_value_krw = market_value * Decimal(str(current_exchange_rate))
+                    # 원금도 원화 환산 (매수 시점 환율 사용)
+                    purchase_rate = asset.get("purchase_exchange_rate")
+                    if purchase_rate:
+                        purchase_rate = Decimal(str(purchase_rate))
+                    else:
+                        purchase_rate = Decimal(str(current_exchange_rate))
+                    principal_krw = avg_price * quantity * purchase_rate
+                    profit_loss = market_value_krw - principal_krw
+                    asset_copy["market_value"] = market_value_krw
+                else:
+                    principal = avg_price * quantity
+                    profit_loss = market_value - principal
+                    asset_copy["market_value"] = market_value
+
                 asset_copy["profit_loss"] = profit_loss
 
-                if principal > 0:
-                    asset_copy["profit_rate"] = float((profit_loss / principal) * 100)
+                # 수익률은 원금 대비 계산
+                principal_for_rate = principal_krw if currency == "USD" else principal
+                if principal_for_rate > 0:
+                    asset_copy["profit_rate"] = float((profit_loss / principal_for_rate) * 100)
                 else:
                     asset_copy["profit_rate"] = 0.0
             elif asset.get("current_value"):
