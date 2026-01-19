@@ -29,7 +29,7 @@ export function Header() {
             Meowney
           </span>
           <span className="text-xs text-muted-foreground hidden sm:inline-block">
-            냥이 자산관리
+            스마트한 집사의 투자 비서
           </span>
         </div>
 
