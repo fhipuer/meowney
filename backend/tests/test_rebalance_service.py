@@ -1,0 +1,354 @@
+"""
+RebalanceService 단위 테스트 냥~ 🐱
+v0.7.2: 그룹 매칭 및 current_value 자산 처리 테스트
+"""
+import pytest
+from decimal import Decimal
+from unittest.mock import MagicMock, AsyncMock, patch
+from uuid import UUID
+
+from app.services.rebalance_service import RebalanceService
+
+
+class TestMatchItemToAsset:
+    """match_item_to_asset 메서드 테스트"""
+
+    @pytest.fixture
+    def service(self):
+        """RebalanceService 인스턴스 (DB 모킹)"""
+        with patch("app.services.rebalance_service.get_supabase_client"):
+            return RebalanceService()
+
+    def test_match_by_asset_id_string(self, service):
+        """asset_id (문자열)로 매칭 테스트 냥~"""
+        assets = [
+            {"id": "asset-123", "name": "삼성전자", "ticker": "005930.KS"},
+            {"id": "asset-456", "name": "현금", "ticker": None},
+        ]
+
+        item = {"asset_id": "asset-123"}
+        matched = service.match_item_to_asset(item, assets)
+
+        assert matched is not None
+        assert matched["id"] == "asset-123"
+        assert matched["name"] == "삼성전자"
+
+    def test_match_by_asset_id_uuid(self, service):
+        """
+        버그 #2 핵심 테스트: UUID 타입의 asset_id 매칭 냥~
+
+        assets 리스트의 id가 UUID 객체일 때도 매칭되어야 함
+        """
+        uuid_str = "550e8400-e29b-41d4-a716-446655440000"
+        uuid_obj = UUID(uuid_str)
+
+        assets = [
+            {"id": uuid_obj, "name": "현금", "ticker": None, "current_value": 5000000},
+        ]
+
+        # item의 asset_id는 문자열
+        item = {"asset_id": uuid_str}
+        matched = service.match_item_to_asset(item, assets)
+
+        assert matched is not None, "UUID 자산이 매칭되지 않음!"
+        assert matched["name"] == "현금"
+
+    def test_match_by_ticker(self, service):
+        """ticker로 매칭 테스트 냥~"""
+        assets = [
+            {"id": "asset-1", "name": "KODEX 200", "ticker": "069500.KS"},
+            {"id": "asset-2", "name": "현금", "ticker": None},
+        ]
+
+        item = {"ticker": "069500.KS"}
+        matched = service.match_item_to_asset(item, assets)
+
+        assert matched is not None
+        assert matched["id"] == "asset-1"
+
+    def test_match_by_alias(self, service):
+        """alias로 매칭 테스트 냥~"""
+        assets = [
+            {"id": "asset-1", "name": "삼성전자 보통주", "ticker": "005930.KS"},
+        ]
+
+        item = {"alias": "삼성전자"}
+        matched = service.match_item_to_asset(item, assets)
+
+        assert matched is not None
+        assert matched["id"] == "asset-1"
+
+    def test_no_match(self, service):
+        """매칭 실패 테스트 냥~"""
+        assets = [
+            {"id": "asset-1", "name": "삼성전자", "ticker": "005930.KS"},
+        ]
+
+        item = {"asset_id": "nonexistent", "ticker": "INVALID"}
+        matched = service.match_item_to_asset(item, assets)
+
+        assert matched is None
+
+
+class TestGetAssetValues:
+    """_get_asset_values 메서드 테스트"""
+
+    @pytest.fixture
+    def service(self):
+        """RebalanceService 인스턴스"""
+        with patch("app.services.rebalance_service.get_supabase_client"):
+            svc = RebalanceService()
+            svc.finance_service = MagicMock()
+            return svc
+
+    @pytest.mark.asyncio
+    async def test_current_value_asset_included(self, service):
+        """
+        버그 #2 재현: current_value 자산이 asset_values에 올바르게 포함되는지 테스트 냥~
+        """
+        assets = [
+            {
+                "id": "cash-1",
+                "name": "비상금",
+                "ticker": None,
+                "quantity": 0,
+                "average_price": 0,
+                "current_value": 5000000,
+                "currency": "KRW",
+            },
+        ]
+
+        # Mock finance service (현금은 ticker가 없어서 호출 안됨)
+        service.finance_service.get_stock_price = AsyncMock(return_value={})
+        service.finance_service.get_exchange_rate = AsyncMock(return_value=1300.0)
+
+        total_value, asset_values = await service._get_asset_values(assets)
+
+        assert total_value == Decimal("5000000")
+        assert "cash-1" in asset_values
+        assert asset_values["cash-1"]["market_value"] == Decimal("5000000")
+
+    @pytest.mark.asyncio
+    async def test_mixed_assets_total_value(self, service):
+        """
+        주식 + 현금 혼합 자산의 총 가치 계산 테스트 냥~
+        """
+        assets = [
+            {
+                "id": "stock-1",
+                "name": "삼성전자",
+                "ticker": "005930.KS",
+                "quantity": 100,
+                "average_price": 50000,
+                "current_value": None,
+                "currency": "KRW",
+            },
+            {
+                "id": "cash-1",
+                "name": "비상금",
+                "ticker": None,
+                "quantity": 0,
+                "average_price": 0,
+                "current_value": 5000000,
+                "currency": "KRW",
+            },
+        ]
+
+        # Mock: 삼성전자 현재가 50,000원
+        async def mock_get_price(ticker):
+            if ticker == "005930.KS":
+                return {"current_price": 50000, "valid": True}
+            return {}
+
+        service.finance_service.get_stock_price = mock_get_price
+        service.finance_service.get_exchange_rate = AsyncMock(return_value=1300.0)
+
+        total_value, asset_values = await service._get_asset_values(assets)
+
+        # 주식: 50,000 × 100 = 5,000,000
+        # 현금: 5,000,000
+        # 총: 10,000,000
+        assert total_value == Decimal("10000000")
+        assert asset_values["stock-1"]["market_value"] == Decimal("5000000")
+        assert asset_values["cash-1"]["market_value"] == Decimal("5000000")
+
+    @pytest.mark.asyncio
+    async def test_uuid_key_consistency(self, service):
+        """
+        asset_values 딕셔너리 키 일관성 테스트 냥~
+
+        버그: asset["id"]가 UUID 객체면 나중에 문자열로 조회할 때 실패
+        """
+        uuid_obj = UUID("550e8400-e29b-41d4-a716-446655440000")
+
+        assets = [
+            {
+                "id": uuid_obj,  # UUID 객체
+                "name": "현금",
+                "ticker": None,
+                "quantity": 0,
+                "average_price": 0,
+                "current_value": 3000000,
+                "currency": "KRW",
+            },
+        ]
+
+        service.finance_service.get_stock_price = AsyncMock(return_value={})
+        service.finance_service.get_exchange_rate = AsyncMock(return_value=1300.0)
+
+        total_value, asset_values = await service._get_asset_values(assets)
+
+        # UUID 객체가 키로 사용됨
+        assert uuid_obj in asset_values
+        assert asset_values[uuid_obj]["market_value"] == Decimal("3000000")
+
+
+class TestCalculateGroupSuggestion:
+    """_calculate_group_suggestion 메서드 테스트"""
+
+    @pytest.fixture
+    def service(self):
+        """RebalanceService 인스턴스"""
+        with patch("app.services.rebalance_service.get_supabase_client"):
+            svc = RebalanceService()
+            svc.finance_service = MagicMock()
+            return svc
+
+    @pytest.mark.asyncio
+    async def test_group_with_current_value_asset(self, service):
+        """
+        버그 #2 핵심 테스트: 그룹에 현금/금 등 current_value 자산이 포함될 때 냥~
+
+        시나리오:
+        - 그룹: "안전자산" (목표 30%)
+        - 그룹 아이템: 현금 (asset_id로 연결)
+        - 현금 market_value: 3,000,000원
+        - 총 자산: 10,000,000원
+        - 기대: 그룹 현재 비율 30%, 현재 가치 3,000,000원
+        """
+        assets = [
+            {
+                "id": "stock-1",
+                "name": "주식",
+                "ticker": "005930.KS",
+                "quantity": 100,
+                "average_price": 70000,
+                "current_value": None,
+                "currency": "KRW",
+            },
+            {
+                "id": "cash-1",
+                "name": "비상금",
+                "ticker": None,
+                "quantity": 0,
+                "average_price": 0,
+                "current_value": 3000000,  # 현금 300만원
+                "currency": "KRW",
+            },
+        ]
+
+        # 자산 가치 딕셔너리 (주식 700만 + 현금 300만 = 총 1000만)
+        asset_values = {
+            "stock-1": {"asset": assets[0], "market_value": Decimal("7000000"), "current_price": Decimal("70000")},
+            "cash-1": {"asset": assets[1], "market_value": Decimal("3000000"), "current_price": None},
+        }
+        total_value = Decimal("10000000")
+
+        group = {
+            "id": "group-1",
+            "name": "안전자산",
+            "target_percentage": 30.0,
+            "items": [
+                {"asset_id": "cash-1"},  # 현금을 asset_id로 연결
+            ],
+        }
+
+        suggestion = await service._calculate_group_suggestion(
+            group, assets, asset_values, total_value
+        )
+
+        # 핵심 검증: 현금이 포함된 그룹의 현재 가치
+        assert suggestion["current_value"] == Decimal("3000000"), \
+            f"그룹 현재 가치가 {suggestion['current_value']}원 (기대: 3,000,000원)"
+        assert suggestion["current_percentage"] == 30.0, \
+            f"그룹 현재 비율이 {suggestion['current_percentage']}% (기대: 30%)"
+
+    @pytest.mark.asyncio
+    async def test_group_item_not_matched(self, service):
+        """그룹 아이템이 매칭되지 않을 때 테스트 냥~"""
+        assets = [
+            {"id": "stock-1", "name": "삼성전자", "ticker": "005930.KS"},
+        ]
+
+        asset_values = {
+            "stock-1": {"asset": assets[0], "market_value": Decimal("10000000"), "current_price": Decimal("50000")},
+        }
+        total_value = Decimal("10000000")
+
+        group = {
+            "id": "group-1",
+            "name": "안전자산",
+            "target_percentage": 30.0,
+            "items": [
+                {"asset_id": "nonexistent-asset"},  # 존재하지 않는 자산
+            ],
+        }
+
+        suggestion = await service._calculate_group_suggestion(
+            group, assets, asset_values, total_value
+        )
+
+        # 매칭 실패 시 0원
+        assert suggestion["current_value"] == Decimal("0")
+        assert suggestion["items"][0]["is_matched"] is False
+
+
+class TestCalculateAllocationSuggestion:
+    """_calculate_allocation_suggestion 메서드 테스트"""
+
+    @pytest.fixture
+    def service(self):
+        """RebalanceService 인스턴스"""
+        with patch("app.services.rebalance_service.get_supabase_client"):
+            svc = RebalanceService()
+            svc.finance_service = MagicMock()
+            svc.finance_service.get_exchange_rate = AsyncMock(return_value=1300.0)
+            return svc
+
+    @pytest.mark.asyncio
+    async def test_allocation_with_current_value_asset(self, service):
+        """
+        current_value 자산의 개별 배분 제안 테스트 냥~
+        """
+        assets = [
+            {
+                "id": "cash-1",
+                "name": "비상금",
+                "ticker": None,
+                "quantity": 0,
+                "average_price": 0,
+                "current_value": 2000000,
+                "currency": "KRW",
+            },
+        ]
+
+        asset_values = {
+            "cash-1": {"asset": assets[0], "market_value": Decimal("2000000"), "current_price": None},
+        }
+        total_value = Decimal("10000000")
+
+        alloc = {
+            "asset_id": "cash-1",
+            "target_percentage": 30.0,
+        }
+
+        suggestion = await service._calculate_allocation_suggestion(
+            alloc, assets, asset_values, total_value
+        )
+
+        # 현재 가치 200만원, 목표 300만원 (30%)
+        assert suggestion["current_value"] == Decimal("2000000")
+        assert suggestion["current_percentage"] == 20.0  # 2,000,000 / 10,000,000 * 100
+        assert suggestion["target_percentage"] == 30.0
+        assert suggestion["suggested_amount"] == Decimal("1000000")  # 100만원 추가 필요
+        assert suggestion["is_matched"] is True

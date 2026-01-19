@@ -223,3 +223,291 @@ class TestCalculateSummary:
         allocations_dict = {a.category_name: a for a in summary.allocations}
         assert allocations_dict["국내ETF"].percentage == pytest.approx(43.48, rel=0.01)
         assert allocations_dict["해외ETF"].percentage == pytest.approx(56.52, rel=0.01)
+
+    @pytest.mark.asyncio
+    async def test_current_value_asset_in_summary(self, service):
+        """
+        current_value 자산(현금)이 대시보드 요약에 올바르게 포함되는지 확인 냥~
+
+        시나리오:
+        - 주식: market_value = 5,000,000 (50%)
+        - 현금: market_value = 5,000,000 (50%)
+        - 총 자산: 10,000,000
+        """
+        enriched_assets = [
+            {
+                "market_value": 5000000,  # 이미 계산된 평가금액
+                "quantity": 100,
+                "average_price": 50000,
+                "currency": "KRW",
+                "category_name": "국내주식",
+                "category_color": "#3b82f6",
+                "category_id": None,  # UUID 형식이 필요하므로 None 사용
+            },
+            {
+                "market_value": 5000000,  # 현금 (current_value에서 복사됨)
+                "quantity": 0,  # 현금은 수량 0
+                "average_price": 0,  # 현금은 매입가 0
+                "currency": "KRW",
+                "category_name": "현금",
+                "category_color": "#22c55e",
+                "category_id": None,  # UUID 형식이 필요하므로 None 사용
+            },
+        ]
+
+        summary = await service.calculate_summary(enriched_assets)
+
+        # 총 자산가치 검증
+        assert summary.total_value == Decimal("10000000")
+
+        # 카테고리별 배분 검증
+        assert len(summary.allocations) == 2
+
+        allocations_dict = {a.category_name: a for a in summary.allocations}
+
+        # 주식 50%, 현금 50%
+        assert allocations_dict["국내주식"].percentage == 50.0
+        assert allocations_dict["현금"].percentage == 50.0
+        assert allocations_dict["현금"].market_value == Decimal("5000000")
+
+    @pytest.mark.asyncio
+    async def test_zero_quantity_current_value_asset(self, service):
+        """
+        quantity=0, average_price=0인 현금 자산의 원금 처리 확인 냥~
+
+        현금은 수량/매입가가 없으므로 원금 = 0 (손익계산 제외)
+        """
+        enriched_assets = [
+            {
+                "market_value": 10000000,  # CMA 1천만원
+                "quantity": 0,
+                "average_price": 0,
+                "currency": "KRW",
+                "category_name": "현금",
+                "category_color": "#22c55e",
+                "category_id": None,
+            },
+        ]
+
+        summary = await service.calculate_summary(enriched_assets)
+
+        # 총 자산가치는 1천만원
+        assert summary.total_value == Decimal("10000000")
+        # 원금은 0 (수량 × 매입가)
+        assert summary.total_principal == Decimal("0")
+        # 수익은 계산 불가 (0으로 나누기 방지)
+        assert summary.profit_rate == 0.0
+
+    @pytest.mark.asyncio
+    async def test_mixed_stock_and_cash_profit_calculation(self, service):
+        """
+        주식과 현금이 혼합된 포트폴리오의 수익률 계산 확인 냥~
+        """
+        enriched_assets = [
+            {
+                "market_value": 6000000,  # 주식 평가금액 600만원
+                "quantity": 100,
+                "average_price": 50000,  # 원금 500만원
+                "currency": "KRW",
+                "category_name": "국내주식",
+                "category_color": "#3b82f6",
+                "category_id": None,
+            },
+            {
+                "market_value": 4000000,  # 현금 400만원
+                "quantity": 0,
+                "average_price": 0,
+                "currency": "KRW",
+                "category_name": "현금",
+                "category_color": "#22c55e",
+                "category_id": None,
+            },
+        ]
+
+        summary = await service.calculate_summary(enriched_assets)
+
+        # 총 자산: 600만 + 400만 = 1000만
+        assert summary.total_value == Decimal("10000000")
+        # 원금: 주식만 계산 = 500만
+        assert summary.total_principal == Decimal("5000000")
+        # 수익: 1000만 - 500만 = 500만
+        assert summary.total_profit == Decimal("5000000")
+        # 수익률: 500만 / 500만 × 100 = 100%
+        assert summary.profit_rate == 100.0
+
+
+class TestEdgeCases:
+    """엣지 케이스 테스트 냥~ 🐱"""
+
+    @pytest.fixture
+    def mock_db(self):
+        """Mock Supabase client"""
+        return MagicMock()
+
+    @pytest.fixture
+    def service(self, mock_db):
+        """AssetService 인스턴스"""
+        return AssetService(mock_db)
+
+    @pytest.mark.asyncio
+    async def test_all_cash_portfolio(self, service):
+        """현금만 있는 포트폴리오 처리 확인"""
+        enriched_assets = [
+            {
+                "market_value": 5000000,
+                "quantity": 0,
+                "average_price": 0,
+                "currency": "KRW",
+                "category_name": "현금",
+                "category_color": "#22c55e",
+                "category_id": None,
+            },
+            {
+                "market_value": 3000000,
+                "quantity": 0,
+                "average_price": 0,
+                "currency": "KRW",
+                "category_name": "현금",
+                "category_color": "#22c55e",
+                "category_id": None,
+            },
+        ]
+
+        summary = await service.calculate_summary(enriched_assets)
+
+        assert summary.total_value == Decimal("8000000")
+        assert summary.total_principal == Decimal("0")
+        assert summary.profit_rate == 0.0
+        # 같은 카테고리는 합쳐져야 함
+        assert len(summary.allocations) == 1
+        assert summary.allocations[0].percentage == 100.0
+
+    @pytest.mark.asyncio
+    async def test_very_small_values(self, service):
+        """매우 작은 금액 처리 확인 (소수점 정밀도)"""
+        enriched_assets = [
+            {
+                "market_value": 0.01,  # 1원 미만
+                "quantity": 0.001,
+                "average_price": 10,
+                "currency": "KRW",
+                "category_name": "테스트",
+                "category_color": "#000000",
+                "category_id": None,
+            },
+        ]
+
+        summary = await service.calculate_summary(enriched_assets)
+
+        assert summary.total_value == Decimal("0.01")
+        assert summary.asset_count == 1
+
+    @pytest.mark.asyncio
+    async def test_very_large_values(self, service):
+        """매우 큰 금액 처리 확인 (억 단위)"""
+        enriched_assets = [
+            {
+                "market_value": 100000000000,  # 1000억
+                "quantity": 1000000,
+                "average_price": 100000,
+                "currency": "KRW",
+                "category_name": "대형주",
+                "category_color": "#000000",
+                "category_id": None,
+            },
+        ]
+
+        summary = await service.calculate_summary(enriched_assets)
+
+        assert summary.total_value == Decimal("100000000000")
+        assert summary.total_principal == Decimal("100000000000")
+
+    @pytest.mark.asyncio
+    async def test_negative_profit(self, service):
+        """손실이 발생한 경우 음수 수익률 확인"""
+        enriched_assets = [
+            {
+                "market_value": 800000,  # 현재 80만원
+                "quantity": 10,
+                "average_price": 100000,  # 매입가 100만원
+                "currency": "KRW",
+                "category_name": "주식",
+                "category_color": "#000000",
+                "category_id": None,
+            },
+        ]
+
+        summary = await service.calculate_summary(enriched_assets)
+
+        assert summary.total_value == Decimal("800000")
+        assert summary.total_principal == Decimal("1000000")
+        assert summary.total_profit == Decimal("-200000")  # -20만원 손실
+        assert summary.profit_rate == -20.0
+
+    @pytest.mark.asyncio
+    async def test_multiple_same_category(self, service):
+        """같은 카테고리의 여러 자산 합산 확인"""
+        enriched_assets = [
+            {
+                "market_value": 1000000,
+                "quantity": 10,
+                "average_price": 100000,
+                "currency": "KRW",
+                "category_name": "국내주식",
+                "category_color": "#3b82f6",
+                "category_id": None,
+            },
+            {
+                "market_value": 2000000,
+                "quantity": 20,
+                "average_price": 100000,
+                "currency": "KRW",
+                "category_name": "국내주식",
+                "category_color": "#3b82f6",
+                "category_id": None,
+            },
+            {
+                "market_value": 2000000,
+                "quantity": 10,
+                "average_price": 200000,
+                "currency": "KRW",
+                "category_name": "해외주식",
+                "category_color": "#ec4899",
+                "category_id": None,
+            },
+        ]
+
+        summary = await service.calculate_summary(enriched_assets)
+
+        # 총 5백만원
+        assert summary.total_value == Decimal("5000000")
+        # 2개 카테고리
+        assert len(summary.allocations) == 2
+
+        allocations_dict = {a.category_name: a for a in summary.allocations}
+        # 국내주식: 3백만원 (60%)
+        assert allocations_dict["국내주식"].market_value == Decimal("3000000")
+        assert allocations_dict["국내주식"].percentage == 60.0
+        # 해외주식: 2백만원 (40%)
+        assert allocations_dict["해외주식"].market_value == Decimal("2000000")
+        assert allocations_dict["해외주식"].percentage == 40.0
+
+    @pytest.mark.asyncio
+    async def test_string_numeric_values(self, service):
+        """문자열 숫자값 처리 확인 (DB에서 가져온 데이터)"""
+        enriched_assets = [
+            {
+                "market_value": "1000000",  # 문자열
+                "quantity": "10",  # 문자열
+                "average_price": "100000",  # 문자열
+                "currency": "KRW",
+                "category_name": "주식",
+                "category_color": "#000000",
+                "category_id": None,
+            },
+        ]
+
+        summary = await service.calculate_summary(enriched_assets)
+
+        assert summary.total_value == Decimal("1000000")
+        assert summary.total_principal == Decimal("1000000")
