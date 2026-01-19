@@ -9,6 +9,7 @@ import {
   Target,
   Settings,
   Cat,
+  BookOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store/useStore'
@@ -21,6 +22,11 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  {
+    title: '자산배분이란?',
+    href: '/guide',
+    icon: BookOpen,
+  },
   {
     title: '대시보드',
     href: '/',

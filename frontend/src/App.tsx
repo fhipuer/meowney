@@ -10,6 +10,7 @@ import { AssetsPage } from '@/pages/AssetsPage'
 import { RebalancePage } from '@/pages/RebalancePage'
 import { RebalancePlanPage } from '@/pages/RebalancePlanPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { GuidePage } from '@/pages/GuidePage'
 
 // React Query 클라이언트 설정
 const queryClient = new QueryClient({
@@ -27,6 +28,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
+            <Route path="/guide" element={<GuidePage />} />
             <Route path="/" element={<DashboardPage />} />
             <Route path="/assets" element={<AssetsPage />} />
             <Route path="/rebalance" element={<RebalancePage />} />
