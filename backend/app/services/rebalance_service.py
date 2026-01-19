@@ -291,6 +291,12 @@ class RebalanceService:
                 if asset.get("ticker") == ticker:
                     return asset
 
+            # 2-1. ticker 값이 실제로는 name일 수 있음 (사용자 입력 오류 대응)
+            # 예: 사용자가 그룹 아이템에 '국내 금현물'을 ticker로 입력
+            for asset in assets:
+                if asset.get("name") == ticker:
+                    return asset
+
         # 3. alias 매칭 (이름 포함 검사)
         if item.get("alias"):
             alias_lower = item["alias"].lower()
@@ -330,7 +336,9 @@ class RebalanceService:
             elif asset.get("current_value"):
                 market_value = Decimal(str(asset["current_value"]))
 
-            asset_values[asset["id"]] = {
+            # 키를 문자열로 통일 (UUID 객체 대응) 냥~
+            asset_id_str = str(asset["id"])
+            asset_values[asset_id_str] = {
                 "asset": asset,
                 "market_value": market_value,
                 "current_price": current_price,
@@ -416,7 +424,8 @@ class RebalanceService:
         current_value = Decimal("0")
 
         if matched_asset:
-            asset_data = asset_values.get(matched_asset["id"])
+            # 키를 문자열로 변환하여 조회 (UUID 객체 대응) 냥~
+            asset_data = asset_values.get(str(matched_asset["id"]))
             if asset_data:
                 current_value = asset_data["market_value"]
 
@@ -431,7 +440,8 @@ class RebalanceService:
         # 매수/매도 수량 계산
         suggested_qty = None
         if matched_asset:
-            current_price = asset_values.get(matched_asset["id"], {}).get("current_price")
+            # 키를 문자열로 변환하여 조회 냥~
+            current_price = asset_values.get(str(matched_asset["id"]), {}).get("current_price")
             if current_price and current_price > 0:
                 if matched_asset.get("currency") == "USD":
                     exchange_rate = await self.finance_service.get_exchange_rate()
@@ -483,7 +493,8 @@ class RebalanceService:
             asset_name = None
 
             if matched_asset:
-                asset_data = asset_values.get(matched_asset["id"])
+                # 키를 문자열로 변환하여 조회 (UUID 객체 대응) 냥~
+                asset_data = asset_values.get(str(matched_asset["id"]))
                 if asset_data:
                     item_current_value = asset_data["market_value"]
                 asset_name = matched_asset.get("name")

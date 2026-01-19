@@ -89,6 +89,64 @@ class TestMatchItemToAsset:
 
         assert matched is None
 
+    def test_match_by_name_when_ticker_contains_name(self, service):
+        """
+        버그 수정: ticker 필드에 자산명이 저장된 경우 name으로 매칭 냥~
+
+        시나리오: 사용자가 그룹 아이템 추가 시 ticker 입력란에 '국내 금현물' 입력
+        실제 자산: ticker=null, name='국내 금현물'
+        """
+        assets = [
+            {"id": "gold-1", "name": "국내 금현물", "ticker": None, "current_value": 27363810},
+            {"id": "etf-1", "name": "GDX", "ticker": "GDX"},
+        ]
+
+        # ticker 필드에 자산명이 저장된 아이템
+        item = {"ticker": "국내 금현물"}
+        matched = service.match_item_to_asset(item, assets)
+
+        assert matched is not None, "ticker에 name이 저장된 경우 매칭되어야 함"
+        assert matched["id"] == "gold-1"
+        assert matched["name"] == "국내 금현물"
+
+    def test_match_ticker_first_then_name(self, service):
+        """ticker 매칭 우선, 실패 시 name 매칭 냥~"""
+        assets = [
+            {"id": "asset-1", "name": "삼성전자", "ticker": "005930.KS"},
+            {"id": "asset-2", "name": "TIGER 코스피", "ticker": None},
+        ]
+
+        # ticker가 실제로 존재하는 경우 → ticker 매칭
+        item1 = {"ticker": "005930.KS"}
+        matched1 = service.match_item_to_asset(item1, assets)
+        assert matched1["id"] == "asset-1"
+
+        # ticker 값이 실제로는 name인 경우 → name 폴백 매칭
+        item2 = {"ticker": "TIGER 코스피"}
+        matched2 = service.match_item_to_asset(item2, assets)
+        assert matched2 is not None
+        assert matched2["id"] == "asset-2"
+
+    def test_match_current_value_asset_by_name(self, service):
+        """current_value 자산(현금)이 name으로 매칭되는지 테스트 냥~"""
+        assets = [
+            {
+                "id": "cash-1",
+                "name": "현금",
+                "ticker": None,
+                "quantity": 0,
+                "average_price": 0,
+                "current_value": 27342062,
+            },
+        ]
+
+        # 플랜 개별 배분에서 ticker에 '현금' 저장된 경우
+        item = {"ticker": "현금"}
+        matched = service.match_item_to_asset(item, assets)
+
+        assert matched is not None, "현금 자산이 name으로 매칭되어야 함"
+        assert matched["id"] == "cash-1"
+
 
 class TestGetAssetValues:
     """_get_asset_values 메서드 테스트"""
@@ -177,9 +235,10 @@ class TestGetAssetValues:
         """
         asset_values 딕셔너리 키 일관성 테스트 냥~
 
-        버그: asset["id"]가 UUID 객체면 나중에 문자열로 조회할 때 실패
+        수정: 키를 문자열로 통일하여 UUID 객체/문자열 혼용 문제 해결
         """
         uuid_obj = UUID("550e8400-e29b-41d4-a716-446655440000")
+        uuid_str = "550e8400-e29b-41d4-a716-446655440000"
 
         assets = [
             {
@@ -198,9 +257,9 @@ class TestGetAssetValues:
 
         total_value, asset_values = await service._get_asset_values(assets)
 
-        # UUID 객체가 키로 사용됨
-        assert uuid_obj in asset_values
-        assert asset_values[uuid_obj]["market_value"] == Decimal("3000000")
+        # 키가 문자열로 통일됨 (UUID 객체 → 문자열)
+        assert uuid_str in asset_values
+        assert asset_values[uuid_str]["market_value"] == Decimal("3000000")
 
 
 class TestCalculateGroupSuggestion:
