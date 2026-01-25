@@ -66,10 +66,16 @@ class RebalanceService:
         response = query.limit(1).execute()
         if response.data:
             plan = response.data[0]
-            # plan_allocations -> allocations 키 변환
-            plan["allocations"] = plan.pop("plan_allocations", [])
-            # groups도 조회해서 추가 냥~
-            plan["groups"] = await self.get_groups(UUID(plan["id"]))
+            portfolio_id = UUID(plan["portfolio_id"])
+            # plan_allocations -> allocations 키 변환 (current_value 포함)
+            allocations = plan.pop("plan_allocations", [])
+            plan["allocations"] = await self.get_allocations_with_values(
+                allocations, portfolio_id
+            )
+            # groups도 조회해서 추가 (current_value 포함) 냥~
+            plan["groups"] = await self.get_groups_with_values(
+                UUID(plan["id"]), portfolio_id
+            )
             return plan
         return None
 
@@ -96,6 +102,7 @@ class RebalanceService:
             "description": data.get("description"),
             "is_main": data.get("is_main", False),
             "is_active": True,
+            "strateghy_prompt": data.get("strategy_prompt"),
         }
 
         response = self.supabase.table("rebalance_plans").insert(plan_data).execute()
@@ -123,6 +130,8 @@ class RebalanceService:
             update_data["name"] = data["name"]
         if "description" in data:
             update_data["description"] = data["description"]
+        if "strategy_prompt" in data:
+            update_data["strategy_prompt"] = data["strategy_prompt"]
         if "is_main" in data:
             update_data["is_main"] = data["is_main"]
         if "is_active" in data:
@@ -216,6 +225,86 @@ class RebalanceService:
             group["items"] = group.pop("allocation_group_items", [])
 
         return groups
+
+    async def get_groups_with_values(
+        self, plan_id: UUID, portfolio_id: UUID
+    ) -> list[dict]:
+        """플랜의 배분 그룹 목록 조회 (current_value 포함) 냥~"""
+        from app.services.asset_service import AssetService
+
+        # 기존 그룹 조회
+        groups = await self.get_groups(plan_id)
+        if not groups:
+            return groups
+
+        # 자산 데이터 조회
+        asset_service = AssetService(self.supabase)
+        assets = await asset_service.get_assets(portfolio_id=portfolio_id)
+        if not assets:
+            # 자산이 없으면 모든 그룹의 current_value를 0으로 설정
+            for group in groups:
+                group["current_value"] = 0.0
+                group["current_percentage"] = 0.0
+            return groups
+
+        # 자산 시가 계산
+        total_value, asset_values = await self._get_asset_values(assets)
+
+        # 각 그룹의 current_value 계산
+        for group in groups:
+            group_value = Decimal("0")
+            for item in group.get("items", []):
+                matched_asset = self.match_item_to_asset(item, assets)
+                if matched_asset:
+                    asset_data = asset_values.get(str(matched_asset["id"]))
+                    if asset_data:
+                        group_value += asset_data["market_value"]
+
+            group["current_value"] = float(group_value)
+            group["current_percentage"] = (
+                float(group_value / total_value * 100) if total_value > 0 else 0.0
+            )
+
+        return groups
+
+    async def get_allocations_with_values(
+        self, allocations: list[dict], portfolio_id: UUID
+    ) -> list[dict]:
+        """개별 배분 항목에 current_value 추가 냥~"""
+        from app.services.asset_service import AssetService
+
+        if not allocations:
+            return allocations
+
+        # 자산 데이터 조회
+        asset_service = AssetService(self.supabase)
+        assets = await asset_service.get_assets(portfolio_id=portfolio_id)
+        if not assets:
+            for alloc in allocations:
+                alloc["current_value"] = 0.0
+                alloc["current_percentage"] = 0.0
+            return allocations
+
+        # 자산 시가 계산
+        total_value, asset_values = await self._get_asset_values(assets)
+
+        # 각 배분 항목의 current_value 계산
+        for alloc in allocations:
+            matched_asset = self.match_item_to_asset(alloc, assets)
+            current_value = Decimal("0")
+
+            if matched_asset:
+                asset_data = asset_values.get(str(matched_asset["id"]))
+                if asset_data:
+                    current_value = asset_data["market_value"]
+                alloc["matched_asset_name"] = matched_asset.get("name")
+
+            alloc["current_value"] = float(current_value)
+            alloc["current_percentage"] = (
+                float(current_value / total_value * 100) if total_value > 0 else 0.0
+            )
+
+        return allocations
 
     async def save_groups(self, plan_id: UUID, groups: list[dict]) -> list[dict]:
         """배분 그룹 저장 냥~"""

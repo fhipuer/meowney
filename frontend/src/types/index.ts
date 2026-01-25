@@ -196,6 +196,8 @@ export interface PlanAllocation {
   target_percentage: number
   asset_name?: string
   matched_asset?: Asset  // 매칭된 자산 정보 냥~
+  matched_asset_name?: string  // 매칭된 자산명 냥~
+  current_value?: number  // 현재 시가 냥~
   current_percentage?: number
   created_at: string
   updated_at: string
@@ -455,4 +457,22 @@ export interface ManualHistoryCreateResponse {
   success: boolean
   message: string
   entries: ManualHistoryItem[]
+}
+
+// ============================================
+// 사용자 설정 타입 (v0.8.0) 냥~
+// ============================================
+
+export interface UserSettings {
+  id: string
+  user_id: string
+  alert_threshold: number      // 알림 기준 (%)
+  calculator_tolerance: number  // 계산기 기본값 (%)
+  created_at: string
+  updated_at: string
+}
+
+export interface UserSettingsUpdate {
+  alert_threshold?: number
+  calculator_tolerance?: number
 }

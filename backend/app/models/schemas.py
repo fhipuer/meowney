@@ -290,6 +290,9 @@ class PlanAllocationResponse(PlanAllocationBase):
     plan_id: UUID
     asset_name: Optional[str] = None
     matched_asset: Optional[dict] = None  # 매칭된 자산 정보 냥~
+    matched_asset_name: Optional[str] = None  # 매칭된 자산명 냥~
+    current_value: Optional[float] = None  # 현재 시가 냥~
+    current_percentage: Optional[float] = None  # 현재 비율 냥~
 
     class Config:
         from_attributes = True
@@ -481,5 +484,32 @@ class BenchmarkHistoryRequest(BaseModel):
     period: Optional[str] = Field("1M", description="기간 (1W, 1M, 3M, 6M, 1Y)")
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+
+
+# ============================================
+# User Settings (사용자 설정) 스키마 냥~
+# ============================================
+
+class UserSettingsBase(BaseModel):
+    """사용자 설정 기본"""
+    alert_threshold: float = Field(5.0, ge=0, le=20, description="알림 기준 (%)")
+    calculator_tolerance: float = Field(5.0, ge=0, le=20, description="계산기 기본값 (%)")
+
+
+class UserSettingsUpdate(BaseModel):
+    """사용자 설정 수정 요청"""
+    alert_threshold: Optional[float] = Field(None, ge=0, le=20)
+    calculator_tolerance: Optional[float] = Field(None, ge=0, le=20)
+
+
+class UserSettingsResponse(UserSettingsBase):
+    """사용자 설정 응답"""
+    id: UUID
+    user_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
