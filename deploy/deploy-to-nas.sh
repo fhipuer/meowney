@@ -10,7 +10,7 @@ set -e
 NAS_HOST="192.168.0.9"
 NAS_PORT="1024"
 NAS_USER="fhipuer"
-NAS_PATH="/var/service/homes/fhipuer/meowney"
+NAS_PATH="/volume1/homes/fhipuer/meowney"
 IMAGE_FILE="meowney-images.tar.gz"
 PROJECT_DIR="c:/Miz/Project/meowney"
 
@@ -29,15 +29,10 @@ echo "💾 Step 2: 이미지 저장 및 압축 중..."
 docker save meowney-meowney-backend:latest meowney-meowney-frontend:latest | gzip > "$IMAGE_FILE"
 echo "   생성됨: $IMAGE_FILE ($(du -h $IMAGE_FILE | cut -f1))"
 
-# Step 3: NAS에 업로드
+# Step 3: NAS에 업로드 (SSH cat 방식 - SCP subsystem 문제 우회)
 echo ""
 echo "📤 Step 3: NAS에 업로드 중... (비밀번호 입력 필요)"
-scp -P "$NAS_PORT" "$IMAGE_FILE" "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/"
-
-# Step 4: NAS에서 업데이트 실행
-echo ""
-echo "🔄 Step 4: NAS에서 업데이트 실행 중... (비밀번호 입력 필요)"
-ssh -p "$NAS_PORT" "${NAS_USER}@${NAS_HOST}" "cd ${NAS_PATH} && ./update.sh"
+cat "$IMAGE_FILE" | ssh -p "$NAS_PORT" "${NAS_USER}@${NAS_HOST}" "cat > ${NAS_PATH}/${IMAGE_FILE}"
 
 # 정리
 echo ""
@@ -46,6 +41,8 @@ rm -f "$IMAGE_FILE"
 
 echo ""
 echo "========================================"
-echo "🐱 배포 완료! 냥~"
-echo "   Frontend: http://${NAS_HOST}:3000"
-echo "   Backend:  http://${NAS_HOST}:8000"
+echo "🐱 업로드 완료! 냥~"
+echo ""
+echo "📋 NAS에서 수동으로 업데이트 실행:"
+echo "   ssh -p ${NAS_PORT} ${NAS_USER}@${NAS_HOST}"
+echo "   cd ${NAS_PATH} && ./update.sh"
