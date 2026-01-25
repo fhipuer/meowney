@@ -4,6 +4,8 @@
  */
 import { Wallet, TrendingUp, TrendingDown } from 'lucide-react'
 import { AssetList } from '@/components/assets/AssetList'
+import { CountryRatioChart } from '@/components/rebalance/CountryRatioChart'
+import { AssetAllocationChart } from '@/components/rebalance/AssetAllocationChart'
 import { useAssets } from '@/hooks/useAssets'
 import { useStore } from '@/store/useStore'
 import { formatKRW, formatPercent, getProfitClass, maskValue } from '@/lib/utils'
@@ -43,6 +45,14 @@ export function AssetsPage() {
               </span>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 자산 배분 차트 (가로 2열) */}
+      {assets && assets.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <CountryRatioChart assets={assets} />
+          <AssetAllocationChart assets={assets} />
         </div>
       )}
 
