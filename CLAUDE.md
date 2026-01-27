@@ -8,6 +8,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 개인 자산 포트폴리오 관리, 일별 자산 추이 추적, 리밸런싱 계산기
 - 코드/주석에 고양이 관련 위트 사용 권장 (변수명, 에러 메시지 등)
 
+## 상세 학습 문서
+
+프로젝트의 상세 아키텍처, 코드 흐름, 설계 결정을 학습하려면 아래 문서를 참고하세요:
+
+📖 **[docs/architecture.md](docs/architecture.md)** - 프로젝트 아키텍처 학습 가이드
+- DB 스키마 상세 (ERD, 테이블 관계, 마이그레이션 히스토리)
+- Backend 서비스 클래스 분석 (AssetService, FinanceService, RebalanceService)
+- Frontend 상태 관리 및 컴포넌트 구조
+- End-to-End 데이터 흐름 (자산 추가, 대시보드 로딩, 리밸런싱 계산)
+- 학습 Q&A (자주 묻는 질문과 코드 위치)
+
 ## 기술 스택
 
 ### Backend (Python)
@@ -39,10 +50,14 @@ uvicorn app.main:app --reload --port 8000
 ```bash
 cd frontend
 npm install
-npm run dev      # 개발 서버
+npm run dev      # 개발 서버 (http://localhost:3000)
 npm run build    # 프로덕션 빌드
 npm run lint     # ESLint
 ```
+
+**로컬 개발 서버 포트:**
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:8000`
 
 ### Docker
 ```bash

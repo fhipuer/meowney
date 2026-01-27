@@ -102,7 +102,7 @@ class RebalanceService:
             "description": data.get("description"),
             "is_main": data.get("is_main", False),
             "is_active": True,
-            "strateghy_prompt": data.get("strategy_prompt"),
+            "strategy_prompt": data.get("strategy_prompt"),
         }
 
         response = self.supabase.table("rebalance_plans").insert(plan_data).execute()
