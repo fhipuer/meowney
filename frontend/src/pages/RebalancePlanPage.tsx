@@ -226,7 +226,12 @@ export function RebalancePlanPage() {
               <CardContent>
                 <div className="space-y-3">
                   <div className="text-sm text-muted-foreground">
-                    {plan.allocations?.length || 0}개 자산 목표 설정됨
+                    {(plan.allocations?.length || 0) + (plan.groups?.length || 0)}개 목표 설정됨
+                    {(plan.groups?.length || 0) > 0 && (
+                      <span className="ml-1">
+                        (개별 {plan.allocations?.length || 0}, 그룹 {plan.groups?.length || 0})
+                      </span>
+                    )}
                   </div>
                   {/* 주요 자산 Sparklines */}
                   {plan.allocations && plan.allocations.length > 0 && (

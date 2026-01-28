@@ -8,14 +8,20 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { dashboardApi } from '@/lib/api'
+import { useSettings } from '@/hooks/useSettings'
 
 export function RebalanceAlert() {
   const [dismissed, setDismissed] = useState(false)
 
+  // 설정에서 알림 기준 가져오기 냥~
+  const { data: settings } = useSettings()
+  const alertThreshold = settings?.alert_threshold ?? 5.0
+
   const { data: alerts } = useQuery({
-    queryKey: ['rebalanceAlerts'],
-    queryFn: () => dashboardApi.getRebalanceAlerts(undefined, 5.0),
+    queryKey: ['rebalanceAlerts', alertThreshold],
+    queryFn: () => dashboardApi.getRebalanceAlerts(undefined, alertThreshold),
     staleTime: 5 * 60 * 1000,
+    enabled: alertThreshold > 0,  // threshold가 0이면 알림 비활성화
   })
 
   if (dismissed || !alerts?.needs_rebalancing) {

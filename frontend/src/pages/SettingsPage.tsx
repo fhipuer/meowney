@@ -1,18 +1,20 @@
 /**
  * 설정 페이지 냥~ 🐱
  */
-import { useState, useRef } from 'react'
-import { Moon, Sun, Cat, Eye, EyeOff, Download, Upload, FileJson, Loader2, Plus, Trash2, History, Calendar } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { Moon, Sun, Cat, Eye, EyeOff, Download, Upload, FileJson, Loader2, Plus, Trash2, History, Calendar, Scale } from 'lucide-react'
 import { APP_VERSION } from '@/lib/version'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
+import { Slider } from '@/components/ui/slider'
 import { useStore } from '@/store/useStore'
 import { dataMigrationApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { useManualHistory, useCreateManualHistory, useDeleteAssetHistory } from '@/hooks/useDashboard'
+import { useSettings, useUpdateSettings } from '@/hooks/useSettings'
 import { formatKRW, formatDate } from '@/lib/utils'
 import type { ManualHistoryEntry } from '@/types'
 
@@ -32,6 +34,50 @@ export function SettingsPage() {
     { snapshot_date: '', total_value: 0, total_principal: 0 }
   ])
   const [historyMessage, setHistoryMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  // 리밸런싱 설정 상태 냥~
+  const { data: settings, isLoading: settingsLoading } = useSettings()
+  const updateSettings = useUpdateSettings()
+  const [alertThreshold, setAlertThreshold] = useState(5.0)
+  const [calculatorTolerance, setCalculatorTolerance] = useState(5.0)
+  const [settingsMessage, setSettingsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [hasChanges, setHasChanges] = useState(false)
+
+  // 설정값이 로드되면 상태 업데이트 냥~
+  useEffect(() => {
+    if (settings) {
+      setAlertThreshold(settings.alert_threshold)
+      setCalculatorTolerance(settings.calculator_tolerance)
+      setHasChanges(false)
+    }
+  }, [settings])
+
+  // 설정 저장 냥~
+  const handleSaveSettings = async () => {
+    try {
+      await updateSettings.mutateAsync({
+        alert_threshold: alertThreshold,
+        calculator_tolerance: calculatorTolerance,
+      })
+      setSettingsMessage({ type: 'success', text: '설정이 저장됐다냥~ 🎉' })
+      setHasChanges(false)
+    } catch {
+      setSettingsMessage({ type: 'error', text: '저장 실패 냥~ 😿' })
+    }
+  }
+
+  // 설정 변경 감지 냥~
+  const handleAlertThresholdChange = (value: number[]) => {
+    setAlertThreshold(value[0])
+    setHasChanges(true)
+    setSettingsMessage(null)
+  }
+
+  const handleCalculatorToleranceChange = (value: number[]) => {
+    setCalculatorTolerance(value[0])
+    setHasChanges(true)
+    setSettingsMessage(null)
+  }
 
   // 데이터 내보내기 냥~
   const handleExport = async () => {
@@ -212,6 +258,91 @@ export function SettingsPage() {
             <p className="text-sm text-muted-foreground mt-3">
               🙈 모든 금액이 ***,*** 로 표시됩니다. 비율과 차트는 유지됩니다.
             </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 리밸런싱 설정 냥~ */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Scale className="h-5 w-5" />
+            리밸런싱 설정
+          </CardTitle>
+          <CardDescription>
+            리밸런싱 알림 기준과 계산기 기본값을 설정하세요
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {settingsLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              설정을 불러오는 중 냥~...
+            </div>
+          ) : (
+            <>
+              {/* 알림 기준 설정 */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>대시보드 알림 기준</Label>
+                  <span className="text-sm font-medium text-primary">
+                    ±{alertThreshold.toFixed(1)}%
+                  </span>
+                </div>
+                <Slider
+                  value={[alertThreshold]}
+                  onValueChange={handleAlertThresholdChange}
+                  min={0}
+                  max={20}
+                  step={0.5}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  목표 비율과 현재 비율의 차이가 이 값을 초과하면 대시보드에 리밸런싱 알림이 표시됩니다.
+                </p>
+              </div>
+
+              <Separator />
+
+              {/* 계산기 기본값 설정 */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>리밸런싱 계산기 기본값</Label>
+                  <span className="text-sm font-medium text-primary">
+                    ±{calculatorTolerance.toFixed(1)}%
+                  </span>
+                </div>
+                <Slider
+                  value={[calculatorTolerance]}
+                  onValueChange={handleCalculatorToleranceChange}
+                  min={0}
+                  max={20}
+                  step={0.5}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  리밸런싱 페이지에서 허용 오차 슬라이더의 초기값으로 사용됩니다.
+                </p>
+              </div>
+
+              {/* 저장 버튼 */}
+              <div className="flex items-center gap-3">
+                <Button
+                  onClick={handleSaveSettings}
+                  disabled={!hasChanges || updateSettings.isPending}
+                >
+                  {updateSettings.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : null}
+                  설정 저장
+                </Button>
+                {settingsMessage && (
+                  <p className={`text-sm ${settingsMessage.type === 'success' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {settingsMessage.text}
+                  </p>
+                )}
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

@@ -2,7 +2,7 @@
  * 리밸런싱 페이지
  * 플랜 기반 자산별 리밸런싱 계산
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { TrendingUp, TrendingDown, Settings2, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -18,14 +18,25 @@ import {
 } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { usePlans, useCalculateRebalance } from '@/hooks/useRebalance'
+import { useSettings } from '@/hooks/useSettings'
 import { formatKRW, getProfitClass } from '@/lib/utils'
 
 export function RebalancePage() {
   const { data: plans, isLoading: plansLoading } = usePlans()
+  const { data: settings } = useSettings()
   const calculateMutation = useCalculateRebalance()
 
   const [selectedPlanId, setSelectedPlanId] = useState<string>('')
-  const [tolerancePercent, setTolerancePercent] = useState<number>(0.5)
+  const [tolerancePercent, setTolerancePercent] = useState<number>(5.0)
+  const [isInitialized, setIsInitialized] = useState(false)
+
+  // 설정에서 계산기 기본값 로드 냥~
+  useEffect(() => {
+    if (settings && !isInitialized) {
+      setTolerancePercent(settings.calculator_tolerance)
+      setIsInitialized(true)
+    }
+  }, [settings, isInitialized])
 
   // 메인 플랜 자동 선택
   const mainPlan = plans?.find((p) => p.is_main)

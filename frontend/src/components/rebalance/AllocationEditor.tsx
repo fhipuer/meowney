@@ -153,14 +153,14 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     )
   }, [assets])
 
-  // 매칭 로직
+  // 매칭 로직 (v0.7.2: name 기반 매칭 추가)
   function matchItemToAsset(
     item: { asset_id?: string | null; ticker?: string | null; alias?: string | null },
     assetList: Asset[]
   ): Asset | undefined {
     if (!assetList || assetList.length === 0) return undefined
 
-    // 1. asset_id 매칭
+    // 1. asset_id 매칭 (최우선)
     if (item.asset_id) {
       const matched = assetList.find((a) => a.id === item.asset_id)
       if (matched) return matched
@@ -170,6 +170,11 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
     if (item.ticker) {
       const matched = assetList.find((a) => a.ticker === item.ticker)
       if (matched) return matched
+
+      // 2-1. ticker 값이 실제로는 name일 수 있음 (사용자 입력 오류 대응)
+      // 예: 사용자가 그룹 아이템에 '국내 금현물'을 ticker로 입력
+      const matchedByName = assetList.find((a) => a.name === item.ticker)
+      if (matchedByName) return matchedByName
     }
 
     // 3. alias 매칭 (이름 포함 검사)

@@ -305,3 +305,36 @@ CREATE TABLE IF NOT EXISTS benchmark_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_benchmark_history_ticker_date ON benchmark_history(ticker, snapshot_date);
+
+-- ============================================
+-- 사용자 설정 테이블 (v0.8.0)
+-- 리밸런싱 허용 오차 등 사용자 설정 저장 냥~
+-- ============================================
+CREATE TABLE IF NOT EXISTS user_settings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',  -- 단일 사용자 고정 ID
+    alert_threshold DECIMAL(5, 2) NOT NULL DEFAULT 5.0,       -- 알림 기준 (%)
+    calculator_tolerance DECIMAL(5, 2) NOT NULL DEFAULT 5.0,  -- 계산기 기본값 (%)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    CONSTRAINT unique_user_settings UNIQUE (user_id),
+    CONSTRAINT check_alert_threshold CHECK (alert_threshold >= 0 AND alert_threshold <= 20),
+    CONSTRAINT check_calculator_tolerance CHECK (calculator_tolerance >= 0 AND calculator_tolerance <= 20)
+);
+
+-- 기본 설정 생성
+INSERT INTO user_settings (user_id, alert_threshold, calculator_tolerance)
+VALUES ('00000000-0000-0000-0000-000000000001', 5.0, 5.0)
+ON CONFLICT (user_id) DO NOTHING;
+
+-- 트리거
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_user_settings_updated_at') THEN
+        CREATE TRIGGER update_user_settings_updated_at
+            BEFORE UPDATE ON user_settings
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END
+$$;

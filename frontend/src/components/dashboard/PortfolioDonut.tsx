@@ -52,23 +52,31 @@ interface PortfolioDonutProps {
   totalValueFromApi?: number
 }
 
-// 자산 매칭 함수
+// 자산 매칭 함수 (v0.7.2: name 기반 매칭 추가)
 function matchItemToAsset(
   item: { asset_id?: string | null; ticker?: string | null; alias?: string | null },
   assets: Asset[]
 ): Asset | undefined {
   if (!assets || assets.length === 0) return undefined
 
+  // 1. asset_id로 매칭 (최우선)
   if (item.asset_id) {
     const matched = assets.find((a) => a.id === item.asset_id)
     if (matched) return matched
   }
 
+  // 2. ticker로 정확히 매칭
   if (item.ticker) {
     const matched = assets.find((a) => a.ticker === item.ticker)
     if (matched) return matched
+
+    // 2-1. ticker 값이 실제로는 name일 수 있음 (사용자 입력 오류 대응)
+    // 예: 사용자가 그룹 아이템에 '국내 금현물'을 ticker로 입력
+    const matchedByName = assets.find((a) => a.name === item.ticker)
+    if (matchedByName) return matchedByName
   }
 
+  // 3. alias로 부분 매칭
   if (item.alias) {
     const aliasLower = item.alias.toLowerCase()
     const matched = assets.find((a) => {
@@ -90,19 +98,15 @@ function safeNumber(value: unknown): number {
 /**
  * 플랜 기반 차트 데이터 생성
  * 백엔드에서 이미 원화 환산된 market_value를 사용 (v0.6.1)
- *
- * 주의: 현재 assets API는 USD 자산의 market_value를 달러로 반환하므로,
- * 비율 계산 시 불일치가 발생할 수 있음. 백엔드 total_value를 별도로 받아 표시.
+ * v0.7.2: USD 환율 이중 적용 버그 수정 - exchangeRate 파라미터 제거
  */
 function buildChartFromPlan(
   plan: RebalancePlan,
-  assets: Asset[],
-  exchangeRate: number
+  assets: Asset[]
 ): PlanChartItem[] {
   const result: PlanChartItem[] = []
   let totalValue = 0
   const matchedAssetIds = new Set<string>()
-  const safeRate = safeNumber(exchangeRate) || 1300
 
   // 1. 개별 배분 항목 처리
   ;(plan.allocations || []).forEach((alloc, idx) => {
@@ -112,10 +116,8 @@ function buildChartFromPlan(
     if (matched) {
       matchedAssetIds.add(matched.id)
       value = safeNumber(matched.market_value)
-      // USD 자산은 원화로 환산 (assets API가 달러로 반환하므로)
-      if (matched.currency === 'USD') {
-        value = value * safeRate
-      }
+      // market_value는 이미 원화로 환산되어 있음 (백엔드 처리)
+      // USD 환율 이중 적용 버그 수정 (v0.7.2)
     }
 
     if (value > 0) {
@@ -137,11 +139,9 @@ function buildChartFromPlan(
       const matched = matchItemToAsset(item, assets)
       if (matched) {
         matchedAssetIds.add(matched.id)
-        let itemValue = safeNumber(matched.market_value)
-        // USD 자산은 원화로 환산 (assets API가 달러로 반환하므로)
-        if (matched.currency === 'USD') {
-          itemValue = itemValue * safeRate
-        }
+        const itemValue = safeNumber(matched.market_value)
+        // market_value는 이미 원화로 환산되어 있음 (백엔드 처리)
+        // USD 환율 이중 적용 버그 수정 (v0.7.2)
         groupValue += itemValue
       }
     })
@@ -161,11 +161,9 @@ function buildChartFromPlan(
   let unassignedValue = 0
   assets.forEach((asset) => {
     if (!matchedAssetIds.has(asset.id)) {
-      let value = safeNumber(asset.market_value)
-      // USD 자산은 원화로 환산 (assets API가 달러로 반환하므로)
-      if (asset.currency === 'USD') {
-        value = value * safeRate
-      }
+      const value = safeNumber(asset.market_value)
+      // market_value는 이미 원화로 환산되어 있음 (백엔드 처리)
+      // USD 환율 이중 적용 버그 수정 (v0.7.2)
       unassignedValue += value
     }
   })
@@ -217,14 +215,9 @@ export function PortfolioDonut({ allocations, isLoading, totalValueFromApi }: Po
     const apiTotal = totalValueFromApi ? Number(totalValueFromApi) : 0
 
     // 메인 플랜이 있고, 배분 항목이나 그룹이 있으면 플랜 기반으로 표시
-    // 주의: buildChartFromPlan은 assets API 데이터를 사용하므로 환율 계산 필요
-    // TODO: 향후 백엔드 API 개선 시 환율 계산 로직 제거 가능
+    // v0.7.2: market_value는 이미 원화로 환산되어 있으므로 환율 계산 불필요
     if (mainPlan && ((mainPlan.allocations && mainPlan.allocations.length > 0) || (mainPlan.groups && mainPlan.groups.length > 0))) {
-      // 임시로 assets의 current_exchange_rate 사용 (첫 번째 USD 자산에서 가져오기)
-      const usdAsset = assets?.find(a => a.currency === 'USD')
-      const rate = usdAsset?.current_exchange_rate ? Number(usdAsset.current_exchange_rate) : 1300
-
-      const planData = buildChartFromPlan(mainPlan, assets || [], rate)
+      const planData = buildChartFromPlan(mainPlan, assets || [])
       // 플랜 데이터가 있으면 사용, 없으면 카테고리 기반으로 폴백 냥~
       if (planData.length > 0) {
         // 차트 내부 계산 값 대신 백엔드 total_value 사용 (일관성 보장)

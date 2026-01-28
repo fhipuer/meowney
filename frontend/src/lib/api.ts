@@ -31,6 +31,8 @@ import type {
   ManualHistoryEntry,
   ManualHistoryItem,
   ManualHistoryCreateResponse,
+  UserSettings,
+  UserSettingsUpdate,
 } from '@/types'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -370,6 +372,24 @@ export const dataMigrationApi = {
   // 스키마 정보 조회
   getSchemaInfo: async (): Promise<SchemaInfo> => {
     const { data } = await apiClient.get<SchemaInfo>('/data/schema-info')
+    return data
+  },
+}
+
+// ============================================
+// Settings API 냥~
+// ============================================
+
+export const settingsApi = {
+  // 설정 조회 (없으면 기본값으로 생성)
+  get: async (): Promise<UserSettings> => {
+    const { data } = await apiClient.get<UserSettings>('/settings')
+    return data
+  },
+
+  // 설정 수정
+  update: async (settings: UserSettingsUpdate): Promise<UserSettings> => {
+    const { data } = await apiClient.put<UserSettings>('/settings', settings)
     return data
   },
 }
