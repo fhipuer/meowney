@@ -121,8 +121,8 @@ class AssetService:
         """자산 정보 수정 냥~"""
         update_data = data.model_dump(exclude_unset=True)
 
-        # Decimal -> str 변환
-        for key in ["quantity", "average_price", "current_value"]:
+        # Decimal -> str 변환 냥~
+        for key in ["quantity", "average_price", "current_value", "purchase_exchange_rate"]:
             if key in update_data and update_data[key] is not None:
                 update_data[key] = str(update_data[key])
 
