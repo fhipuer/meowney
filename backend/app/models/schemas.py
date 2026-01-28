@@ -354,7 +354,7 @@ class RebalancePlanBase(BaseModel):
     """리밸런싱 플랜 기본"""
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
-    strategy_prompt: Optional[str] = Field(None, max_length=2000, description="전략 프롬프트 (AI 조언용)")
+    strategy_prompt: Optional[str] = Field(None, max_length=10000, description="전략 프롬프트 (AI 조언용)")
     is_main: bool = False
 
 
@@ -368,7 +368,7 @@ class RebalancePlanUpdate(BaseModel):
     """리밸런싱 플랜 수정"""
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = None
-    strategy_prompt: Optional[str] = Field(None, max_length=2000)
+    strategy_prompt: Optional[str] = Field(None, max_length=10000)
     is_main: Optional[bool] = None
     is_active: Optional[bool] = None
 
