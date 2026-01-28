@@ -64,6 +64,62 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
   const { data: exchangeRate } = useExchangeRate()
   const { isPrivacyMode } = useStore()
 
+  // 환율 변동률 계산 냥~
+  const getExchangeRateChange = (purchaseRate: number | null | undefined, currentRate: number | null | undefined) => {
+    if (!purchaseRate || !currentRate) return null
+    const changePercent = ((currentRate - purchaseRate) / purchaseRate) * 100
+    return {
+      purchaseRate,
+      currentRate,
+      changePercent,
+      isPositive: changePercent > 0
+    }
+  }
+
+  // 환율 변동 정보 표시 컴포넌트 냥~
+  const ExchangeRateInfo = ({ asset }: { asset: Asset }) => {
+    if (asset.currency !== 'USD' || !asset.purchase_exchange_rate) {
+      return null
+    }
+
+    const change = getExchangeRateChange(
+      asset.purchase_exchange_rate,
+      asset.current_exchange_rate
+    )
+    if (!change) return null
+
+    const colorClass = change.isPositive
+      ? 'text-red-500 dark:text-red-400'
+      : change.changePercent < 0
+        ? 'text-blue-500 dark:text-blue-400'
+        : 'text-muted-foreground'
+
+    const percentStr = `${change.changePercent >= 0 ? '+' : ''}${change.changePercent.toFixed(1)}%`
+
+    // 프라이버시 모드: 변동률만
+    if (isPrivacyMode) {
+      return (
+        <span className={`text-xs ${colorClass} ml-2`}>
+          FX: {percentStr}
+        </span>
+      )
+    }
+
+    // 일반 모드
+    return (
+      <>
+        {/* 데스크톱: 전체 표시 */}
+        <span className={`hidden sm:inline text-xs ${colorClass} ml-2`}>
+          FX: {change.purchaseRate.toLocaleString()}→{change.currentRate.toLocaleString()} ({percentStr})
+        </span>
+        {/* 모바일: 압축 */}
+        <span className={`sm:hidden text-xs ${colorClass} ml-1`}>
+          환율{percentStr}
+        </span>
+      </>
+    )
+  }
+
   // 상대적 시간 표시 (예: "2시간 전", "3일 전")
   const formatRelativeTime = (dateString: string) => {
     const date = new Date(dateString)
@@ -212,13 +268,16 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
                       {asset.market_value ? maskValue(formatKRW(asset.market_value), isPrivacyMode) : '-'}
                     </div>
                   )}
-                  <div className={`flex items-center justify-end gap-1 text-sm ${getProfitClass(asset.profit_rate || 0)}`}>
-                    {(asset.profit_rate || 0) >= 0 ? (
-                      <TrendingUp className="h-3 w-3" />
-                    ) : (
-                      <TrendingDown className="h-3 w-3" />
-                    )}
-                    {formatPercent(asset.profit_rate || 0)}
+                  <div className="flex items-center justify-end gap-1 text-sm flex-wrap">
+                    <span className={`flex items-center gap-1 ${getProfitClass(asset.profit_rate || 0)}`}>
+                      {(asset.profit_rate || 0) >= 0 ? (
+                        <TrendingUp className="h-3 w-3" />
+                      ) : (
+                        <TrendingDown className="h-3 w-3" />
+                      )}
+                      {formatPercent(asset.profit_rate || 0)}
+                    </span>
+                    <ExchangeRateInfo asset={asset} />
                   </div>
                 </div>
 
