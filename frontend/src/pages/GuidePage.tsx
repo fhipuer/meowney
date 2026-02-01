@@ -16,6 +16,7 @@ import { GuideQuizTab } from '@/components/guide/GuideQuizTab'
 interface GuideTab {
   id: string
   title: string
+  shortTitle: string
   icon: React.ComponentType<{ className?: string }>
   component: React.ComponentType
   description: string
@@ -25,6 +26,7 @@ const guideTabs: GuideTab[] = [
   {
     id: 'basics',
     title: '기초이론',
+    shortTitle: '기초',
     icon: BookOpen,
     component: GuideBasicsTab,
     description: '자산배분이 무엇인지, 왜 중요한지 알아봅니다',
@@ -32,6 +34,7 @@ const guideTabs: GuideTab[] = [
   {
     id: 'asset-classes',
     title: '자산군',
+    shortTitle: '자산',
     icon: Layers,
     component: GuideAssetClassesTab,
     description: '주식, 채권, 현금 등 다양한 자산군을 소개합니다',
@@ -39,6 +42,7 @@ const guideTabs: GuideTab[] = [
   {
     id: 'rebalancing',
     title: '리밸런싱',
+    shortTitle: '리밸',
     icon: RefreshCw,
     component: GuideRebalancingTab,
     description: '포트폴리오를 원래 비율로 되돌리는 방법을 배웁니다',
@@ -46,6 +50,7 @@ const guideTabs: GuideTab[] = [
   {
     id: 'meowney',
     title: '활용법',
+    shortTitle: '활용',
     icon: Cat,
     component: GuideMeowneyTab,
     description: 'Meowney로 자산배분을 실천하는 방법을 익힙니다',
@@ -53,6 +58,7 @@ const guideTabs: GuideTab[] = [
   {
     id: 'portfolios',
     title: '추천 포트폴리오',
+    shortTitle: '추천',
     icon: Briefcase,
     component: GuidePortfoliosTab,
     description: '유명 투자 전략과 추천 포트폴리오를 살펴봅니다',
@@ -60,6 +66,7 @@ const guideTabs: GuideTab[] = [
   {
     id: 'quiz',
     title: '투자 성향',
+    shortTitle: '퀴즈',
     icon: Brain,
     component: GuideQuizTab,
     description: '나에게 맞는 투자 스타일을 찾아봅니다',
@@ -94,6 +101,7 @@ export function GuidePage() {
             >
               <tab.icon className="h-4 w-4 shrink-0" />
               <span className="hidden sm:inline truncate">{tab.title}</span>
+              <span className="sm:hidden text-[10px] truncate">{tab.shortTitle}</span>
             </TabsTrigger>
           ))}
         </TabsList>

@@ -11,6 +11,7 @@ import {
 import {
   BarChart,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   Tooltip,
@@ -18,6 +19,7 @@ import {
   CartesianGrid,
   Line,
   ComposedChart,
+  Area,
 } from 'recharts'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -79,6 +81,16 @@ const conservativePortfolio = [
   { name: '현금', value: 10, color: '#22c55e' },
 ]
 
+const compoundData = [
+  { year: '0년', value: 1000 },
+  { year: '5년', value: 1403 },
+  { year: '10년', value: 1967 },
+  { year: '15년', value: 2759 },
+  { year: '20년', value: 3870 },
+  { year: '25년', value: 5427 },
+  { year: '30년', value: 7612 },
+]
+
 // --- Tooltip styles ---
 
 const tooltipStyle = {
@@ -93,6 +105,11 @@ const tooltipStyle = {
 export function GuideBasicsTab() {
   return (
     <div className="space-y-8">
+      {/* 비상자금 경고 */}
+      <GuideTipBox variant="warning">
+        투자를 시작하기 전에 최소 3~6개월치 생활비를 비상자금으로 확보하세요! 비상자금 없이 투자하면 급할 때 손해를 보며 팔아야 할 수 있어요.
+      </GuideTipBox>
+
       {/* Section 1: 달걀을 한 바구니에 담지 마라 */}
       <GuideSection
         icon={BookOpen}
@@ -233,8 +250,8 @@ export function GuideBasicsTab() {
               />
               <Bar dataKey="loss" radius={[4, 4, 0, 0]}>
                 {lossComparisonData.map((entry, index) => (
-                  <rect
-                    key={`bar-${index}`}
+                  <Cell
+                    key={`cell-${index}`}
                     fill={entry.loss <= -25 ? '#ef4444' : '#f97316'}
                   />
                 ))}
@@ -358,11 +375,93 @@ export function GuideBasicsTab() {
           어떤 주식을 살지 고민하기 전에, 먼저 &apos;내 돈의 몇 %를 주식에
           넣을까?&apos;를 정하세요!
         </GuideTipBox>
+
+        <GuideTipBox variant="info">
+          이 90% 수치는 Brinson, Hood & Beebower(1986)의 연구 &apos;Determinants of Portfolio Performance&apos;에 기반합니다. 이후 여러 후속 연구에서도 유사한 결론을 도출했어요.
+        </GuideTipBox>
       </GuideSection>
 
       <Separator />
 
-      {/* Section 6: 나에게 맞는 자산배분 찾기 */}
+      {/* Section 6: 왜 장기투자인가? */}
+      <GuideSection
+        icon={TrendingUp}
+        title="왜 장기투자인가?"
+        description="복리의 마법으로 자산이 눈덩이처럼 불어나요"
+        delay={450}
+      >
+        <p className="text-muted-foreground">
+          복리(Compound Interest)는 이자에 대한 이자가 붙어 자산이 기하급수적으로
+          성장하는 현상입니다. 초기 1,000만원을 연 7% 수익률로 투자하면...
+        </p>
+
+        <ResponsiveContainer width="100%" height={280}>
+          <ComposedChart data={compoundData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis
+              dataKey="year"
+              tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+            />
+            <YAxis
+              tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+              tickFormatter={(v: number) => `${v}만원`}
+            />
+            <Tooltip
+              contentStyle={tooltipStyle}
+              formatter={(value: number) => [`${value}만원`, '자산가치']}
+            />
+            <Area
+              type="monotone"
+              dataKey="value"
+              fill="#6366f1"
+              fillOpacity={0.2}
+              stroke="none"
+            />
+            <Line
+              type="monotone"
+              dataKey="value"
+              stroke="#6366f1"
+              strokeWidth={3}
+              dot={{ r: 4, fill: '#6366f1' }}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <GuideStatCard
+            value="1,967만원"
+            label="10년 후 (약 2배)"
+            icon={TrendingUp}
+            colorClass="text-green-500"
+            bgClass="bg-green-50 dark:bg-green-950/20"
+            delay={0}
+          />
+          <GuideStatCard
+            value="3,870만원"
+            label="20년 후 (약 4배)"
+            icon={TrendingUp}
+            colorClass="text-green-500"
+            bgClass="bg-green-50 dark:bg-green-950/20"
+            delay={100}
+          />
+          <GuideStatCard
+            value="7,612만원"
+            label="30년 후 (약 7.6배)"
+            icon={Sparkles}
+            colorClass="text-indigo-500"
+            bgClass="bg-indigo-50 dark:bg-indigo-950/20"
+            delay={200}
+          />
+        </div>
+
+        <GuideTipBox variant="tip">
+          아인슈타인이 &apos;복리는 세계 8번째 불가사의&apos;라고 했대요. 고양이처럼 느긋하게 오래 기다리는 게 비결이에요!
+        </GuideTipBox>
+      </GuideSection>
+
+      <Separator />
+
+      {/* Section 7: 나에게 맞는 자산배분 찾기 */}
       <GuideSection
         icon={Lightbulb}
         title="나에게 맞는 자산배분 찾기"

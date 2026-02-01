@@ -36,12 +36,12 @@ import { GuideSection } from '@/components/guide/GuideSection'
 import { GuideTipBox } from '@/components/guide/GuideTipBox'
 import { GuideStatCard } from '@/components/guide/GuideStatCard'
 import { GuidePortfolioPie } from '@/components/guide/GuidePortfolioPie'
+import { GuideComparisonBar } from '@/components/guide/GuideComparisonBar'
 
 // --- Static data ---
 
 const radarData = [
   { subject: '기대수익', stocks: 5, bonds: 3, cash: 1, gold: 2 },
-  { subject: '위험도', stocks: 5, bonds: 2, cash: 1, gold: 3 },
   { subject: '유동성', stocks: 5, bonds: 4, cash: 5, gold: 4 },
   { subject: '인플레 헤지', stocks: 3, bonds: 2, cash: 1, gold: 4 },
   { subject: '안정성', stocks: 1, bonds: 4, cash: 5, gold: 3 },
@@ -153,6 +153,20 @@ export function GuideAssetClassesTab() {
         description="각 자산군의 특징과 장단점을 살펴봐요"
         delay={0}
       >
+        <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <BarChart3 className="w-5 h-5 text-blue-500" />
+              <span className="font-bold text-sm">ETF(상장지수펀드)란?</span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              ETF는 여러 종목을 한 번에 담은 '종합선물세트' 같은 상품이에요.
+              주식처럼 거래소에서 쉽게 사고팔 수 있어서 초보자도 간편하게 분산투자할 수 있답니다.
+              이 가이드에서 자주 등장하는 KODEX, TIGER, VOO 등이 모두 ETF예요!
+            </p>
+          </CardContent>
+        </Card>
+
         <div className="space-y-3">
           {/* 주식 */}
           <AssetClassCard
@@ -410,6 +424,16 @@ export function GuideAssetClassesTab() {
             </div>
           ))}
         </div>
+
+        <GuideComparisonBar
+          title="자산군별 기대수익 비교"
+          items={[
+            { label: '주식', value: 90, color: '#ef4444', displayValue: '연 7~10%' },
+            { label: '채권', value: 50, color: '#3b82f6', displayValue: '연 3~5%' },
+            { label: '금', value: 40, color: '#eab308', displayValue: '연 2~4%' },
+            { label: '현금', value: 20, color: '#22c55e', displayValue: '연 1~2%' },
+          ]}
+        />
       </GuideSection>
 
       <Separator />

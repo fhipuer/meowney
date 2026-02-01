@@ -191,6 +191,24 @@ export function GuideQuizTab() {
           <Badge variant="secondary" className="mt-3 text-sm">
             {totalScore}/30점
           </Badge>
+
+          {/* 보수 ← → 공격 스펙트럼 바 */}
+          <div className="w-full max-w-md mx-auto mt-4 space-y-1">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>보수적</span>
+              <span>공격적</span>
+            </div>
+            <div className="relative h-3 rounded-full overflow-hidden bg-gradient-to-r from-blue-400 via-green-400 via-yellow-400 to-red-500">
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white border-2 border-foreground shadow-md"
+                style={{ left: `calc(${((totalScore - 6) / 24) * 100}% - 8px)` }}
+              />
+            </div>
+            <div className="text-center text-xs text-muted-foreground mt-1">
+              내 점수: {totalScore}/30
+            </div>
+          </div>
+
           <p className="text-lg text-muted-foreground italic mt-2">
             {result.catPersonality}
           </p>

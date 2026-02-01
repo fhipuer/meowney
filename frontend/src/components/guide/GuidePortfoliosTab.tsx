@@ -287,10 +287,18 @@ export function GuidePortfoliosTab() {
         </ResponsiveContainer>
       </GuideSection>
 
+      <GuideTipBox variant="info">
+        각 포트폴리오의 기대 수익률과 구성은 원 전략의 일반적인 가이드라인을 참고한 것이며, 실제 구현 시 세부 비율은 달라질 수 있습니다.
+      </GuideTipBox>
+
       {/* Footer tip */}
       <GuideTipBox variant="tip">
         어떤 포트폴리오가 나에게 맞을지 모르겠다면, &apos;투자 성향&apos; 탭에서
         퀴즈를 풀어보세요!
+      </GuideTipBox>
+
+      <GuideTipBox variant="warning">
+        과거 수익률은 미래 수익을 보장하지 않습니다. 위에 표시된 기대 수익률은 과거 데이터 기반의 참고치이며, 실제 투자 결과는 달라질 수 있어요.
       </GuideTipBox>
     </div>
   )

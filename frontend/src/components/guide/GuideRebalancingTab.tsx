@@ -10,6 +10,7 @@ import {
   ArrowLeftRight,
   PlusCircle,
   ArrowRight,
+  ArrowDown,
   AlertTriangle,
   Calculator,
   Coffee,
@@ -110,9 +111,9 @@ export function GuideRebalancingTab() {
         description="포트폴리오 비율을 원래 목표대로 되돌리는 것"
         delay={0}
       >
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+        <div className="flex flex-col md:flex-row items-center gap-4">
           {/* Column 1: 처음 설정 */}
-          <Card className="hover:shadow-md transition-shadow">
+          <Card className="hover:shadow-md transition-shadow w-full md:flex-1">
             <CardContent className="p-5 flex flex-col items-center text-center">
               <span className="text-sm font-medium text-muted-foreground mb-2">
                 처음 설정
@@ -126,12 +127,13 @@ export function GuideRebalancingTab() {
             </CardContent>
           </Card>
 
-          <div className="hidden md:flex items-center justify-center">
-            <ArrowRight className="w-6 h-6 text-muted-foreground" />
+          <div className="flex items-center justify-center">
+            <ArrowRight className="w-6 h-6 text-muted-foreground hidden md:block" />
+            <ArrowDown className="w-6 h-6 text-muted-foreground md:hidden" />
           </div>
 
           {/* Column 2: 비율 틀어짐 */}
-          <Card className="hover:shadow-md transition-shadow">
+          <Card className="hover:shadow-md transition-shadow w-full md:flex-1">
             <CardContent className="p-5 flex flex-col items-center text-center">
               <Badge variant="destructive" className="mb-2">
                 비율 틀어짐!
@@ -145,12 +147,13 @@ export function GuideRebalancingTab() {
             </CardContent>
           </Card>
 
-          <div className="hidden md:flex items-center justify-center">
-            <ArrowRight className="w-6 h-6 text-muted-foreground" />
+          <div className="flex items-center justify-center">
+            <ArrowRight className="w-6 h-6 text-muted-foreground hidden md:block" />
+            <ArrowDown className="w-6 h-6 text-muted-foreground md:hidden" />
           </div>
 
           {/* Column 3: 원래대로 */}
-          <Card className="hover:shadow-md transition-shadow">
+          <Card className="hover:shadow-md transition-shadow w-full md:flex-1">
             <CardContent className="p-5 flex flex-col items-center text-center">
               <Badge
                 variant="default"
@@ -455,7 +458,13 @@ export function GuideRebalancingTab() {
               <div>
                 <div className="font-bold mb-1">세금</div>
                 <p className="text-sm text-muted-foreground">
+                  국내 주식: 대주주가 아닌 개인 투자자는 양도소득세 비과세
+                </p>
+                <p className="text-sm text-muted-foreground">
                   해외 주식: 연 250만원 초과 수익 시 22% 과세
+                </p>
+                <p className="text-xs text-muted-foreground/70 mt-1">
+                  ※ 세법은 변경될 수 있으니 최신 규정을 확인하세요
                 </p>
               </div>
             </CardContent>
@@ -485,6 +494,10 @@ export function GuideRebalancingTab() {
             </CardContent>
           </Card>
         </div>
+
+        <GuideTipBox variant="warning">
+          세금과 수수료는 리밸런싱의 숨은 비용이에요. 특히 해외 주식은 연 250만원 초과 수익 시 22% 양도소득세가 부과되니 주의하세요!
+        </GuideTipBox>
 
         <GuideTipBox variant="tip">
           고양이가 천천히 스트레칭하듯, 리밸런싱도 서두르지 말고 여유롭게!

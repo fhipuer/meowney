@@ -196,10 +196,11 @@ export const QUIZ_RESULTS: QuizResult[] = [
       '야생 고양이 스타일! 어떤 모험도 두렵지 않은 대담한 정글의 왕이에요!',
     description:
       '최대 수익을 목표로 높은 위험을 감수합니다. 주식 비중이 매우 높은 공격적 배분이 적합해요.',
-    recommendedPortfolios: ['three-fund'],
+    recommendedPortfolios: ['three-fund', 'korean-balanced'],
     allocationSuggestion: [
-      { name: '주식', percentage: 80, color: '#ef4444' },
+      { name: '주식', percentage: 75, color: '#ef4444' },
       { name: '채권', percentage: 15, color: '#3b82f6' },
+      { name: '대체자산', percentage: 5, color: '#eab308' },
       { name: '현금', percentage: 5, color: '#22c55e' },
     ],
     scoreRange: [25, 30],
