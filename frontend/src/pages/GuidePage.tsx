@@ -1,25 +1,23 @@
 /**
  * 자산배분이란? 가이드 페이지 냥~
- * 투자 초보자를 위한 자산배분 튜토리얼
+ * 투자 초보자를 위한 인터랙티브 자산배분 튜토리얼
  */
 import { useState } from 'react'
-import { BookOpen, Layers, RefreshCw, Cat, ChevronLeft, ChevronRight } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { BookOpen, Layers, RefreshCw, Cat, ChevronLeft, ChevronRight, Briefcase, Brain } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
-import { MarkdownContent } from '@/components/guide/MarkdownContent'
-
-// 마크다운 콘텐츠 import
-import guideBasics from '@/content/guide-basics.md'
-import guideAssetClasses from '@/content/guide-asset-classes.md'
-import guideRebalancing from '@/content/guide-rebalancing.md'
-import guideMeowney from '@/content/guide-meowney.md'
+import { GuideBasicsTab } from '@/components/guide/GuideBasicsTab'
+import { GuideAssetClassesTab } from '@/components/guide/GuideAssetClassesTab'
+import { GuideRebalancingTab } from '@/components/guide/GuideRebalancingTab'
+import { GuideMeowneyTab } from '@/components/guide/GuideMeowneyTab'
+import { GuidePortfoliosTab } from '@/components/guide/GuidePortfoliosTab'
+import { GuideQuizTab } from '@/components/guide/GuideQuizTab'
 
 interface GuideTab {
   id: string
   title: string
   icon: React.ComponentType<{ className?: string }>
-  content: string
+  component: React.ComponentType
   description: string
 }
 
@@ -28,29 +26,43 @@ const guideTabs: GuideTab[] = [
     id: 'basics',
     title: '기초이론',
     icon: BookOpen,
-    content: guideBasics,
+    component: GuideBasicsTab,
     description: '자산배분이 무엇인지, 왜 중요한지 알아봅니다',
   },
   {
     id: 'asset-classes',
     title: '자산군',
     icon: Layers,
-    content: guideAssetClasses,
+    component: GuideAssetClassesTab,
     description: '주식, 채권, 현금 등 다양한 자산군을 소개합니다',
   },
   {
     id: 'rebalancing',
     title: '리밸런싱',
     icon: RefreshCw,
-    content: guideRebalancing,
+    component: GuideRebalancingTab,
     description: '포트폴리오를 원래 비율로 되돌리는 방법을 배웁니다',
   },
   {
     id: 'meowney',
     title: '활용법',
     icon: Cat,
-    content: guideMeowney,
+    component: GuideMeowneyTab,
     description: 'Meowney로 자산배분을 실천하는 방법을 익힙니다',
+  },
+  {
+    id: 'portfolios',
+    title: '추천 포트폴리오',
+    icon: Briefcase,
+    component: GuidePortfoliosTab,
+    description: '유명 투자 전략과 추천 포트폴리오를 살펴봅니다',
+  },
+  {
+    id: 'quiz',
+    title: '투자 성향',
+    icon: Brain,
+    component: GuideQuizTab,
+    description: '나에게 맞는 투자 스타일을 찾아봅니다',
   },
 ]
 
@@ -73,15 +85,15 @@ export function GuidePage() {
 
       {/* 탭 네비게이션 */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6">
           {guideTabs.map((tab) => (
             <TabsTrigger
               key={tab.id}
               value={tab.id}
-              className="flex items-center gap-2"
+              className="flex items-center gap-1.5 text-xs sm:text-sm"
             >
-              <tab.icon className="h-4 w-4" />
-              <span className="hidden sm:inline">{tab.title}</span>
+              <tab.icon className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline truncate">{tab.title}</span>
             </TabsTrigger>
           ))}
         </TabsList>
@@ -89,18 +101,7 @@ export function GuidePage() {
         {/* 탭 콘텐츠 */}
         {guideTabs.map((tab) => (
           <TabsContent key={tab.id} value={tab.id} className="mt-6">
-            <Card>
-              <CardHeader className="pb-4">
-                <CardTitle className="flex items-center gap-2">
-                  <tab.icon className="h-5 w-5 text-primary" />
-                  {tab.title}
-                </CardTitle>
-                <CardDescription>{tab.description}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <MarkdownContent content={tab.content} />
-              </CardContent>
-            </Card>
+            <tab.component />
           </TabsContent>
         ))}
       </Tabs>
