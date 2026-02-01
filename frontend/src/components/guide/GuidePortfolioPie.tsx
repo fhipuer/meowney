@@ -24,7 +24,7 @@ export function GuidePortfolioPie({
 }: GuidePortfolioPieProps) {
   return (
     <div className={cn('flex flex-col items-center space-y-4', className)}>
-      <div className="relative" style={{ width: '100%', height: size }}>
+      <div className="relative w-full" style={{ minWidth: size, height: size }}>
         <ResponsiveContainer width="100%" height={size}>
           <PieChart>
             <Pie

@@ -113,7 +113,7 @@ export function GuideRebalancingTab() {
       >
         <div className="flex flex-col md:flex-row items-center gap-4">
           {/* Column 1: 처음 설정 */}
-          <Card className="hover:shadow-md transition-shadow w-full md:flex-1">
+          <Card className="hover:shadow-md transition-shadow w-full md:flex-1 md:min-w-0">
             <CardContent className="p-5 flex flex-col items-center text-center">
               <span className="text-sm font-medium text-muted-foreground mb-2">
                 처음 설정
@@ -133,7 +133,7 @@ export function GuideRebalancingTab() {
           </div>
 
           {/* Column 2: 비율 틀어짐 */}
-          <Card className="hover:shadow-md transition-shadow w-full md:flex-1">
+          <Card className="hover:shadow-md transition-shadow w-full md:flex-1 md:min-w-0">
             <CardContent className="p-5 flex flex-col items-center text-center">
               <Badge variant="destructive" className="mb-2">
                 비율 틀어짐!
@@ -153,7 +153,7 @@ export function GuideRebalancingTab() {
           </div>
 
           {/* Column 3: 원래대로 */}
-          <Card className="hover:shadow-md transition-shadow w-full md:flex-1">
+          <Card className="hover:shadow-md transition-shadow w-full md:flex-1 md:min-w-0">
             <CardContent className="p-5 flex flex-col items-center text-center">
               <Badge
                 variant="default"
