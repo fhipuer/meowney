@@ -236,6 +236,18 @@ export function GuideAssetClassesTab() {
               </span>
             </div>
 
+            <div className="mt-2 pt-2 border-t border-border/50 space-y-1">
+              <p className="text-xs text-muted-foreground">
+                💡 만기에 따라 성격이 달라요
+              </p>
+              <p className="text-xs text-muted-foreground">
+                • 단기채(1~3년): 변동성이 낮아 현금처럼 안정적
+              </p>
+              <p className="text-xs text-muted-foreground">
+                • 장기채(10년+): 수익이 높지만 금리 변동에 민감
+              </p>
+            </div>
+
             <GuideTipBox variant="tip">
               채권은 느긋한 노묘 같아요. 급하지 않고 꾸준히 간식(이자)을
               받아먹죠!
@@ -347,6 +359,9 @@ export function GuideAssetClassesTab() {
                     <p className="text-red-500 dark:text-red-400">
                       - 변동성이 매우 높음
                     </p>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      대표 ETF: KODEX 원자재선물, DBC
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -413,6 +428,10 @@ export function GuideAssetClassesTab() {
           </RadarChart>
         </ResponsiveContainer>
 
+        <p className="text-xs text-muted-foreground text-center mt-1">
+          ※ 금은 대체자산의 일부이지만, 고유한 안전자산 성격으로 별도 비교합니다
+        </p>
+
         <div className="flex flex-wrap gap-4 justify-center">
           {radarColors.map((item) => (
             <div key={item.key} className="flex items-center gap-2">
@@ -451,6 +470,9 @@ export function GuideAssetClassesTab() {
               <h4 className="font-bold text-center mb-3">
                 초보자 기본 포트폴리오
               </h4>
+              <p className="text-xs text-muted-foreground text-center mb-3">
+                주식과 채권을 균형 있게 배분한 안정적인 구성이에요
+              </p>
               <GuidePortfolioPie data={beginnerPortfolio} size={200} />
             </CardContent>
           </Card>
@@ -460,6 +482,9 @@ export function GuideAssetClassesTab() {
               <h4 className="font-bold text-center mb-3">
                 공격적 포트폴리오
               </h4>
+              <p className="text-xs text-muted-foreground text-center mb-3">
+                높은 수익을 추구하되 대체자산으로 위험을 분산해요
+              </p>
               <GuidePortfolioPie data={aggressivePortfolio} size={200} />
             </CardContent>
           </Card>
