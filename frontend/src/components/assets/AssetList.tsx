@@ -269,14 +269,18 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
                     </div>
                   )}
                   <div className="flex items-center justify-end gap-1 text-sm flex-wrap">
-                    <span className={`flex items-center gap-1 ${getProfitClass(asset.profit_rate || 0)}`}>
-                      {(asset.profit_rate || 0) >= 0 ? (
-                        <TrendingUp className="h-3 w-3" />
-                      ) : (
-                        <TrendingDown className="h-3 w-3" />
-                      )}
-                      {formatPercent(asset.profit_rate || 0)}
-                    </span>
+                    {asset.asset_type === 'cash' ? (
+                      <span className="text-muted-foreground">-</span>
+                    ) : (
+                      <span className={`flex items-center gap-1 ${getProfitClass(asset.profit_rate || 0)}`}>
+                        {(asset.profit_rate || 0) >= 0 ? (
+                          <TrendingUp className="h-3 w-3" />
+                        ) : (
+                          <TrendingDown className="h-3 w-3" />
+                        )}
+                        {formatPercent(asset.profit_rate || 0)}
+                      </span>
+                    )}
                     <ExchangeRateInfo asset={asset} />
                   </div>
                 </div>

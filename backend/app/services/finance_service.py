@@ -215,17 +215,22 @@ class FinanceService:
                     asset_copy["profit_rate"] = 0.0
             elif asset.get("current_value"):
                 # 티커 없는 자산 (금현물, 현금, 예금 등)
-                # current_value = 현재 총 가치, average_price × quantity = 원금
                 current_value = Decimal(str(asset["current_value"]))
-                principal = avg_price * quantity
-
                 asset_copy["market_value"] = current_value
-                asset_copy["profit_loss"] = current_value - principal
 
-                if principal > 0:
-                    asset_copy["profit_rate"] = float(((current_value - principal) / principal) * 100)
-                else:
+                # 현금은 수익 개념 없음 냥~ 💰
+                if asset.get("asset_type") == "cash":
+                    asset_copy["profit_loss"] = Decimal("0")
                     asset_copy["profit_rate"] = 0.0
+                else:
+                    # current_value = 현재 총 가치, average_price × quantity = 원금
+                    principal = avg_price * quantity
+                    asset_copy["profit_loss"] = current_value - principal
+
+                    if principal > 0:
+                        asset_copy["profit_rate"] = float(((current_value - principal) / principal) * 100)
+                    else:
+                        asset_copy["profit_rate"] = 0.0
             else:
                 asset_copy["market_value"] = Decimal("0")
                 asset_copy["profit_loss"] = Decimal("0")

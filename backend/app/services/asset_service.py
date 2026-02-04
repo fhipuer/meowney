@@ -187,8 +187,10 @@ class AssetService:
             avg_price = Decimal(str(asset.get("average_price", 0)))
             currency = asset.get("currency", "KRW")
 
-            # 원금 계산: USD 자산은 매수시점 환율 사용
-            if currency == "USD":
+            # 현금은 수익 계산에서 제외: principal = market_value로 맞춤 냥~ 💰
+            if asset.get("asset_type") == "cash":
+                principal = market_value
+            elif currency == "USD":
                 # 매수시점 환율, 없으면 현재 환율로 폴백
                 purchase_rate = asset.get("purchase_exchange_rate")
                 if purchase_rate:
