@@ -205,3 +205,18 @@ NAS에 Docker 이미지를 빌드하고 배포합니다.
 **NAS 정보:**
 - Host: 192.168.0.9:1024
 - Path: `/volume1/homes/fhipuer/meowney/`
+
+## 개발 규칙
+
+### 외부 데이터 소스 사용 시 필수 검증
+yfinance 등 외부 라이브러리로 데이터를 가져오는 기능을 구현할 때는 **구현 후 반드시** 실제 반환값을 확인한다.
+
+```bash
+# 예시: 구현 전 티커/필드 가용성 확인
+cd backend
+python -c "import yfinance as yf; info = yf.Ticker('TICKER').info; print(info.get('fieldName'))"
+```
+
+- 특정 필드(예: `trailingPE`)가 `None`을 반환할 수 있으므로 구현 전에 실제 데이터 확인 필수
+- 대안 티커/소스가 필요한 경우 여러 후보를 테스트한 후 채택
+- 프론트엔드 변경 후 TypeScript 타입 체크(`npx tsc --noEmit`) 실행 확인

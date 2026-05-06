@@ -1,6 +1,7 @@
 """
 대시보드 API 냥~ 🐱
 """
+import asyncio
 from uuid import UUID
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -321,51 +322,90 @@ async def get_market_indicators():
     - KOSPI, S&P 500, NASDAQ
     - VIX (공포지수)
     - USD/KRW 환율
+    - 금/은 현물 가격비
+    - 주요 지수 PER (S&P 500, NASDAQ, KOSPI)
     """
     finance_service = FinanceService()
 
     # 주요 지표 목록
-    indicators = [
+    indicators_meta = [
         {"ticker": "^KS11", "name": "KOSPI", "currency": "KRW"},
         {"ticker": "^GSPC", "name": "S&P 500", "currency": "USD"},
         {"ticker": "^IXIC", "name": "NASDAQ", "currency": "USD"},
         {"ticker": "^VIX", "name": "VIX", "currency": ""},
     ]
 
+    # 지수 가격, 금/은 비율, PER 병렬 조회
+    indicator_tasks = [
+        finance_service.get_ticker_history(m["ticker"], 2) for m in indicators_meta
+    ]
+    exchange_task = finance_service.get_exchange_rate()
+    gold_silver_task = finance_service.get_gold_silver_ratio()
+    per_task = finance_service.get_index_per()
+
+    (
+        *indicator_results,
+        exchange_rate,
+        gold_silver,
+        per_data,
+    ) = await asyncio.gather(
+        *indicator_tasks,
+        exchange_task,
+        gold_silver_task,
+        per_task,
+        return_exceptions=True,
+    )
+
     results = []
 
-    for indicator in indicators:
+    for meta, data in zip(indicators_meta, indicator_results):
         try:
-            data = await finance_service.get_ticker_history(indicator["ticker"], 2)
+            if isinstance(data, Exception):
+                continue
             if data and data.get("data") and len(data["data"]) >= 1:
                 latest = data["data"][-1]
                 results.append({
-                    "ticker": indicator["ticker"],
-                    "name": indicator["name"],
+                    "ticker": meta["ticker"],
+                    "name": meta["name"],
                     "price": latest["close"],
                     "change_rate": data.get("change_rate", 0),
-                    "currency": indicator["currency"],
+                    "currency": meta["currency"],
                 })
         except Exception:
-            # 개별 지표 조회 실패 시 스킵
             pass
 
     # 환율 추가
     try:
-        rate = await finance_service.get_exchange_rate()
-        results.append({
-            "ticker": "USDKRW=X",
-            "name": "USD/KRW",
-            "price": rate,
-            "change_rate": 0,  # 환율은 별도 계산 필요
-            "currency": "KRW",
-        })
+        if not isinstance(exchange_rate, Exception):
+            results.append({
+                "ticker": "USDKRW=X",
+                "name": "USD/KRW",
+                "price": exchange_rate,
+                "change_rate": 0,
+                "currency": "KRW",
+            })
     except Exception:
         pass
 
+    # 금/은 비율
+    gold_silver_result = None
+    if not isinstance(gold_silver, Exception) and gold_silver.get("valid"):
+        gold_silver_result = {
+            "gold_price": gold_silver["gold_price"],
+            "silver_price": gold_silver["silver_price"],
+            "ratio": gold_silver["ratio"],
+        }
+
+    # PER 데이터
+    per_result = None
+    if not isinstance(per_data, Exception):
+        per_result = per_data
+
     return {
         "indicators": results,
-        "timestamp": datetime.now().isoformat()
+        "gold_silver_ratio": gold_silver_result,
+        "index_per": per_result,
+        "timestamp": datetime.now().isoformat(),
     }
 
 

@@ -412,6 +412,84 @@ class FinanceService:
         )
         return result
 
+    def _get_gold_silver_ratio_sync(self) -> dict:
+        """
+        금/은 비율 조회 냥~ (GC=F / SI=F)
+        """
+        try:
+            gold = yf.Ticker("GC=F")
+            silver = yf.Ticker("SI=F")
+
+            gold_info = gold.info
+            silver_info = silver.info
+
+            gold_price = (
+                gold_info.get("regularMarketPrice")
+                or gold_info.get("currentPrice")
+                or gold_info.get("previousClose")
+            )
+            silver_price = (
+                silver_info.get("regularMarketPrice")
+                or silver_info.get("currentPrice")
+                or silver_info.get("previousClose")
+            )
+
+            if gold_price and silver_price and float(silver_price) > 0:
+                ratio = float(gold_price) / float(silver_price)
+                return {
+                    "gold_price": float(gold_price),
+                    "silver_price": float(silver_price),
+                    "ratio": round(ratio, 2),
+                    "valid": True,
+                }
+            return {"valid": False, "ratio": None, "gold_price": None, "silver_price": None}
+        except Exception as e:
+            print(f"🙀 금/은 비율 조회 실패 냥: {e}")
+            return {"valid": False, "ratio": None, "gold_price": None, "silver_price": None}
+
+    async def get_gold_silver_ratio(self) -> dict:
+        """금/은 현물 가격비 비동기 조회 냥~ 🐱"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, self._get_gold_silver_ratio_sync)
+
+    def _get_index_per_sync(self) -> dict:
+        """
+        주요 지수 PER 조회 냥~
+        - S&P 500: ^GSPC trailingPE
+        - NASDAQ: QQQ ETF trailingPE (나스닥 직접 PER 없음)
+        - KOSPI: 069500.KS (KODEX 200 ETF) trailingPE
+        """
+        results = {}
+
+        sources = [
+            ("sp500", "SPY", "S&P 500 (SPY)"),
+            ("nasdaq", "QQQ", "NASDAQ (QQQ)"),
+            ("kospi", "EWY", "KOSPI (EWY)"),
+        ]
+
+        for key, ticker, label in sources:
+            try:
+                t = yf.Ticker(ticker)
+                info = t.info
+                pe = info.get("trailingPE") or info.get("forwardPE")
+                results[key] = {
+                    "label": label,
+                    "ticker": ticker,
+                    "per": round(float(pe), 2) if pe else None,
+                    "type": "trailing" if info.get("trailingPE") else ("forward" if info.get("forwardPE") else None),
+                    "valid": pe is not None,
+                }
+            except Exception as e:
+                print(f"🙀 PER 조회 실패 냥: {ticker} - {e}")
+                results[key] = {"label": label, "ticker": ticker, "per": None, "type": None, "valid": False}
+
+        return results
+
+    async def get_index_per(self) -> dict:
+        """주요 지수 PER 비동기 조회 냥~ 🐱"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, self._get_index_per_sync)
+
 
 # 싱글톤 인스턴스 (필요시 사용)
 _finance_service: FinanceService | None = None

@@ -426,8 +426,30 @@ export interface MarketIndicator {
   currency: string
 }
 
+export interface GoldSilverRatio {
+  gold_price: number
+  silver_price: number
+  ratio: number
+}
+
+export interface IndexPerEntry {
+  label: string
+  ticker: string
+  per: number | null
+  type: string | null
+  valid: boolean
+}
+
+export interface IndexPer {
+  sp500: IndexPerEntry
+  nasdaq: IndexPerEntry
+  kospi: IndexPerEntry
+}
+
 export interface MarketIndicatorsResponse {
   indicators: MarketIndicator[]
+  gold_silver_ratio: GoldSilverRatio | null
+  index_per: IndexPer | null
   timestamp: string
 }
 
