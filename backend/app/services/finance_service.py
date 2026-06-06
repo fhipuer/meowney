@@ -46,7 +46,7 @@ class FinanceService:
             return {
                 "ticker": ticker,
                 "current_price": current_price,
-                "currency": info.get("currency", "USD"),
+                "currency": info.get("currency"),  # None 유지 - 기본값 USD 가정하면 KRW 자산에 환율 곱히는 버그 발생
                 "name": info.get("shortName") or info.get("longName"),
                 "exchange": info.get("exchange"),
                 "valid": current_price is not None,
