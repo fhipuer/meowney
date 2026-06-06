@@ -149,9 +149,12 @@ class FinanceService:
                 price_info = prices[ticker]
                 current_price = price_info.get("current_price")
 
+                # yfinance가 currency None 반환 시 DB의 자산 통화를 따름
+                price_currency = price_info.get("currency") or currency
+
                 if current_price:
-                    # USD 자산인 경우 원화 환산 (선택적)
-                    if price_info.get("currency") == "USD" and currency == "KRW":
+                    # 가격 통화가 USD인데 자산 통화가 KRW이면 원화 환산
+                    if price_currency == "USD" and currency == "KRW":
                         current_price = float(current_price) * current_exchange_rate
 
                     asset_copy["current_price"] = Decimal(str(current_price))
