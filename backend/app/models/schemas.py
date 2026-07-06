@@ -277,6 +277,8 @@ class PlanAllocationBase(BaseModel):
     alias: Optional[str] = None  # 티커 없는 자산용 별칭 냥~
     display_name: Optional[str] = None  # 커스텀 표시명 냥~
     target_percentage: float = Field(..., ge=0, le=100)
+    absolute_band: Optional[float] = Field(None, ge=0, le=100, description="절대 밴드 (%p), None이면 전역 기본값 사용")
+    relative_band: Optional[float] = Field(None, ge=0, le=200, description="상대 밴드 (%), None이면 전역 기본값 사용")
 
 
 class PlanAllocationCreate(PlanAllocationBase):
@@ -404,6 +406,8 @@ class AssetRebalanceSuggestion(BaseModel):
     suggested_amount: Decimal  # 양수면 매수, 음수면 매도
     suggested_quantity: Optional[Decimal] = None  # 매수/매도 수량
     is_matched: bool = True  # 보유 자산과 매칭 여부 냥~
+    effective_band: float = 5.0
+    action: str = "hold"
 
 
 # ============================================
@@ -431,6 +435,8 @@ class GroupRebalanceSuggestion(BaseModel):
     target_value: Decimal
     suggested_amount: Decimal
     items: list[GroupItemSuggestion] = []
+    effective_band: float = 5.0
+    action: str = "hold"
 
 
 class AssetRebalanceResponse(BaseModel):
@@ -492,14 +498,14 @@ class BenchmarkHistoryRequest(BaseModel):
 
 class UserSettingsBase(BaseModel):
     """사용자 설정 기본"""
-    alert_threshold: float = Field(5.0, ge=0, le=20, description="알림 기준 (%)")
-    calculator_tolerance: float = Field(5.0, ge=0, le=20, description="계산기 기본값 (%)")
+    default_absolute_band: float = Field(5.0, ge=0, le=100, description="기본 절대 밴드 (%p)")
+    default_relative_band: float = Field(25.0, ge=0, le=200, description="기본 상대 밴드 (%)")
 
 
 class UserSettingsUpdate(BaseModel):
     """사용자 설정 수정 요청"""
-    alert_threshold: Optional[float] = Field(None, ge=0, le=20)
-    calculator_tolerance: Optional[float] = Field(None, ge=0, le=20)
+    default_absolute_band: Optional[float] = Field(None, ge=0, le=100)
+    default_relative_band: Optional[float] = Field(None, ge=0, le=200)
 
 
 class UserSettingsResponse(UserSettingsBase):

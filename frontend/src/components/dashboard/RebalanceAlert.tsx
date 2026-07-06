@@ -13,15 +13,15 @@ import { useSettings } from '@/hooks/useSettings'
 export function RebalanceAlert() {
   const [dismissed, setDismissed] = useState(false)
 
-  // 설정에서 알림 기준 가져오기 냥~
+  // 편차 밴드 기본값을 알림 기준으로 사용 냥~
   const { data: settings } = useSettings()
-  const alertThreshold = settings?.alert_threshold ?? 5.0
+  const alertThreshold = settings?.default_absolute_band ?? 5.0
 
   const { data: alerts } = useQuery({
     queryKey: ['rebalanceAlerts', alertThreshold],
     queryFn: () => dashboardApi.getRebalanceAlerts(undefined, alertThreshold),
     staleTime: 5 * 60 * 1000,
-    enabled: alertThreshold > 0,  // threshold가 0이면 알림 비활성화
+    enabled: alertThreshold > 0,
   })
 
   if (dismissed || !alerts?.needs_rebalancing) {

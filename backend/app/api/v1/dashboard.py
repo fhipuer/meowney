@@ -160,17 +160,25 @@ async def _get_main_plan_alerts(
     rebalance_service,
 ) -> RebalanceAlertsResponse:
     """메인 플랜 기반 리밸런싱 알림 냥~"""
-    # 리밸런싱 계산
+    # 리밸런싱 계산 (effective_band, action 포함)
     result = await rebalance_service.calculate_rebalance_by_plan(
         UUID(main_plan["id"]), portfolio_id
     )
 
+    # 그룹용 기본 절대 밴드 조회 냥~
+    DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
+    settings_result = rebalance_service.supabase.table("user_settings").select(
+        "default_absolute_band"
+    ).eq("user_id", DEFAULT_USER_ID).execute()
+    settings_row = settings_result.data[0] if settings_result.data else {}
+    group_band = float(settings_row.get("default_absolute_band") or 5.0)
+
     alerts = []
 
-    # 개별 배분 알림
+    # 개별 배분 알림 — effective_band 기반 action으로 판단 냥~
     for suggestion in result.get("suggestions", []):
-        deviation = abs(suggestion["target_percentage"] - suggestion["current_percentage"])
-        if deviation >= threshold:
+        if suggestion.get("action") != "hold":
+            deviation = abs(suggestion["target_percentage"] - suggestion["current_percentage"])
             alerts.append(RebalanceAlert(
                 category_name=suggestion["asset_name"],
                 current_percentage=round(suggestion["current_percentage"], 2),
@@ -179,10 +187,10 @@ async def _get_main_plan_alerts(
                 direction="over" if suggestion["current_percentage"] > suggestion["target_percentage"] else "under",
             ))
 
-    # 그룹 배분 알림
+    # 그룹 배분 알림 — default_absolute_band 사용 냥~
     for group_sugg in result.get("group_suggestions", []):
         deviation = abs(group_sugg["target_percentage"] - group_sugg["current_percentage"])
-        if deviation >= threshold:
+        if deviation >= group_band:
             alerts.append(RebalanceAlert(
                 category_name=f"{group_sugg['group_name']}",
                 current_percentage=round(group_sugg["current_percentage"], 2),
@@ -196,7 +204,7 @@ async def _get_main_plan_alerts(
 
     return RebalanceAlertsResponse(
         alerts=alerts,
-        threshold=threshold,
+        threshold=group_band,
         needs_rebalancing=len(alerts) > 0,
     )
 

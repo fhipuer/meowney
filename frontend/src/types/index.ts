@@ -194,6 +194,8 @@ export interface PlanAllocation {
   alias: string | null  // 티커 없는 자산용 별칭 냥~
   display_name: string | null  // 커스텀 표시명 냥~
   target_percentage: number
+  absolute_band?: number | null
+  relative_band?: number | null
   asset_name?: string
   matched_asset?: Asset  // 매칭된 자산 정보 냥~
   matched_asset_name?: string  // 매칭된 자산명 냥~
@@ -268,6 +270,8 @@ export interface PlanAllocationCreate {
   alias?: string  // 티커 없는 자산용 별칭 냥~
   display_name?: string  // 커스텀 표시명 냥~
   target_percentage: number
+  absolute_band?: number | null
+  relative_band?: number | null
 }
 
 // 그룹 아이템 생성 요청 (weight 제거됨)
@@ -299,6 +303,8 @@ export interface AssetRebalanceSuggestion {
   suggested_amount: number
   suggested_quantity: number | null
   is_matched: boolean  // 보유 자산과 매칭 여부 냥~
+  effective_band: number
+  action: 'buy' | 'sell' | 'hold'
 }
 
 // 그룹 아이템 정보 (단순화: 개별 목표 없음)
@@ -322,6 +328,8 @@ export interface GroupRebalanceSuggestion {
   target_value: number
   suggested_amount: number
   items: GroupItemSuggestion[]
+  effective_band: number
+  action: 'buy' | 'sell' | 'hold'
 }
 
 // 자산 기준 리밸런싱 응답
@@ -488,13 +496,13 @@ export interface ManualHistoryCreateResponse {
 export interface UserSettings {
   id: string
   user_id: string
-  alert_threshold: number      // 알림 기준 (%)
-  calculator_tolerance: number  // 계산기 기본값 (%)
+  default_absolute_band: number  // 기본 절대 밴드 (%p)
+  default_relative_band: number  // 기본 상대 밴드 (%)
   created_at: string
   updated_at: string
 }
 
 export interface UserSettingsUpdate {
-  alert_threshold?: number
-  calculator_tolerance?: number
+  default_absolute_band?: number
+  default_relative_band?: number
 }

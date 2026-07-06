@@ -291,6 +291,18 @@ END
 $$;
 
 -- ============================================
+-- 편차 밴드 규칙 마이그레이션 (v0.9.0)
+-- Supabase SQL Editor에서 아래 쿼리 실행 냥~
+-- ============================================
+-- ALTER TABLE plan_allocations
+--   ADD COLUMN IF NOT EXISTS absolute_band DECIMAL(5,2) DEFAULT NULL,
+--   ADD COLUMN IF NOT EXISTS relative_band DECIMAL(5,2) DEFAULT NULL;
+--
+-- ALTER TABLE user_settings
+--   ADD COLUMN IF NOT EXISTS default_absolute_band DECIMAL(5,2) NOT NULL DEFAULT 5.0,
+--   ADD COLUMN IF NOT EXISTS default_relative_band DECIMAL(5,2) NOT NULL DEFAULT 25.0;
+
+-- ============================================
 -- 벤치마크 히스토리 테이블 (v0.6.0)
 -- KOSPI, S&P 500, NASDAQ 일별 종가 저장 냥~
 -- ============================================

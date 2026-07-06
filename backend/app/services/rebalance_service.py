@@ -200,6 +200,10 @@ class RebalanceService:
                 item["alias"] = alloc["alias"]
             if alloc.get("display_name"):
                 item["display_name"] = alloc["display_name"]
+            if alloc.get("absolute_band") is not None:
+                item["absolute_band"] = alloc["absolute_band"]
+            if alloc.get("relative_band") is not None:
+                item["relative_band"] = alloc["relative_band"]
             allocation_data.append(item)
 
         response = self.supabase.table("plan_allocations").insert(allocation_data).execute()
@@ -477,11 +481,21 @@ class RebalanceService:
         # 자산 가치 계산
         total_value, asset_values = await self._get_asset_values(assets)
 
+        # user_settings에서 기본 밴드값 조회 냥~
+        DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
+        settings_result = self.supabase.table("user_settings").select(
+            "default_absolute_band,default_relative_band"
+        ).eq("user_id", DEFAULT_USER_ID).execute()
+        settings_row = settings_result.data[0] if settings_result.data else {}
+        default_abs_band = Decimal(str(settings_row.get("default_absolute_band") or 5))
+        default_rel_band = Decimal(str(settings_row.get("default_relative_band") or 25))
+
         # 개별 배분 제안 계산
         suggestions = []
         for alloc in allocations:
             suggestion = await self._calculate_allocation_suggestion(
-                alloc, assets, asset_values, total_value
+                alloc, assets, asset_values, total_value,
+                default_abs_band, default_rel_band
             )
             suggestions.append(suggestion)
 
@@ -489,7 +503,8 @@ class RebalanceService:
         group_suggestions = []
         for group in groups:
             group_suggestion = await self._calculate_group_suggestion(
-                group, assets, asset_values, total_value
+                group, assets, asset_values, total_value,
+                default_abs_band, default_rel_band
             )
             group_suggestions.append(group_suggestion)
 
@@ -502,7 +517,13 @@ class RebalanceService:
         }
 
     async def _calculate_allocation_suggestion(
-        self, alloc: dict, assets: list[dict], asset_values: dict, total_value: Decimal
+        self,
+        alloc: dict,
+        assets: list[dict],
+        asset_values: dict,
+        total_value: Decimal,
+        default_absolute_band: Decimal = Decimal("5"),
+        default_relative_band: Decimal = Decimal("25"),
     ) -> dict:
         """개별 배분 제안 계산 냥~"""
         target_pct = Decimal(str(alloc["target_percentage"]))
@@ -525,6 +546,17 @@ class RebalanceService:
         )
         diff_pct = target_pct - current_pct
         suggested_amount = target_value - current_value
+
+        # 5/25 밴드 계산: effective_band = min(절대, 목표 × 상대/100) 냥~
+        abs_band = Decimal(str(alloc.get("absolute_band") or default_absolute_band))
+        rel_band = Decimal(str(alloc.get("relative_band") or default_relative_band))
+        effective_band = min(abs_band, target_pct * rel_band / Decimal("100"))
+        if abs(diff_pct) <= effective_band:
+            action = "hold"
+        elif diff_pct > 0:
+            action = "buy"
+        else:
+            action = "sell"
 
         # 매수/매도 수량 계산
         suggested_qty = None
@@ -562,10 +594,18 @@ class RebalanceService:
             "suggested_amount": suggested_amount,
             "suggested_quantity": suggested_qty,
             "is_matched": matched_asset is not None,
+            "effective_band": float(effective_band),
+            "action": action,
         }
 
     async def _calculate_group_suggestion(
-        self, group: dict, assets: list[dict], asset_values: dict, total_value: Decimal
+        self,
+        group: dict,
+        assets: list[dict],
+        asset_values: dict,
+        total_value: Decimal,
+        default_absolute_band: Decimal = Decimal("5"),
+        default_relative_band: Decimal = Decimal("25"),
     ) -> dict:
         """그룹 배분 제안 계산 냥~ (단순화: weight 없이 합산만)"""
         target_pct = Decimal(str(group["target_percentage"]))
@@ -606,6 +646,16 @@ class RebalanceService:
             else Decimal("0")
         )
 
+        # 그룹에도 5/25 밴드 적용 냥~
+        effective_band = min(default_absolute_band, target_pct * default_relative_band / Decimal("100"))
+        diff_pct = target_pct - current_pct
+        if abs(diff_pct) <= effective_band:
+            action = "hold"
+        elif diff_pct > 0:
+            action = "buy"
+        else:
+            action = "sell"
+
         return {
             "group_id": group.get("id"),
             "group_name": group["name"],
@@ -615,4 +665,6 @@ class RebalanceService:
             "target_value": target_value,
             "suggested_amount": target_value - group_current_value,
             "items": item_details,
+            "effective_band": float(effective_band),
+            "action": action,
         }

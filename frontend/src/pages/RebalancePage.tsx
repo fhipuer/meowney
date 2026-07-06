@@ -2,13 +2,11 @@
  * 리밸런싱 페이지
  * 플랜 기반 자산별 리밸런싱 계산
  */
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { TrendingUp, TrendingDown, Settings2, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -27,16 +25,6 @@ export function RebalancePage() {
   const calculateMutation = useCalculateRebalance()
 
   const [selectedPlanId, setSelectedPlanId] = useState<string>('')
-  const [tolerancePercent, setTolerancePercent] = useState<number>(5.0)
-  const [isInitialized, setIsInitialized] = useState(false)
-
-  // 설정에서 계산기 기본값 로드 냥~
-  useEffect(() => {
-    if (settings && !isInitialized) {
-      setTolerancePercent(settings.calculator_tolerance)
-      setIsInitialized(true)
-    }
-  }, [settings, isInitialized])
 
   // 메인 플랜 자동 선택
   const mainPlan = plans?.find((p) => p.is_main)
@@ -131,20 +119,6 @@ export function RebalancePage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="tolerance" className="text-sm whitespace-nowrap">허용 오차</Label>
-                  <Input
-                    id="tolerance"
-                    type="number"
-                    min="0"
-                    max="10"
-                    step="0.1"
-                    value={tolerancePercent}
-                    onChange={(e) => setTolerancePercent(parseFloat(e.target.value) || 0.5)}
-                    className="w-20"
-                  />
-                  <span className="text-sm text-muted-foreground">%</span>
-                </div>
                 <Button
                   onClick={handleCalculate}
                   disabled={!effectivePlanId || calculateMutation.isPending}
@@ -152,6 +126,11 @@ export function RebalancePage() {
                   {calculateMutation.isPending ? '계산 중...' : '리밸런싱 계산'}
                 </Button>
               </div>
+              {settings && (
+                <p className="text-xs text-muted-foreground">
+                  편차 밴드: 절대 ±{settings.default_absolute_band ?? 5}%p / 상대 ±{settings.default_relative_band ?? 25}% (설정에서 변경 가능)
+                </p>
+              )}
 
               {!effectivePlanId && (
                 <Alert>
@@ -187,8 +166,8 @@ export function RebalancePage() {
                         <>
                           <h4 className="font-semibold text-sm text-muted-foreground mb-2">개별 배분</h4>
                           {calculateMutation.data.suggestions.map((suggestion, index) => {
-                            const isBuy = suggestion.suggested_amount > 0
-                            const isHold = Math.abs(suggestion.difference_percentage) < tolerancePercent
+                            const isHold = suggestion.action === 'hold'
+                            const isBuy = suggestion.action === 'buy'
 
                             return (
                               <div
@@ -209,6 +188,11 @@ export function RebalancePage() {
                                   </div>
                                   <div className="text-xs text-muted-foreground mt-1">
                                     평가금액: {formatKRW(suggestion.current_value)}
+                                    {suggestion.effective_band !== undefined && (
+                                      <span className="ml-2 text-muted-foreground/70">
+                                        허용 ±{suggestion.effective_band.toFixed(2)}%p
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
 
@@ -257,9 +241,8 @@ export function RebalancePage() {
                           <h4 className="font-semibold text-sm text-muted-foreground mb-2 mt-4">그룹 배분</h4>
                           {calculateMutation.data.group_suggestions.map((groupSuggestion, index) => {
                             const diff = (groupSuggestion.target_percentage - (groupSuggestion.current_percentage ?? 0))
-                            const isOverweight = diff < -tolerancePercent
-                            const isUnderweight = diff > tolerancePercent
-                            const isBalanced = !isOverweight && !isUnderweight
+                            const isBalanced = groupSuggestion.action === 'hold'
+                            const isUnderweight = groupSuggestion.action === 'buy'
 
                             return (
                               <div

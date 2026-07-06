@@ -28,6 +28,7 @@ import {
 import { useAssets } from '@/hooks/useAssets'
 import { useExchangeRate } from '@/hooks/useDashboard'
 import { useSaveAllocations, useUpdatePlan, useSaveGroups } from '@/hooks/useRebalance'
+import { useSettings } from '@/hooks/useSettings'
 import { formatKRW, formatUSD } from '@/lib/utils'
 import { TickerSparkline } from './TickerSparkline'
 import { RealTimePieChart } from './RealTimePieChart'
@@ -49,6 +50,8 @@ interface AllocationItem {
   alias?: string
   display_name?: string
   target_percentage: number
+  absolute_band?: number | null
+  relative_band?: number | null
   matched_asset?: Asset
 }
 
@@ -83,6 +86,7 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
   const { data: assetsData } = useAssets()
   const assets = assetsData?.assets
   const { data: exchangeRate } = useExchangeRate()
+  const { data: settings } = useSettings()
   const saveAllocationsMutation = useSaveAllocations()
   const saveGroupsMutation = useSaveGroups()
   const updatePlanMutation = useUpdatePlan()
@@ -101,6 +105,8 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
       alias: alloc.alias || undefined,
       display_name: alloc.display_name || undefined,
       target_percentage: alloc.target_percentage,
+      absolute_band: alloc.absolute_band ?? null,
+      relative_band: alloc.relative_band ?? null,
       matched_asset: matchItemToAsset(alloc, assets || []),
     }))
   })
@@ -262,6 +268,14 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
   const handleAllocationChange = (id: string, value: number) => {
     setAllocations((prev) =>
       prev.map((a) => (a.id === id ? { ...a, target_percentage: Math.min(100, Math.max(0, value)) } : a))
+    )
+  }
+
+  // 슬롯별 밴드 변경
+  const handleAllocationBandChange = (id: string, field: 'absolute_band' | 'relative_band', raw: string) => {
+    const val = raw === '' ? null : parseFloat(raw)
+    setAllocations((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, [field]: val !== null && isNaN(val) ? null : val } : a))
     )
   }
 
@@ -517,6 +531,8 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
         alias: a.alias,
         display_name: a.display_name,
         target_percentage: a.target_percentage,
+        absolute_band: a.absolute_band ?? null,
+        relative_band: a.relative_band ?? null,
       }))
 
     await saveAllocationsMutation.mutateAsync({
@@ -761,6 +777,38 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                         </div>
                       </div>
                       <Progress value={alloc.target_percentage} className="h-1.5" />
+                      {/* 슬롯별 편차 밴드 입력 */}
+                      <div className="flex items-center gap-3 pt-1">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">편차 밴드:</span>
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.5"
+                            className="w-16 h-7 text-xs text-right"
+                            value={alloc.absolute_band ?? ''}
+                            placeholder={String(settings?.default_absolute_band ?? 5)}
+                            onChange={(e) => handleAllocationBandChange(alloc.id, 'absolute_band', e.target.value)}
+                          />
+                          <span className="text-xs text-muted-foreground">%p</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">/</span>
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min="0"
+                            max="200"
+                            step="5"
+                            className="w-16 h-7 text-xs text-right"
+                            value={alloc.relative_band ?? ''}
+                            placeholder={String(settings?.default_relative_band ?? 25)}
+                            onChange={(e) => handleAllocationBandChange(alloc.id, 'relative_band', e.target.value)}
+                          />
+                          <span className="text-xs text-muted-foreground">%</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground/60">(비워두면 전역 기본값 사용)</span>
+                      </div>
                     </div>
                   )
                 })}

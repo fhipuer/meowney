@@ -38,16 +38,16 @@ export function SettingsPage() {
   // 리밸런싱 설정 상태 냥~
   const { data: settings, isLoading: settingsLoading } = useSettings()
   const updateSettings = useUpdateSettings()
-  const [alertThreshold, setAlertThreshold] = useState(5.0)
-  const [calculatorTolerance, setCalculatorTolerance] = useState(5.0)
+  const [defaultAbsoluteBand, setDefaultAbsoluteBand] = useState(5.0)
+  const [defaultRelativeBand, setDefaultRelativeBand] = useState(25.0)
   const [settingsMessage, setSettingsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [hasChanges, setHasChanges] = useState(false)
 
   // 설정값이 로드되면 상태 업데이트 냥~
   useEffect(() => {
     if (settings) {
-      setAlertThreshold(settings.alert_threshold)
-      setCalculatorTolerance(settings.calculator_tolerance)
+      setDefaultAbsoluteBand(settings.default_absolute_band ?? 5.0)
+      setDefaultRelativeBand(settings.default_relative_band ?? 25.0)
       setHasChanges(false)
     }
   }, [settings])
@@ -56,8 +56,8 @@ export function SettingsPage() {
   const handleSaveSettings = async () => {
     try {
       await updateSettings.mutateAsync({
-        alert_threshold: alertThreshold,
-        calculator_tolerance: calculatorTolerance,
+        default_absolute_band: defaultAbsoluteBand,
+        default_relative_band: defaultRelativeBand,
       })
       setSettingsMessage({ type: 'success', text: '설정이 저장됐다냥~ 🎉' })
       setHasChanges(false)
@@ -66,15 +66,14 @@ export function SettingsPage() {
     }
   }
 
-  // 설정 변경 감지 냥~
-  const handleAlertThresholdChange = (value: number[]) => {
-    setAlertThreshold(value[0])
+  const handleAbsoluteBandChange = (value: number[]) => {
+    setDefaultAbsoluteBand(value[0])
     setHasChanges(true)
     setSettingsMessage(null)
   }
 
-  const handleCalculatorToleranceChange = (value: number[]) => {
-    setCalculatorTolerance(value[0])
+  const handleRelativeBandChange = (value: number[]) => {
+    setDefaultRelativeBand(value[0])
     setHasChanges(true)
     setSettingsMessage(null)
   }
@@ -270,7 +269,7 @@ export function SettingsPage() {
             리밸런싱 설정
           </CardTitle>
           <CardDescription>
-            리밸런싱 알림 기준과 계산기 기본값을 설정하세요
+            편차 밴드 기본값을 설정하세요
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -281,47 +280,51 @@ export function SettingsPage() {
             </div>
           ) : (
             <>
-              {/* 알림 기준 설정 */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>대시보드 알림 기준</Label>
-                  <span className="text-sm font-medium text-primary">
-                    ±{alertThreshold.toFixed(1)}%
-                  </span>
-                </div>
-                <Slider
-                  value={[alertThreshold]}
-                  onValueChange={handleAlertThresholdChange}
-                  min={0}
-                  max={20}
-                  step={0.5}
-                  className="w-full"
-                />
+              {/* 편차 밴드 기본값 설정 (5/25 룰) */}
+              <div className="space-y-1">
+                <Label className="text-sm font-semibold">편차 밴드 기본값 (5/25 룰)</Label>
                 <p className="text-xs text-muted-foreground">
-                  목표 비율과 현재 비율의 차이가 이 값을 초과하면 대시보드에 리밸런싱 알림이 표시됩니다.
+                  실효 밴드 = min(절대 밴드, 목표비율 × 상대 밴드) — 이 범위 내면 홀드
                 </p>
               </div>
 
-              <Separator />
-
-              {/* 계산기 기본값 설정 */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label>리밸런싱 계산기 기본값</Label>
+                  <Label>기본 절대 밴드</Label>
                   <span className="text-sm font-medium text-primary">
-                    ±{calculatorTolerance.toFixed(1)}%
+                    ±{defaultAbsoluteBand.toFixed(1)}%p
                   </span>
                 </div>
                 <Slider
-                  value={[calculatorTolerance]}
-                  onValueChange={handleCalculatorToleranceChange}
+                  value={[defaultAbsoluteBand]}
+                  onValueChange={handleAbsoluteBandChange}
                   min={0}
                   max={20}
                   step={0.5}
                   className="w-full"
                 />
                 <p className="text-xs text-muted-foreground">
-                  리밸런싱 페이지에서 허용 오차 슬라이더의 초기값으로 사용됩니다.
+                  슬롯별 설정이 없을 때 사용하는 절대 편차 허용치입니다.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>기본 상대 밴드</Label>
+                  <span className="text-sm font-medium text-primary">
+                    ±{defaultRelativeBand.toFixed(0)}%
+                  </span>
+                </div>
+                <Slider
+                  value={[defaultRelativeBand]}
+                  onValueChange={handleRelativeBandChange}
+                  min={0}
+                  max={100}
+                  step={5}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  목표 비율 대비 상대적 허용치입니다. 예: 목표 5%, 상대 25% → 허용 ±1.25%p
                 </p>
               </div>
 

@@ -29,8 +29,8 @@ async def get_settings(db: SupabaseDep):
     # 설정이 없으면 기본값으로 생성
     new_settings = {
         "user_id": str(DEFAULT_USER_ID),
-        "alert_threshold": 5.0,
-        "calculator_tolerance": 5.0,
+        "default_absolute_band": 5.0,
+        "default_relative_band": 25.0,
     }
 
     insert_result = db.table("user_settings").insert(new_settings).execute()
@@ -59,8 +59,8 @@ async def update_settings(settings: UserSettingsUpdate, db: SupabaseDep):
         # 기본값으로 생성 후 업데이트
         new_settings = {
             "user_id": str(DEFAULT_USER_ID),
-            "alert_threshold": 5.0,
-            "calculator_tolerance": 5.0,
+            "default_absolute_band": 5.0,
+            "default_relative_band": 25.0,
             **update_data,
         }
         result = db.table("user_settings").insert(new_settings).execute()
