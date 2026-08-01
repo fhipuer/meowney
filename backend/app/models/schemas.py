@@ -104,6 +104,15 @@ class DashboardSummary(BaseModel):
     total_principal: Decimal = Field(..., description="총 투자원금")
     total_profit: Decimal = Field(..., description="총 손익")
     profit_rate: float = Field(..., description="총 수익률 (%)")
+    annual_asset_change_rate: Optional[float] = Field(
+        None, description="연초 기준 연간 자산증감률 (%)"
+    )
+    annual_baseline_value: Optional[Decimal] = Field(
+        None, description="연초에 가장 가까운 자산가치"
+    )
+    annual_baseline_date: Optional[date] = Field(
+        None, description="연간 자산증감률 기준 스냅샷 날짜"
+    )
     asset_count: int = Field(..., description="보유 자산 수")
     allocations: list[CategoryAllocation] = Field(default_factory=list)
     last_updated: datetime

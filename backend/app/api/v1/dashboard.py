@@ -58,6 +58,14 @@ async def get_dashboard_summary(
     )
     print(f"[DEBUG] summary.total_value: {summary.total_value}")
 
+    (
+        summary.annual_asset_change_rate,
+        summary.annual_baseline_value,
+        summary.annual_baseline_date,
+    ) = await asset_service.get_annual_asset_change(
+        portfolio_id, summary.total_value
+    )
+
     # 메인 플랜 정보 추가 냥~
     main_plan = await rebalance_service.get_main_plan(portfolio_id)
     if main_plan:

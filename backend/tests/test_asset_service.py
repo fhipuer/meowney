@@ -3,10 +3,83 @@ AssetService 단위 테스트 냥~ 🐱
 v0.6.0: USD 원화 환산 테스트 추가 (exchange_rate 파라미터 방식)
 """
 import pytest
+from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock
+from uuid import UUID
 
 from app.services.asset_service import AssetService
+
+
+class HistoryQueryStub:
+    def __init__(self, rows):
+        self.data = rows
+
+    def table(self, _name):
+        return self
+
+    def select(self, _columns):
+        return self
+
+    def eq(self, _column, _value):
+        return self
+
+    def gte(self, _column, _value):
+        return self
+
+    def lte(self, _column, _value):
+        return self
+
+    def execute(self):
+        return self
+
+
+class TestAnnualAssetChange:
+    @pytest.mark.asyncio
+    async def test_uses_snapshot_closest_to_start_of_year(self):
+        db = HistoryQueryStub([
+            {"snapshot_date": "2025-12-31", "total_value": "1000000"},
+            {"snapshot_date": "2026-01-03", "total_value": "1200000"},
+        ])
+        service = AssetService(db)
+
+        rate, baseline_value, baseline_date = await service.get_annual_asset_change(
+            UUID("00000000-0000-0000-0000-000000000001"),
+            Decimal("1250000"),
+            date(2026, 8, 1),
+        )
+
+        assert rate == 25.0
+        assert baseline_value == Decimal("1000000")
+        assert baseline_date == date(2025, 12, 31)
+
+    @pytest.mark.asyncio
+    async def test_returns_none_without_history(self):
+        service = AssetService(HistoryQueryStub([]))
+
+        result = await service.get_annual_asset_change(
+            UUID("00000000-0000-0000-0000-000000000001"),
+            Decimal("1250000"),
+            date(2026, 8, 1),
+        )
+
+        assert result == (None, None, None)
+
+    @pytest.mark.asyncio
+    async def test_zero_baseline_has_no_rate(self):
+        service = AssetService(HistoryQueryStub([
+            {"snapshot_date": "2026-01-01", "total_value": "0"},
+        ]))
+
+        rate, baseline_value, baseline_date = await service.get_annual_asset_change(
+            UUID("00000000-0000-0000-0000-000000000001"),
+            Decimal("100"),
+            date(2026, 8, 1),
+        )
+
+        assert rate is None
+        assert baseline_value == Decimal("0")
+        assert baseline_date == date(2026, 1, 1)
 
 
 class TestCalculateSummary:

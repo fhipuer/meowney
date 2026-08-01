@@ -98,6 +98,9 @@ export interface DashboardSummary {
   total_principal: number
   total_profit: number
   profit_rate: number
+  annual_asset_change_rate: number | null
+  annual_baseline_value: number | null
+  annual_baseline_date: string | null
   asset_count: number
   allocations: CategoryAllocation[]
   last_updated: string

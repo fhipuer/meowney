@@ -16,6 +16,20 @@ export function formatKRW(value: number): string {
   }).format(value)
 }
 
+/** 큰 원화 금액을 대시보드에서 빠르게 읽을 수 있는 개략값으로 표시한다. */
+export function formatApproxKRW(value: number): string {
+  const absoluteValue = Math.abs(value)
+  const sign = value < 0 ? '-' : ''
+
+  if (absoluteValue >= 100_000_000) {
+    return `${sign}약 ${(absoluteValue / 100_000_000).toFixed(1)}억원`
+  }
+  if (absoluteValue >= 10_000) {
+    return `${sign}약 ${Math.round(absoluteValue / 10_000).toLocaleString('ko-KR')}만원`
+  }
+  return `${sign}약 ${Math.round(absoluteValue).toLocaleString('ko-KR')}원`
+}
+
 /**
  * 숫자를 퍼센트로 포맷팅 냥~
  */

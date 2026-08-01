@@ -281,6 +281,49 @@ class AssetService:
 
         return history
 
+    async def get_annual_asset_change(
+        self,
+        portfolio_id: Optional[UUID],
+        current_value: Decimal,
+        as_of: Optional[date] = None,
+    ) -> tuple[Optional[float], Optional[Decimal], Optional[date]]:
+        """연초에 가장 가까운 스냅샷 대비 현재 총자산 증감률을 계산한다."""
+        if not portfolio_id:
+            portfolio_id = await self._get_default_portfolio_id()
+
+        as_of = as_of or date.today()
+        year_start = date(as_of.year, 1, 1)
+        search_start = date(as_of.year - 1, 12, 1)
+        search_end = as_of
+
+        result = (
+            self.db.table("asset_history")
+            .select("snapshot_date,total_value")
+            .eq("portfolio_id", str(portfolio_id))
+            .gte("snapshot_date", search_start.isoformat())
+            .lte("snapshot_date", search_end.isoformat())
+            .execute()
+        )
+
+        candidates = result.data or []
+        if not candidates:
+            return None, None, None
+
+        baseline = min(
+            candidates,
+            key=lambda row: (
+                abs((date.fromisoformat(row["snapshot_date"]) - year_start).days),
+                date.fromisoformat(row["snapshot_date"]),
+            ),
+        )
+        baseline_value = Decimal(str(baseline["total_value"]))
+        baseline_date = date.fromisoformat(baseline["snapshot_date"])
+        if baseline_value == 0:
+            return None, baseline_value, baseline_date
+
+        change_rate = (current_value - baseline_value) / baseline_value * 100
+        return round(float(change_rate), 2), baseline_value, baseline_date
+
     async def save_snapshot(self, portfolio_id: UUID, summary: DashboardSummary) -> dict:
         """
         일일 스냅샷 저장 냥~ 🐱
