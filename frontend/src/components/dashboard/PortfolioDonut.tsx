@@ -14,7 +14,7 @@ import { useStore } from '@/store/useStore'
 import { usePlans } from '@/hooks/useRebalance'
 import { useAssets } from '@/hooks/useAssets'
 import { useNavigate } from 'react-router-dom'
-import { PlusCircle, Settings } from 'lucide-react'
+import { PlusCircle, Settings, PieChart as PieChartIcon } from 'lucide-react'
 import type { CategoryAllocation, Asset, RebalancePlan } from '@/types'
 
 // 미배정 자산 상수 냥~
@@ -256,20 +256,20 @@ export function PortfolioDonut({ allocations, isLoading, totalValueFromApi }: Po
 
   // 플랜 상태별 빈 차트 표시
   if (chartData.length === 0 || planStatus !== 'ready') {
-    let message = '자산을 추가해주세요 냥~ 🐱'
+    let message = '등록된 자산이 없습니다.'
     let buttonText = ''
     let buttonAction = () => {}
 
     if (planStatus === 'no-plans') {
-      message = '리밸런싱 플랜을 생성해주세요 냥~ 🐱'
+      message = '먼저 리밸런싱 플랜을 만들어주세요.'
       buttonText = '플랜 생성하기'
       buttonAction = () => navigate('/rebalance/plans')
     } else if (planStatus === 'no-main-plan') {
-      message = '메인 플랜을 선택해주세요 냥~ 🐱'
+      message = '기준으로 사용할 메인 플랜을 선택해주세요.'
       buttonText = '플랜 설정하기'
       buttonAction = () => navigate('/rebalance/plans')
     } else if (!assets || assets.length === 0) {
-      message = '자산을 추가해주세요 냥~ 🐱'
+      message = '포트폴리오에 자산을 추가해주세요.'
       buttonText = '자산 추가하기'
       buttonAction = () => navigate('/assets')
     }
@@ -280,7 +280,9 @@ export function PortfolioDonut({ allocations, isLoading, totalValueFromApi }: Po
           <CardTitle>포트폴리오 배분</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center h-[350px] gap-4">
-          <div className="text-6xl">🐱</div>
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <PieChartIcon className="h-6 w-6" strokeWidth={1.5} />
+          </div>
           <p className="text-muted-foreground text-center">{message}</p>
           {buttonText && (
             <Button variant="outline" onClick={buttonAction} className="gap-2">

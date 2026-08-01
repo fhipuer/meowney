@@ -22,22 +22,23 @@ export function AssetsPage() {
   const TrendIcon = (summary?.total_profit ?? 0) >= 0 ? TrendingUp : TrendingDown
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       {/* 페이지 헤더 */}
-      <div>
+      <div className="border-b border-border/70 pb-6">
+        <p className="mb-2 text-xs font-medium text-primary">Portfolio</p>
         <h1 className="text-3xl font-bold tracking-tight">자산 목록</h1>
-        <p className="text-muted-foreground">
-          보유 중인 자산을 관리합니다.
+        <p className="mt-1 text-muted-foreground">
+          보유 자산과 수익률, 배분 현황을 관리합니다.
         </p>
       </div>
 
       {/* 총 자산가치 요약 - API에서 계산된 값 사용 */}
       {summary && assets && assets.length > 0 && (
-        <div className="flex items-center gap-4 p-4 bg-muted/30 rounded-lg border">
-          <Wallet className="h-5 w-5 text-muted-foreground" />
+        <div className="flex items-center gap-4 rounded-md border border-border/70 bg-white p-5 dark:bg-card">
+          <div className="flex h-10 w-10 items-center justify-center rounded bg-[#eef2ff] text-primary dark:bg-primary/15"><Wallet className="h-5 w-5" /></div>
           <div className="flex items-center gap-3">
-            <span className="text-lg font-semibold">
-              총 자산: {maskValue(formatKRW(summary.total_value), isPrivacyMode)}
+            <span className="text-lg font-medium">
+              {maskValue(formatKRW(summary.total_value), isPrivacyMode)}
             </span>
             <div className={`flex items-center gap-1 ${getProfitClass(summary.profit_rate)}`}>
               <TrendIcon className="h-4 w-4" />

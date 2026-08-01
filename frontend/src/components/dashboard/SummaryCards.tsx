@@ -27,8 +27,8 @@ function StatCard({ title, value, subtitle, icon, iconBgClass, valueClass, delay
   return (
     <Card
       className={cn(
-        'relative overflow-hidden border-0 bg-gradient-to-br from-background to-muted/30',
-        'hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5',
+        'relative overflow-hidden bg-white dark:bg-card',
+        'shadow-none transition-colors duration-[330ms]',
         'opacity-0 animate-slide-up'
       )}
       style={{ animationDelay: `${delay}ms` }}
@@ -37,15 +37,14 @@ function StatCard({ title, value, subtitle, icon, iconBgClass, valueClass, delay
         <div className="flex items-start justify-between">
           <div className="space-y-2">
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <p className={cn('text-2xl font-bold tracking-tight', valueClass)}>
+            <p className={cn('text-2xl font-medium', valueClass)}>
               {value}
             </p>
             <p className="text-xs text-muted-foreground">{subtitle}</p>
           </div>
           <div
             className={cn(
-              'h-11 w-11 rounded-xl flex items-center justify-center',
-              'shadow-sm',
+              'h-10 w-10 rounded flex items-center justify-center',
               iconBgClass
             )}
           >
@@ -53,12 +52,6 @@ function StatCard({ title, value, subtitle, icon, iconBgClass, valueClass, delay
           </div>
         </div>
         {/* 배경 그라데이션 장식 */}
-        <div
-          className={cn(
-            'absolute -right-6 -bottom-6 h-24 w-24 rounded-full opacity-10 blur-2xl',
-            iconBgClass
-          )}
-        />
       </CardContent>
     </Card>
   )
@@ -90,7 +83,7 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
 
   if (!summary) {
     return (
-      <Card className="p-8 text-center border-0 bg-gradient-to-br from-background to-muted/30">
+      <Card className="p-8 text-center">
         <Cat className="h-12 w-12 mx-auto text-muted-foreground mb-4 animate-float" />
         <p className="text-muted-foreground">
           아직 자산 데이터가 없습니다.

@@ -13,6 +13,7 @@ import {
   Fuel,
   BarChart3,
   Layers,
+  Lightbulb,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -237,8 +238,8 @@ export function GuideAssetClassesTab() {
             </div>
 
             <div className="mt-2 pt-2 border-t border-border/50 space-y-1">
-              <p className="text-xs text-muted-foreground">
-                💡 만기에 따라 성격이 달라요
+              <p className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <Lightbulb className="h-3.5 w-3.5 text-primary" /> 만기에 따라 성격이 달라요
               </p>
               <p className="text-xs text-muted-foreground">
                 • 단기채(1~3년): 변동성이 낮아 현금처럼 안정적

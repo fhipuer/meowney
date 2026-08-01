@@ -96,8 +96,8 @@ export function AssetTrendChart({ portfolioId }: AssetTrendChartProps) {
         </CardHeader>
         <CardContent className="flex items-center justify-center h-[350px]">
           <p className="text-muted-foreground text-center">
-            아직 히스토리가 없다옹! 🐱<br />
-            <span className="text-xs">매일 밤 11시에 자동 저장됩니다~</span>
+            아직 자산 히스토리가 없습니다.<br />
+            <span className="text-xs">데이터는 매일 밤 11시에 자동으로 저장됩니다.</span>
           </p>
         </CardContent>
       </Card>

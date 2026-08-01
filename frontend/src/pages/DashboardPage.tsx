@@ -13,23 +13,26 @@ export function DashboardPage() {
   const { data: summary, isLoading: summaryLoading } = useDashboardSummary()
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       {/* 페이지 헤더 */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">대시보드</h1>
-        <p className="text-muted-foreground">
-          자산 현황을 한눈에 확인하세요.
+      <div className="flex items-end justify-between gap-4 border-b border-border/70 pb-6">
+        <div>
+        <p className="mb-2 text-xs font-medium text-primary">Overview</p>
+        <h1 className="text-3xl font-bold tracking-tight">내 자산</h1>
+        <p className="mt-1 text-muted-foreground">
+          포트폴리오의 현재 가치와 배분을 확인하세요.
         </p>
+        </div>
       </div>
-
-      {/* 시장 현황 */}
-      <MarketIndicators />
 
       {/* 리밸런싱 알림 */}
       <RebalanceAlert />
 
       {/* 요약 카드 */}
       <SummaryCards summary={summary} isLoading={summaryLoading} />
+
+      {/* 시장 현황 */}
+      <MarketIndicators />
 
       {/* 차트 영역 */}
       <div className="grid gap-6 lg:grid-cols-2">

@@ -157,9 +157,11 @@ export function PlanAllocationChart({ className }: PlanAllocationChartProps) {
           <CardDescription>메인 플랜 기준</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
-          <span className="text-4xl">🐱</span>
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <Settings className="h-5 w-5" strokeWidth={1.5} />
+          </div>
           <p className="text-muted-foreground text-sm text-center">
-            메인 플랜을 설정해주세요 냥~
+            기준으로 사용할 메인 플랜을 설정해주세요.
           </p>
           <Button variant="outline" size="sm" asChild>
             <Link to="/rebalance/plans">

@@ -117,38 +117,27 @@ export function GuideBasicsTab() {
         description="분산 투자의 핵심 원칙을 알아봐요"
         delay={0}
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Card className="bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800">
-            <CardContent className="p-5 text-center">
-              <div className="text-lg font-bold text-red-600 dark:text-red-400 mb-3">
-                위험한 투자
-              </div>
-              <div className="text-4xl mb-3">🥚🥚🥚🥚🥚</div>
-              <div className="text-sm text-red-600/80 dark:text-red-400/80">
-                모든 자산을 한 곳에 집중!
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
-            <CardContent className="p-5 text-center">
-              <div className="text-lg font-bold text-green-600 dark:text-green-400 mb-3">
-                안전한 투자
-              </div>
-              <div className="text-4xl mb-3">
-                🥚🥚 <span className="text-muted-foreground">|</span> 🥚🥚{' '}
-                <span className="text-muted-foreground">|</span> 🥚
-              </div>
-              <div className="text-sm text-green-600/80 dark:text-green-400/80">
-                여러 자산에 분산!
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <figure className="overflow-hidden rounded-md border border-border bg-[#f2efeb] dark:bg-muted">
+          <img
+            src="/images/guide/concentration-vs-diversification.png"
+            alt="깨지기 쉬운 하나의 받침에 자산을 집중한 모습과 여러 자산군에 안정적으로 분산한 모습의 비교"
+            className="block aspect-[2/1] w-full object-cover"
+            loading="lazy"
+          />
+          <figcaption className="grid grid-cols-2 border-t border-border bg-background">
+            <div className="border-r border-border p-4 md:px-6">
+              <p className="text-sm font-medium text-foreground">한 자산에 집중</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">한 곳의 충격이 포트폴리오 전체에 영향을 줍니다.</p>
+            </div>
+            <div className="p-4 md:px-6">
+              <p className="text-sm font-medium text-foreground">여러 자산군에 분산</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">서로 다른 움직임이 전체 변동성을 완화합니다.</p>
+            </div>
+          </figcaption>
+        </figure>
 
         <GuideTipBox variant="tip">
-          고양이가 간식을 여러 곳에 숨겨두듯이, 우리도 자산을 여러 곳에 나눠두는
-          것이 좋아요!
+          분산투자는 손실을 없애는 방법이 아니라, 하나의 자산이 전체 결과를 결정하지 않도록 위험을 나누는 전략입니다.
         </GuideTipBox>
       </GuideSection>
 

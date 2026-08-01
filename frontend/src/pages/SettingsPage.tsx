@@ -59,10 +59,10 @@ export function SettingsPage() {
         default_absolute_band: defaultAbsoluteBand,
         default_relative_band: defaultRelativeBand,
       })
-      setSettingsMessage({ type: 'success', text: '설정이 저장됐다냥~ 🎉' })
+      setSettingsMessage({ type: 'success', text: '설정이 저장되었습니다.' })
       setHasChanges(false)
     } catch {
-      setSettingsMessage({ type: 'error', text: '저장 실패 냥~ 😿' })
+      setSettingsMessage({ type: 'error', text: '설정을 저장하지 못했습니다.' })
     }
   }
 
@@ -92,9 +92,9 @@ export function SettingsPage() {
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-      setImportMessage({ type: 'success', text: '내보내기 성공이다냥~ 🎉' })
+      setImportMessage({ type: 'success', text: '데이터를 내보냈습니다.' })
     } catch (error) {
-      setImportMessage({ type: 'error', text: '내보내기 실패 냥~ 😿' })
+      setImportMessage({ type: 'error', text: '데이터를 내보내지 못했습니다.' })
     } finally {
       setIsExporting(false)
     }
@@ -114,7 +114,7 @@ export function SettingsPage() {
 
       // 스키마 버전 확인
       if (!data.schema_version) {
-        throw new Error('유효하지 않은 파일 형식이다냥~')
+        throw new Error('유효하지 않은 파일 형식입니다.')
       }
 
       const result = await dataMigrationApi.importData(data, 'replace')
@@ -126,7 +126,7 @@ export function SettingsPage() {
       // 캐시 무효화
       queryClient.invalidateQueries()
     } catch (error) {
-      const message = error instanceof Error ? error.message : '가져오기 실패 냥~ 😿'
+      const message = error instanceof Error ? error.message : '데이터를 가져오지 못했습니다.'
       setImportMessage({ type: 'error', text: message })
     } finally {
       setIsImporting(false)
@@ -167,38 +167,39 @@ export function SettingsPage() {
     )
 
     if (validEntries.length === 0) {
-      setHistoryMessage({ type: 'error', text: '유효한 데이터를 입력해주세요 냥~ 🙀' })
+      setHistoryMessage({ type: 'error', text: '유효한 데이터를 입력해주세요.' })
       return
     }
 
     try {
       await createManualHistory.mutateAsync({ entries: validEntries })
-      setHistoryMessage({ type: 'success', text: `${validEntries.length}개의 데이터가 저장됐다냥~ 🎉` })
+      setHistoryMessage({ type: 'success', text: `${validEntries.length}개의 데이터가 저장되었습니다.` })
       setNewEntries([{ snapshot_date: '', total_value: 0, total_principal: 0 }])
     } catch {
-      setHistoryMessage({ type: 'error', text: '저장 실패 냥~ 😿' })
+      setHistoryMessage({ type: 'error', text: '데이터를 저장하지 못했습니다.' })
     }
   }
 
   // 과거 데이터 삭제 냥~
   const handleDeleteHistory = async (historyId: string) => {
-    if (!confirm('정말 삭제할까냥? 🙀')) return
+    if (!confirm('선택한 데이터를 삭제하시겠습니까?')) return
 
     try {
       await deleteAssetHistory.mutateAsync(historyId)
-      setHistoryMessage({ type: 'success', text: '삭제 완료다냥~ 🎉' })
+      setHistoryMessage({ type: 'success', text: '삭제되었습니다.' })
     } catch {
-      setHistoryMessage({ type: 'error', text: '삭제 실패 냥~ 😿' })
+      setHistoryMessage({ type: 'error', text: '삭제하지 못했습니다.' })
     }
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       {/* 페이지 헤더 */}
-      <div>
+      <div className="border-b border-border/70 pb-6">
+        <p className="mb-2 text-xs font-medium text-primary">Preferences</p>
         <h1 className="text-3xl font-bold tracking-tight">설정</h1>
         <p className="text-muted-foreground">
-          앱 설정을 관리하세요 냥~ 🐱
+          화면, 개인정보 보호와 데이터 관리 방식을 설정합니다.
         </p>
       </div>
 
