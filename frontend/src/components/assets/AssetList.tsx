@@ -5,10 +5,8 @@ import { useState } from 'react'
 import {
   Pencil,
   Trash2,
-  PawPrint,
+  Briefcase,
   TrendingUp,
-  TrendingDown,
-  Clock,
   Landmark,
   Coins,
   Building,
@@ -30,11 +28,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { formatKRW, formatPercent, getProfitClass, formatUSD, maskValue } from '@/lib/utils'
+import { formatKRW, formatPercent, getProfitClass, formatUSD, maskValue, cn } from '@/lib/utils'
 import { useStore } from '@/store/useStore'
 import { useDeleteAsset } from '@/hooks/useAssets'
 import { AssetForm } from './AssetForm'
 import type { Asset } from '@/types'
+import { getExchangeRateChange } from './asset-display'
 
 interface AssetListProps {
   assets: Asset[] | undefined
@@ -62,17 +61,6 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
   const deleteAssetMutation = useDeleteAsset()
   const { isPrivacyMode } = useStore()
 
-  // 환율 변동률 계산 냥~
-  const getExchangeRateChange = (purchaseRate: number | null | undefined, currentRate: number | null | undefined) => {
-    if (!purchaseRate || !currentRate) return null
-    const changePercent = ((currentRate - purchaseRate) / purchaseRate) * 100
-    return {
-      purchaseRate,
-      currentRate,
-      changePercent,
-      isPositive: changePercent > 0
-    }
-  }
 
   // 환율 변동 정보 표시 컴포넌트 냥~
   const ExchangeRateInfo = ({ asset }: { asset: Asset }) => {
@@ -172,10 +160,9 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
           <CardTitle>자산 목록</CardTitle>
         </CardHeader>
         <CardContent className="py-12 text-center">
-          <PawPrint className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground mb-4">
-            아직 등록된 자산이 없습니다.
-          </p>
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted"><Briefcase className="h-5 w-5 text-muted-foreground" /></div>
+          <p className="font-medium">등록된 자산이 없습니다.</p>
+          <p className="mb-5 mt-1 text-sm text-muted-foreground">첫 자산을 추가하면 포트폴리오 분석을 시작할 수 있습니다.</p>
           <AssetForm />
         </CardContent>
       </Card>
@@ -184,134 +171,44 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
 
   return (
     <>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            자산 목록
-            <span className="text-sm font-normal text-muted-foreground">
-              ({assets.length}개)
-            </span>
-          </CardTitle>
+      <section className="overflow-hidden rounded-md border border-border/70 bg-card">
+        <div className="flex items-center justify-between border-b border-border/70 px-4 py-4 sm:px-5">
+          <div><h2 className="text-lg font-medium">보유 자산</h2><p className="mt-0.5 text-xs text-muted-foreground">총 {assets.length}개 자산</p></div>
           <AssetForm />
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {assets.map((asset) => {
-              const assetTypeInfo = ASSET_TYPE_ICONS[asset.asset_type] || ASSET_TYPE_ICONS.other
-              const IconComponent = assetTypeInfo.icon
-              return (
-              <div
-                key={asset.id}
-                className="flex items-center gap-4 p-4 border rounded-lg hover:bg-accent/50 transition-colors"
-              >
-                {/* 자산 유형 아이콘 */}
-                <div
-                  className={`h-10 w-10 rounded-full flex items-center justify-center text-white ${assetTypeInfo.bgColor}`}
-                  title={assetTypeInfo.label}
-                >
-                  <IconComponent className="h-5 w-5" />
-                </div>
+        </div>
 
-                {/* 자산 정보 */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium truncate">{asset.name}</span>
-                    {asset.ticker ? (
-                      <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                        {asset.ticker}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded">
-                        수동
-                      </span>
-                    )}
-                    {/* USD 자산 뱃지 */}
-                    {asset.currency === 'USD' && (
-                      <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded">
-                        USD
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-sm text-muted-foreground flex items-center gap-2">
-                    {/* USD 자산: 달러 단가 표시 */}
-                    {asset.currency === 'USD' ? (
-                      <span>{asset.quantity.toLocaleString()}주 × {maskValue(formatUSD(asset.average_price), isPrivacyMode)}</span>
-                    ) : (
-                      <span>{asset.quantity.toLocaleString()}주 × {maskValue(formatKRW(asset.average_price), isPrivacyMode)}</span>
-                    )}
-                    {/* 티커 없는 자산은 갱신일시 표시 */}
-                    {!asset.ticker && asset.updated_at && (
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground/70">
-                        <Clock className="h-3 w-3" />
-                        {formatRelativeTime(asset.updated_at)}
-                      </span>
-                    )}
-                  </div>
-                </div>
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[900px] border-collapse text-sm">
+            <thead className="bg-muted/45 text-left text-xs font-medium text-muted-foreground">
+              <tr><th className="px-5 py-3">자산</th><th className="px-4 py-3">유형</th><th className="px-4 py-3 text-right">수량</th><th className="px-4 py-3 text-right">평균 매수가</th><th className="px-4 py-3 text-right">평가 금액</th><th className="px-4 py-3 text-right">수익률</th><th className="w-24 px-4 py-3"><span className="sr-only">작업</span></th></tr>
+            </thead>
+            <tbody className="divide-y divide-border/70">
+              {assets.map((asset) => {
+                const type = ASSET_TYPE_ICONS[asset.asset_type] || ASSET_TYPE_ICONS.other
+                return <tr key={asset.id} className="transition-colors hover:bg-muted/30">
+                  <td className="px-5 py-3.5"><div className="font-medium">{asset.name}</div><div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground"><span>{asset.ticker || '수동 입력'}</span><span>{asset.currency}</span>{!asset.ticker && asset.updated_at && <span>{formatRelativeTime(asset.updated_at)}</span>}</div></td>
+                  <td className="px-4 py-3.5"><span className="inline-flex items-center gap-2"><span className={cn('h-2 w-2 rounded-full', type.bgColor)} />{type.label}</span></td>
+                  <td className="px-4 py-3.5 text-right tabular-nums">{asset.quantity.toLocaleString()}</td>
+                  <td className="px-4 py-3.5 text-right tabular-nums">{maskValue(asset.currency === 'USD' ? formatUSD(asset.average_price) : formatKRW(asset.average_price), isPrivacyMode)}</td>
+                  <td className="px-4 py-3.5 text-right tabular-nums"><div className="font-medium">{asset.market_value ? maskValue(formatKRW(asset.market_value), isPrivacyMode) : '-'}</div>{asset.currency === 'USD' && asset.market_value_usd != null && <div className="text-xs text-muted-foreground">{maskValue(formatUSD(asset.market_value_usd), isPrivacyMode)}</div>}</td>
+                  <td className={cn('px-4 py-3.5 text-right font-medium tabular-nums', asset.asset_type === 'cash' ? 'text-muted-foreground' : getProfitClass(asset.profit_rate || 0))}>{asset.asset_type === 'cash' ? '-' : formatPercent(asset.profit_rate || 0)}<ExchangeRateInfo asset={asset} /></td>
+                  <td className="px-3 py-3.5"><div className="flex justify-end"><Button variant="ghost" size="icon" onClick={() => setEditingAsset(asset)} aria-label={`${asset.name} 수정`}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" onClick={() => setDeletingAsset(asset)} aria-label={`${asset.name} 삭제`}><Trash2 className="h-4 w-4 text-muted-foreground" /></Button></div></td>
+                </tr>
+              })}
+            </tbody>
+          </table>
+        </div>
 
-                {/* 평가금액 & 수익률 */}
-                <div className="text-right">
-                  {/* USD 자산: 달러/원화 병행 표시 */}
-                  {asset.currency === 'USD' && asset.market_value_usd != null && asset.market_value != null ? (
-                    <div>
-                      <div className="font-medium text-emerald-600 dark:text-emerald-400">
-                        {maskValue(formatUSD(asset.market_value_usd), isPrivacyMode)}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {maskValue(formatKRW(asset.market_value), isPrivacyMode)}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="font-medium">
-                      {asset.market_value ? maskValue(formatKRW(asset.market_value), isPrivacyMode) : '-'}
-                    </div>
-                  )}
-                  {asset.price_status === 'stale' && (
-                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">지연 시세</p>
-                  )}
-                  {asset.price_status === 'unavailable' && (
-                    <p className="mt-1 text-xs text-destructive">시세 확인 불가</p>
-                  )}
-                  <div className="flex items-center justify-end gap-1 text-sm flex-wrap">
-                    {asset.asset_type === 'cash' ? (
-                      <span className="text-muted-foreground">-</span>
-                    ) : (
-                      <span className={`flex items-center gap-1 ${getProfitClass(asset.profit_rate || 0)}`}>
-                        {(asset.profit_rate || 0) >= 0 ? (
-                          <TrendingUp className="h-3 w-3" />
-                        ) : (
-                          <TrendingDown className="h-3 w-3" />
-                        )}
-                        {formatPercent(asset.profit_rate || 0)}
-                      </span>
-                    )}
-                    <ExchangeRateInfo asset={asset} />
-                  </div>
-                </div>
-
-                {/* 액션 버튼 */}
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setEditingAsset(asset)}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setDeletingAsset(asset)}
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </div>
-              </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
+        <div className="divide-y divide-border/70 md:hidden">
+          {assets.map((asset) => {
+            const type = ASSET_TYPE_ICONS[asset.asset_type] || ASSET_TYPE_ICONS.other
+            return <div key={asset.id} className="p-4">
+              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex items-center gap-2"><span className={cn('h-2 w-2 shrink-0 rounded-full', type.bgColor)} /><p className="truncate font-medium">{asset.name}</p></div><p className="mt-1 pl-4 text-xs text-muted-foreground">{asset.ticker || type.label} · {asset.currency}</p></div><div className="text-right"><p className="font-medium tabular-nums">{asset.market_value ? maskValue(formatKRW(asset.market_value), isPrivacyMode) : '-'}</p><p className={cn('mt-1 text-xs font-medium', asset.asset_type === 'cash' ? 'text-muted-foreground' : getProfitClass(asset.profit_rate || 0))}>{asset.asset_type === 'cash' ? '-' : formatPercent(asset.profit_rate || 0)}</p></div></div>
+              <div className="mt-3 flex items-center justify-between border-t border-border/50 pt-3"><p className="text-xs text-muted-foreground">{asset.quantity.toLocaleString()} × {maskValue(asset.currency === 'USD' ? formatUSD(asset.average_price) : formatKRW(asset.average_price), isPrivacyMode)}</p><div className="flex"><Button variant="ghost" size="sm" onClick={() => setEditingAsset(asset)}><Pencil className="mr-1.5 h-3.5 w-3.5" />수정</Button><Button variant="ghost" size="icon" onClick={() => setDeletingAsset(asset)}><Trash2 className="h-3.5 w-3.5 text-muted-foreground" /></Button></div></div>
+            </div>
+          })}
+        </div>
+      </section>
 
       {/* 수정 다이얼로그 */}
       {editingAsset && (

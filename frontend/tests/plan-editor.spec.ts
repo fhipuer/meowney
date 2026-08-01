@@ -5,7 +5,7 @@ test.use({
 })
 
 test('플랜 편집 전략 프롬프트가 충분한 높이로 표시된다', async ({ page }) => {
-  await page.goto('http://127.0.0.1:3000/rebalance/plans')
+  await page.goto('/rebalance/plans')
   await expect(page.getByRole('heading', { name: '플랜 설정' })).toBeVisible()
 
   const planCard = page.locator('[class*="rounded"][class*="border"]').filter({

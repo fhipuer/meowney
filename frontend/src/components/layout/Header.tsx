@@ -1,57 +1,67 @@
-/**
- * 헤더 컴포넌트 냥~ 🐱
- */
-import { Menu, Moon, Sun } from 'lucide-react'
+import { NavLink } from 'react-router-dom'
+import { BarChart3, Briefcase, Moon, Scale, Settings, Sun, Target } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/store/useStore'
+import { cn } from '@/lib/utils'
+
+const navigation = [
+  { title: '대시보드', href: '/', icon: BarChart3 },
+  { title: '자산', href: '/assets', icon: Briefcase },
+  { title: '리밸런싱', href: '/rebalance', icon: Scale },
+  { title: '플랜', href: '/rebalance/plans', icon: Target },
+]
 
 export function Header() {
-  const { toggleSidebar, isDarkMode, toggleDarkMode } = useStore()
-
+  const { isDarkMode, toggleDarkMode } = useStore()
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border/70 bg-white/90 backdrop-blur-xl dark:bg-background/90">
-      <div className="flex h-16 items-center px-5 md:px-7">
-        {/* 사이드바 토글 */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="mr-2 md:hidden"
-          onClick={toggleSidebar}
-        >
-          <Menu className="h-5 w-5" />
-          <span className="sr-only">메뉴 토글</span>
-        </Button>
+    <>
+      <header className="sticky top-0 z-50 border-b border-border/70 bg-background/92 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-[1440px] items-center px-5 md:px-8">
+          <NavLink to="/" className="flex items-center gap-3" aria-label="Meowney 홈">
+            <div className="flex h-8 w-8 items-center justify-center rounded bg-[#171a20] text-[13px] font-medium text-white dark:bg-white dark:text-[#171a20]">M</div>
+            <span className="text-[17px] font-medium tracking-[-0.01em]">Meowney</span>
+          </NavLink>
 
-        {/* 로고 */}
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded bg-[#171a20] text-[13px] font-medium text-white dark:bg-white dark:text-[#171a20]">M</div>
-          <span className="font-medium text-[17px] tracking-[-0.01em] hidden sm:inline-block">
-            Meowney
-          </span>
+          <nav className="ml-12 hidden h-full items-center gap-1 md:flex" aria-label="주요 메뉴">
+            {navigation.map((item) => (
+              <NavLink
+                key={item.href}
+                to={item.href}
+                end={item.href === '/'}
+                className={({ isActive }) => cn(
+                  'relative flex h-full items-center px-4 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground',
+                  isActive && 'text-foreground after:absolute after:inset-x-4 after:bottom-0 after:h-0.5 after:bg-primary'
+                )}
+              >
+                {item.title}
+              </NavLink>
+            ))}
+          </nav>
+
+          <div className="ml-auto flex items-center gap-1">
+            <Button variant="ghost" size="icon" onClick={toggleDarkMode} title={isDarkMode ? '라이트 모드' : '다크 모드'}>
+              {isDarkMode ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+            </Button>
+            <Button variant="ghost" size="icon" asChild>
+              <NavLink to="/settings" aria-label="설정"><Settings className="h-[18px] w-[18px]" /></NavLink>
+            </Button>
+          </div>
         </div>
+      </header>
 
-        {/* 스페이서 */}
-        <div className="flex-1" />
-
-        {/* 우측 메뉴 */}
-        <div className="flex items-center gap-2">
-          {/* 다크모드 토글 */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="rounded bg-[#f4f4f4] dark:bg-muted"
-            onClick={toggleDarkMode}
-            title={isDarkMode ? '라이트 모드로 전환' : '다크 모드로 전환'}
+      <nav className="fixed inset-x-0 bottom-0 z-50 grid h-16 grid-cols-4 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden" aria-label="모바일 주요 메뉴">
+        {navigation.map((item) => (
+          <NavLink
+            key={item.href}
+            to={item.href}
+            end={item.href === '/'}
+            className={({ isActive }) => cn('flex flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground', isActive && 'text-primary')}
           >
-            {isDarkMode ? (
-              <Sun className="h-5 w-5" />
-            ) : (
-              <Moon className="h-5 w-5" />
-            )}
-            <span className="sr-only">테마 토글</span>
-          </Button>
-        </div>
-      </div>
-    </header>
+            <item.icon className="h-5 w-5" strokeWidth={1.7} />
+            {item.title}
+          </NavLink>
+        ))}
+      </nav>
+    </>
   )
 }

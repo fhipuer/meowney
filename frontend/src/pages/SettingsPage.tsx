@@ -2,7 +2,7 @@
  * 설정 페이지 냥~ 🐱
  */
 import { useState, useRef, useEffect } from 'react'
-import { Moon, Sun, Cat, Eye, EyeOff, Download, Upload, FileJson, Loader2, Plus, Trash2, History, Calendar, Scale } from 'lucide-react'
+import { Moon, Sun, Eye, EyeOff, Download, Upload, FileJson, Loader2, Plus, Trash2, History, Calendar, Scale } from 'lucide-react'
 import { APP_VERSION } from '@/lib/version'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -256,7 +256,7 @@ export function SettingsPage() {
           </div>
           {isPrivacyMode && (
             <p className="text-sm text-muted-foreground mt-3">
-              🙈 모든 금액이 ***,*** 로 표시됩니다. 비율과 차트는 유지됩니다.
+              모든 금액이 ***,*** 형식으로 표시됩니다. 비율과 차트는 유지됩니다.
             </p>
           )}
         </CardContent>
@@ -407,7 +407,7 @@ export function SettingsPage() {
           )}
 
           <p className="text-xs text-muted-foreground">
-            💾 JSON 형식으로 포트폴리오, 자산, 리밸런싱 플랜 데이터를 백업하고 복원할 수 있습니다.
+            JSON 형식으로 포트폴리오, 자산, 리밸런싱 플랜 데이터를 백업하고 복원할 수 있습니다.
             가져오기 시 기존 데이터는 삭제됩니다.
           </p>
         </CardContent>
@@ -544,13 +544,13 @@ export function SettingsPage() {
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                저장된 히스토리가 없다냥~ 🐱
+                저장된 히스토리가 없습니다.
               </p>
             )}
           </div>
 
           <p className="text-xs text-muted-foreground">
-            📝 수동으로 입력한 데이터는 자산 추이 차트에 반영됩니다.
+            수동으로 입력한 데이터는 자산 추이 차트에 반영됩니다.
             기존 날짜에 데이터가 있으면 덮어씁니다.
           </p>
         </CardContent>
@@ -563,8 +563,8 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center gap-4">
-            <div className="h-16 w-16 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Cat className="h-10 w-10 text-primary" />
+            <div className="flex h-16 w-16 items-center justify-center rounded bg-[#171a20] text-xl font-medium text-white dark:bg-white dark:text-[#171a20]">
+              M
             </div>
             <div>
               <h3 className="font-bold text-xl">Meowney</h3>
@@ -577,11 +577,11 @@ export function SettingsPage() {
 
           <div className="text-sm text-muted-foreground space-y-2">
             <p>
-              🐱 Meowney는 개인 자산 포트폴리오를 관리하고,
+              Meowney는 개인 자산 포트폴리오를 관리하고,
               일별 자산 추이를 추적하며, 리밸런싱을 도와주는 서비스입니다.
             </p>
             <p>
-              🐾 냥이와 함께 즐거운 투자 생활 되세요!
+              자산 변화와 목표 배분을 한 곳에서 확인할 수 있도록 돕습니다.
             </p>
           </div>
         </CardContent>

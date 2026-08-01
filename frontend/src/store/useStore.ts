@@ -31,7 +31,7 @@ export const useStore = create<AppState>()(
       setCurrentPortfolioId: (id) => set({ currentPortfolioId: id }),
 
       // 사이드바
-      isSidebarOpen: true,
+      isSidebarOpen: false,
       toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
       setSidebarOpen: (open) => set({ isSidebarOpen: open }),
 

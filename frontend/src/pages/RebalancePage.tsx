@@ -61,8 +61,9 @@ export function RebalancePage() {
   return (
     <div className="space-y-6">
       {/* 페이지 헤더 */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-end justify-between gap-4 border-b border-border/70 pb-6">
         <div>
+          <p className="mb-2 text-xs font-medium text-primary">Portfolio care</p>
           <h1 className="text-3xl font-bold tracking-tight">리밸런싱</h1>
           <p className="text-muted-foreground">
             목표 비율에 맞게 포트폴리오를 조정합니다.
@@ -94,6 +95,7 @@ export function RebalancePage() {
       ) : (
         <>
           {/* 플랜 선택 */}
+          <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
           <Card>
             <CardHeader>
               <CardTitle>리밸런싱 계산</CardTitle>
@@ -142,6 +144,15 @@ export function RebalancePage() {
               )}
             </CardContent>
           </Card>
+          <aside className="rounded-md border border-border/70 bg-card p-5">
+            <p className="text-sm font-medium">계산 과정</p>
+            <ol className="mt-4 space-y-4 text-sm text-muted-foreground">
+              <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-foreground">1</span><span>현재 자산 비중을 선택한 플랜과 비교합니다.</span></li>
+              <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-foreground">2</span><span>허용 편차를 벗어난 자산만 선별합니다.</span></li>
+              <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-foreground">3</span><span>목표 비중에 필요한 매수·매도 금액을 제안합니다.</span></li>
+            </ol>
+          </aside>
+          </div>
 
           {/* 계산 결과 */}
           {calculateMutation.data && (

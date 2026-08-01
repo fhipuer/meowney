@@ -194,6 +194,9 @@
 }
 
 @layer utilities {
+  @media (max-width: 639px) {
+    .plan-chart-label { display: none; }
+  }
   /* Tesla system: surfaces stay flat and motion never changes geometry. */
   [class*="bg-gradient"] {
     background-image: none !important;
