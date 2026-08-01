@@ -20,7 +20,7 @@ from app.models.schemas import (
     ManualHistoryResponse,
 )
 from app.services.asset_service import AssetService
-from app.services.finance_service import FinanceService
+from app.services.finance_service import get_finance_service
 
 router = APIRouter()
 
@@ -39,7 +39,7 @@ async def get_dashboard_summary(
     from app.services.rebalance_service import RebalanceService
 
     asset_service = AssetService(db)
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
     rebalance_service = RebalanceService()
 
     # 자산 목록 조회
@@ -57,6 +57,14 @@ async def get_dashboard_summary(
         enriched_assets, portfolio_id, Decimal(str(exchange_rate))
     )
     print(f"[DEBUG] summary.total_value: {summary.total_value}")
+
+    (
+        summary.annual_asset_change_rate,
+        summary.annual_baseline_value,
+        summary.annual_baseline_date,
+    ) = await asset_service.get_annual_asset_change(
+        portfolio_id, summary.total_value
+    )
 
     # 메인 플랜 정보 추가 냥~
     main_plan = await rebalance_service.get_main_plan(portfolio_id)
@@ -115,7 +123,7 @@ async def get_current_exchange_rate():
     """
     현재 USD/KRW 환율 조회 냥~ 🐱
     """
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
     rate = await finance_service.get_exchange_rate()
 
     return ExchangeRateResponse(
@@ -216,7 +224,7 @@ async def _get_legacy_alerts(
 ) -> RebalanceAlertsResponse:
     """레거시 카테고리 기반 알림 (폴백) 냥~"""
     asset_service = AssetService(db)
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
 
     # 현재 자산 조회
     assets = await asset_service.get_assets(portfolio_id)
@@ -276,7 +284,7 @@ async def get_goal_progress(
     목표 진행률 조회 냥~ 🐱
     """
     asset_service = AssetService(db)
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
 
     # 포트폴리오 목표 금액 조회
     portfolio = await asset_service.get_portfolio(portfolio_id)
@@ -316,7 +324,7 @@ async def get_ticker_history(
 
     최근 N일간의 종가 데이터와 변화율 반환
     """
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
     result = await finance_service.get_ticker_history(ticker, days)
 
     return result
@@ -333,7 +341,7 @@ async def get_market_indicators():
     - 금/은 현물 가격비
     - 주요 지수 PER (S&P 500, NASDAQ, KOSPI)
     """
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
 
     # 주요 지표 목록
     indicators_meta = [

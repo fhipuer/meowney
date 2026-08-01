@@ -18,7 +18,7 @@ from app.models.schemas import (
     TickerValidationResponse,
 )
 from app.services.asset_service import AssetService
-from app.services.finance_service import FinanceService
+from app.services.finance_service import get_finance_service
 from app.config import settings
 
 router = APIRouter()
@@ -30,7 +30,7 @@ async def validate_ticker(ticker: str):
     티커 유효성 검증 및 정보 반환 냥~ 🐱
     자산 추가 전 티커가 유효한지 확인하고 종목 정보 표시
     """
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
     result = await finance_service.validate_ticker_with_info(ticker)
     return TickerValidationResponse(**result)
 
@@ -47,7 +47,7 @@ async def get_assets(
     summary에 총자산, 수익률 정보 포함
     """
     asset_service = AssetService(db)
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
 
     # 자산 목록 조회
     assets = await asset_service.get_assets(portfolio_id, include_inactive)
@@ -72,6 +72,9 @@ async def get_assets(
             total_principal=summary_data.total_principal,
             total_profit=summary_data.total_profit,
             profit_rate=summary_data.profit_rate,
+            valuation_complete=summary_data.valuation_complete,
+            unavailable_asset_count=summary_data.unavailable_asset_count,
+            stale_asset_count=summary_data.stale_asset_count,
         )
     )
 
@@ -85,7 +88,7 @@ async def get_asset(
     특정 자산 상세 조회 냥~ 🐱
     """
     asset_service = AssetService(db)
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
 
     asset = await asset_service.get_asset(asset_id)
     if not asset:
@@ -107,7 +110,7 @@ async def create_asset(
     새 자산 추가 냥~ 🐱
     """
     asset_service = AssetService(db)
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
 
     # 티커 유효성 검증 (있는 경우)
     if asset_data.ticker:
@@ -133,7 +136,7 @@ async def update_asset(
     자산 정보 수정 냥~ 🐱
     """
     asset_service = AssetService(db)
-    finance_service = FinanceService()
+    finance_service = get_finance_service()
 
     # 티커 유효성 검증 (변경하는 경우)
     if asset_data.ticker:

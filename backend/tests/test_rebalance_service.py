@@ -10,6 +10,41 @@ from uuid import UUID
 from app.services.rebalance_service import RebalanceService
 
 
+class TestRebalanceValuationSafety:
+    @pytest.mark.asyncio
+    async def test_unavailable_quote_blocks_partial_rebalance(self):
+        plan_id = UUID("550e8400-e29b-41d4-a716-446655440000")
+        portfolio_id = UUID("550e8400-e29b-41d4-a716-446655440001")
+        asset = {"id": "asset-1", "ticker": "MISSING", "name": "Missing"}
+
+        with patch("app.services.rebalance_service.get_supabase_client"):
+            service = RebalanceService()
+        service.get_plan = AsyncMock(return_value={
+            "name": "Safety plan",
+            "portfolio_id": str(portfolio_id),
+            "allocations": [{"ticker": "MISSING", "target_percentage": 100}],
+            "groups": [],
+        })
+        service._get_asset_values = AsyncMock(return_value=(
+            Decimal("0"),
+            {"asset-1": {
+                "asset": asset,
+                "market_value": Decimal("0"),
+                "price_status": "unavailable",
+            }},
+        ))
+
+        asset_service = MagicMock()
+        asset_service.get_assets = AsyncMock(return_value=[asset])
+        with patch("app.services.asset_service.AssetService", return_value=asset_service):
+            result = await service.calculate_rebalance_by_plan(plan_id, portfolio_id)
+
+        assert result["valuation_complete"] is False
+        assert result["unavailable_asset_count"] == 1
+        assert result["suggestions"] == []
+        assert result["group_suggestions"] == []
+
+
 class TestMatchItemToAsset:
     """match_item_to_asset 메서드 테스트"""
 
@@ -176,9 +211,10 @@ class TestGetAssetValues:
             },
         ]
 
-        # Mock finance service (현금은 ticker가 없어서 호출 안됨)
-        service.finance_service.get_stock_price = AsyncMock(return_value={})
-        service.finance_service.get_exchange_rate = AsyncMock(return_value=1300.0)
+        service.finance_service.enrich_assets_with_prices = AsyncMock(return_value=[{
+            **assets[0], "market_value": Decimal("5000000"), "current_price": None,
+            "unit_price_krw": None, "price_status": "manual",
+        }])
 
         total_value, asset_values = await service._get_asset_values(assets)
 
@@ -212,14 +248,12 @@ class TestGetAssetValues:
             },
         ]
 
-        # Mock: 삼성전자 현재가 50,000원
-        async def mock_get_price(ticker):
-            if ticker == "005930.KS":
-                return {"current_price": 50000, "valid": True}
-            return {}
-
-        service.finance_service.get_stock_price = mock_get_price
-        service.finance_service.get_exchange_rate = AsyncMock(return_value=1300.0)
+        service.finance_service.enrich_assets_with_prices = AsyncMock(return_value=[
+            {**assets[0], "market_value": Decimal("5000000"), "current_price": Decimal("50000"),
+             "unit_price_krw": Decimal("50000"), "price_status": "live"},
+            {**assets[1], "market_value": Decimal("5000000"), "current_price": None,
+             "unit_price_krw": None, "price_status": "manual"},
+        ])
 
         total_value, asset_values = await service._get_asset_values(assets)
 
@@ -252,8 +286,10 @@ class TestGetAssetValues:
             },
         ]
 
-        service.finance_service.get_stock_price = AsyncMock(return_value={})
-        service.finance_service.get_exchange_rate = AsyncMock(return_value=1300.0)
+        service.finance_service.enrich_assets_with_prices = AsyncMock(return_value=[{
+            **assets[0], "market_value": Decimal("3000000"), "current_price": None,
+            "unit_price_krw": None, "price_status": "manual",
+        }])
 
         total_value, asset_values = await service._get_asset_values(assets)
 

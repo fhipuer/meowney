@@ -473,15 +473,15 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
   const handleCurrentRatio = () => {
     if (!assets || assets.length === 0) return
 
-    const totalValue = assets.reduce((sum, a) => sum + (a.market_value || 0), 0)
+    const totalValue = assets.reduce((sum, a) => sum + (Number(a.market_value) || 0), 0)
     if (totalValue === 0) return
 
     // 개별 배분 업데이트
     setAllocations((prev) =>
       prev.map((alloc) => {
         const matched = alloc.matched_asset || matchItemToAsset(alloc, assets)
-        if (matched && matched.market_value) {
-          const pct = (matched.market_value / totalValue) * 100
+        if (matched && Number(matched.market_value) > 0) {
+          const pct = (Number(matched.market_value) / totalValue) * 100
           return { ...alloc, target_percentage: Math.round(pct * 10) / 10 }
         }
         return alloc
@@ -494,8 +494,8 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
         let groupValue = 0
         group.items.forEach((item) => {
           const matched = item.matched_asset || matchItemToAsset(item, assets)
-          if (matched && matched.market_value) {
-            groupValue += matched.market_value
+          if (matched && Number(matched.market_value) > 0) {
+            groupValue += Number(matched.market_value)
           }
         })
         const pct = groupValue > 0 ? (groupValue / totalValue) * 100 : 0
@@ -597,7 +597,7 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[92vh] overflow-y-auto p-5 sm:p-6">
           <DialogHeader>
             <DialogTitle>플랜 편집: {plan.name}</DialogTitle>
             <DialogDescription>
@@ -637,26 +637,39 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
             <Separator />
 
             {/* 플랜 기본 정보 */}
-            <div className="space-y-4">
-              <div className="space-y-2">
+            <div className="space-y-4 rounded-xl border bg-muted/20 p-4 sm:p-5">
+              <div>
+                <h3 className="font-semibold">플랜 기본 정보</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  플랜의 이름과 설명, AI 분석에 사용할 투자 전략을 관리합니다.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
                 <Label htmlFor="editPlanName">플랜 이름</Label>
                 <Input
                   id="editPlanName"
                   value={planName}
                   onChange={(e) => setPlanName(e.target.value)}
                 />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="editPlanDesc">설명</Label>
+                  <Input
+                    id="editPlanDesc"
+                    value={planDescription}
+                    onChange={(e) => setPlanDescription(e.target.value)}
+                    placeholder="플랜 설명 (선택)"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="editPlanDesc">설명</Label>
-                <Input
-                  id="editPlanDesc"
-                  value={planDescription}
-                  onChange={(e) => setPlanDescription(e.target.value)}
-                  placeholder="플랜 설명 (선택)"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="editPlanStrategy">전략 프롬프트</Label>
+                <div className="flex items-end justify-between gap-4">
+                  <Label htmlFor="editPlanStrategy">전략 프롬프트</Label>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {planStrategyPrompt.length.toLocaleString()}자
+                  </span>
+                </div>
                 <Textarea
                   id="editPlanStrategy"
                   value={planStrategyPrompt}
@@ -664,8 +677,13 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                     setPlanStrategyPrompt(e.target.value)
                   }
                   placeholder="투자 전략, 리밸런싱 기준 등 (AI 분석 시 참고)"
-                  rows={3}
+                  rows={12}
+                  style={{ minHeight: '300px' }}
+                  className="resize-y bg-background font-mono leading-relaxed"
                 />
+                <p className="text-xs text-muted-foreground">
+                  투자 원칙, 자산별 판단 기준, 리밸런싱 조건 등을 자유롭게 작성하세요.
+                </p>
               </div>
             </div>
 

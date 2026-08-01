@@ -25,14 +25,14 @@ export function DashboardPage() {
         </div>
       </div>
 
+      {/* 시장 현황 */}
+      <MarketIndicators />
+
       {/* 리밸런싱 알림 */}
       <RebalanceAlert />
 
       {/* 요약 카드 */}
       <SummaryCards summary={summary} isLoading={summaryLoading} />
-
-      {/* 시장 현황 */}
-      <MarketIndicators />
 
       {/* 차트 영역 */}
       <div className="grid gap-6 lg:grid-cols-2">

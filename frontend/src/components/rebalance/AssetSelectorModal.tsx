@@ -51,7 +51,7 @@ export function AssetSelectorModal({
 
   // 전체 포트폴리오 가치 계산 (비중 표시용)
   const totalPortfolioValue = useMemo(() => {
-    return assets.reduce((sum, asset) => sum + (asset.market_value || 0), 0)
+    return assets.reduce((sum, asset) => sum + (Number(asset.market_value) || 0), 0)
   }, [assets])
 
   // 검색 필터링
@@ -163,7 +163,7 @@ export function AssetSelectorModal({
                 const isAlreadyAdded = alreadyAddedAssetIds.includes(asset.id)
                 const isSelected = selectedIds.has(asset.id)
                 const weight = totalPortfolioValue > 0
-                  ? (asset.market_value || 0) / totalPortfolioValue * 100
+                  ? (Number(asset.market_value) || 0) / totalPortfolioValue * 100
                   : 0
 
                 return (
