@@ -34,6 +34,11 @@ export interface Asset {
   profit_rate: number | null
   cost_basis_krw: number | null
   current_exchange_rate: number | null
+  unit_price_krw: number | null
+  price_status: 'live' | 'cached' | 'stale' | 'manual' | 'unavailable' | null
+  price_as_of: string | null
+  price_source: string | null
+  valuation_error: string | null
   category_name: string | null
   category_color: string | null
 }
@@ -44,6 +49,9 @@ export interface AssetsSummary {
   total_principal: number
   total_profit: number
   profit_rate: number
+  valuation_complete: boolean
+  unavailable_asset_count: number
+  stale_asset_count: number
 }
 
 // 자산 목록 API 응답 (v0.7.0)
@@ -98,6 +106,12 @@ export interface DashboardSummary {
   total_principal: number
   total_profit: number
   profit_rate: number
+  valuation_complete: boolean
+  unavailable_asset_count: number
+  stale_asset_count: number
+  annual_asset_change_rate: number | null
+  annual_baseline_value: number | null
+  annual_baseline_date: string | null
   asset_count: number
   allocations: CategoryAllocation[]
   last_updated: string
@@ -339,6 +353,10 @@ export interface AssetRebalanceResponse {
   total_value: number
   suggestions: AssetRebalanceSuggestion[]
   group_suggestions: GroupRebalanceSuggestion[]  // 그룹 제안 냥~
+  valuation_complete: boolean
+  unavailable_asset_count: number
+  stale_asset_count: number
+  valuation_error?: string | null
 }
 
 // 티커 히스토리 (Sparkline용)

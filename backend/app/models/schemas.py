@@ -63,6 +63,11 @@ class AssetResponse(AssetBase):
     profit_rate: Optional[float] = Field(None, description="수익률 (%)")
     cost_basis_krw: Optional[Decimal] = Field(None, description="원화 환산 매입가 (USD자산용)")
     current_exchange_rate: Optional[Decimal] = Field(None, description="현재 환율")
+    unit_price_krw: Optional[Decimal] = Field(None, description="원화 기준 1단위 가격")
+    price_status: Optional[str] = Field(None, description="live, cached, stale, manual, unavailable")
+    price_as_of: Optional[datetime] = Field(None, description="시세 기준시각")
+    price_source: Optional[str] = Field(None, description="시세 출처")
+    valuation_error: Optional[str] = Field(None, description="평가 실패 사유")
     category_name: Optional[str] = None
     category_color: Optional[str] = None
 
@@ -76,6 +81,9 @@ class AssetsSummary(BaseModel):
     total_principal: Decimal = Field(..., description="총 투자원금 (KRW)")
     total_profit: Decimal = Field(..., description="총 손익 (KRW)")
     profit_rate: float = Field(..., description="수익률 (%)")
+    valuation_complete: bool = Field(True, description="모든 자산 평가 완료 여부")
+    unavailable_asset_count: int = Field(0, description="평가 불가 자산 수")
+    stale_asset_count: int = Field(0, description="지연 시세 사용 자산 수")
 
 
 class AssetsListResponse(BaseModel):
@@ -104,6 +112,18 @@ class DashboardSummary(BaseModel):
     total_principal: Decimal = Field(..., description="총 투자원금")
     total_profit: Decimal = Field(..., description="총 손익")
     profit_rate: float = Field(..., description="총 수익률 (%)")
+    valuation_complete: bool = Field(True, description="모든 자산 평가 완료 여부")
+    unavailable_asset_count: int = Field(0, description="평가 불가 자산 수")
+    stale_asset_count: int = Field(0, description="지연 시세 사용 자산 수")
+    annual_asset_change_rate: Optional[float] = Field(
+        None, description="연초 기준 연간 자산증감률 (%)"
+    )
+    annual_baseline_value: Optional[Decimal] = Field(
+        None, description="연초에 가장 가까운 자산가치"
+    )
+    annual_baseline_date: Optional[date] = Field(
+        None, description="연간 자산증감률 기준 스냅샷 날짜"
+    )
     asset_count: int = Field(..., description="보유 자산 수")
     allocations: list[CategoryAllocation] = Field(default_factory=list)
     last_updated: datetime
@@ -446,6 +466,10 @@ class AssetRebalanceResponse(BaseModel):
     total_value: Decimal
     suggestions: list[AssetRebalanceSuggestion]
     group_suggestions: list[GroupRebalanceSuggestion] = []  # 그룹 제안 냥~
+    valuation_complete: bool = True
+    unavailable_asset_count: int = 0
+    stale_asset_count: int = 0
+    valuation_error: Optional[str] = None
 
 
 # ============================================

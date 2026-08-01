@@ -33,7 +33,6 @@ import {
 import { formatKRW, formatPercent, getProfitClass, formatUSD, maskValue } from '@/lib/utils'
 import { useStore } from '@/store/useStore'
 import { useDeleteAsset } from '@/hooks/useAssets'
-import { useExchangeRate } from '@/hooks/useDashboard'
 import { AssetForm } from './AssetForm'
 import type { Asset } from '@/types'
 
@@ -61,7 +60,6 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
   const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null)
 
   const deleteAssetMutation = useDeleteAsset()
-  const { data: exchangeRate } = useExchangeRate()
   const { isPrivacyMode } = useStore()
 
   // 환율 변동률 계산 냥~
@@ -254,19 +252,25 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
                 {/* 평가금액 & 수익률 */}
                 <div className="text-right">
                   {/* USD 자산: 달러/원화 병행 표시 */}
-                  {asset.currency === 'USD' && asset.current_price && exchangeRate ? (
+                  {asset.currency === 'USD' && asset.market_value_usd != null && asset.market_value != null ? (
                     <div>
                       <div className="font-medium text-emerald-600 dark:text-emerald-400">
-                        {maskValue(formatUSD(asset.current_price * asset.quantity), isPrivacyMode)}
+                        {maskValue(formatUSD(asset.market_value_usd), isPrivacyMode)}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {maskValue(formatKRW(asset.current_price * asset.quantity * exchangeRate.rate), isPrivacyMode)}
+                        {maskValue(formatKRW(asset.market_value), isPrivacyMode)}
                       </div>
                     </div>
                   ) : (
                     <div className="font-medium">
                       {asset.market_value ? maskValue(formatKRW(asset.market_value), isPrivacyMode) : '-'}
                     </div>
+                  )}
+                  {asset.price_status === 'stale' && (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">지연 시세</p>
+                  )}
+                  {asset.price_status === 'unavailable' && (
+                    <p className="mt-1 text-xs text-destructive">시세 확인 불가</p>
                   )}
                   <div className="flex items-center justify-end gap-1 text-sm flex-wrap">
                     {asset.asset_type === 'cash' ? (

@@ -154,6 +154,22 @@ export function RebalancePage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
+                  {!calculateMutation.data.valuation_complete && (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        {calculateMutation.data.valuation_error || '일부 자산의 시세를 확인할 수 없어 계산을 중단했습니다.'}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {calculateMutation.data.valuation_complete && calculateMutation.data.stale_asset_count > 0 && (
+                    <Alert>
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        {calculateMutation.data.stale_asset_count}개 자산은 24시간 이내의 마지막 정상 시세로 계산했습니다.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                   {(calculateMutation.data.suggestions?.length ?? 0) === 0 &&
                    (calculateMutation.data.group_suggestions?.length ?? 0) === 0 ? (
                     <p className="text-muted-foreground text-center py-4">

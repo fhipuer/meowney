@@ -7,7 +7,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.db.supabase import get_supabase_client
-from app.services.finance_service import FinanceService
+from app.services.finance_service import get_finance_service
 
 
 class RebalanceService:
@@ -15,12 +15,12 @@ class RebalanceService:
 
     def __init__(self):
         self.supabase = get_supabase_client()
-        self.finance_service = FinanceService()
+        self.finance_service = get_finance_service()
 
     async def get_plans(self, portfolio_id: Optional[UUID] = None) -> list[dict]:
         """플랜 목록 조회 냥~"""
         query = self.supabase.table("rebalance_plans").select(
-            "*, plan_allocations(*)"
+            "*, plan_allocations(*), allocation_groups(*, allocation_group_items(*))"
         ).eq("is_active", True)
 
         if portfolio_id:
@@ -33,7 +33,9 @@ class RebalanceService:
         for plan in plans:
             # plan_allocations -> allocations 키 변환
             plan["allocations"] = plan.pop("plan_allocations", [])
-            plan["groups"] = await self.get_groups(UUID(plan["id"]))
+            plan["groups"] = plan.pop("allocation_groups", [])
+            for group in plan["groups"]:
+                group["items"] = group.pop("allocation_group_items", [])
 
         return plans
 
@@ -41,7 +43,7 @@ class RebalanceService:
         """플랜 상세 조회 냥~"""
         response = (
             self.supabase.table("rebalance_plans")
-            .select("*, plan_allocations(*)")
+            .select("*, plan_allocations(*), allocation_groups(*, allocation_group_items(*))")
             .eq("id", str(plan_id))
             .execute()
         )
@@ -51,7 +53,9 @@ class RebalanceService:
         plan = response.data[0]
         # plan_allocations -> allocations 키 변환
         plan["allocations"] = plan.pop("plan_allocations", [])
-        plan["groups"] = await self.get_groups(plan_id)
+        plan["groups"] = plan.pop("allocation_groups", [])
+        for group in plan["groups"]:
+            group["items"] = group.pop("allocation_group_items", [])
         return plan
 
     async def get_main_plan(self, portfolio_id: Optional[UUID] = None) -> Optional[dict]:
@@ -403,38 +407,23 @@ class RebalanceService:
     async def _get_asset_values(
         self, assets: list[dict]
     ) -> tuple[Decimal, dict[str, dict]]:
-        """자산들의 현재가 및 시장 가치 계산 냥~"""
+        """단일 평가 엔진 결과를 리밸런싱 계산 형식으로 변환한다."""
         total_value = Decimal("0")
         asset_values = {}
 
-        for asset in assets:
-            market_value = Decimal("0")
-            current_price = None
-
-            if asset.get("ticker"):
-                price_data = await self.finance_service.get_stock_price(asset["ticker"])
-                if price_data.get("current_price"):
-                    current_price = Decimal(str(price_data["current_price"]))
-
-                    # USD 자산의 경우 환율 적용
-                    if asset.get("currency") == "USD":
-                        exchange_rate = await self.finance_service.get_exchange_rate()
-                        market_value = (
-                            current_price
-                            * Decimal(str(asset["quantity"]))
-                            * Decimal(str(exchange_rate))
-                        )
-                    else:
-                        market_value = current_price * Decimal(str(asset["quantity"]))
-            elif asset.get("current_value"):
-                market_value = Decimal(str(asset["current_value"]))
+        enriched_assets = await self.finance_service.enrich_assets_with_prices(assets)
+        for asset in enriched_assets:
+            market_value_raw = asset.get("market_value")
+            market_value = Decimal(str(market_value_raw)) if market_value_raw is not None else Decimal("0")
 
             # 키를 문자열로 통일 (UUID 객체 대응) 냥~
             asset_id_str = str(asset["id"])
             asset_values[asset_id_str] = {
                 "asset": asset,
                 "market_value": market_value,
-                "current_price": current_price,
+                "current_price": asset.get("current_price"),
+                "unit_price_krw": asset.get("unit_price_krw"),
+                "price_status": asset.get("price_status"),
             }
             total_value += market_value
 
@@ -481,6 +470,30 @@ class RebalanceService:
         # 자산 가치 계산
         total_value, asset_values = await self._get_asset_values(assets)
 
+        unavailable_count = sum(
+            value.get("price_status") == "unavailable"
+            for value in asset_values.values()
+        )
+        stale_count = sum(
+            value.get("price_status") == "stale"
+            for value in asset_values.values()
+        )
+        if unavailable_count:
+            return {
+                "plan_id": str(plan_id),
+                "plan_name": plan["name"],
+                "total_value": total_value,
+                "suggestions": [],
+                "group_suggestions": [],
+                "valuation_complete": False,
+                "unavailable_asset_count": unavailable_count,
+                "stale_asset_count": stale_count,
+                "valuation_error": (
+                    f"{unavailable_count}개 자산의 시세를 확인할 수 없어 "
+                    "리밸런싱 제안을 계산하지 않았습니다."
+                ),
+            }
+
         # user_settings에서 기본 밴드값 조회 냥~
         DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
         settings_result = self.supabase.table("user_settings").select(
@@ -514,6 +527,9 @@ class RebalanceService:
             "total_value": total_value,
             "suggestions": suggestions,
             "group_suggestions": group_suggestions,
+            "valuation_complete": True,
+            "unavailable_asset_count": 0,
+            "stale_asset_count": stale_count,
         }
 
     async def _calculate_allocation_suggestion(
@@ -562,13 +578,9 @@ class RebalanceService:
         suggested_qty = None
         if matched_asset:
             # 키를 문자열로 변환하여 조회 냥~
-            current_price = asset_values.get(str(matched_asset["id"]), {}).get("current_price")
-            if current_price and current_price > 0:
-                if matched_asset.get("currency") == "USD":
-                    exchange_rate = await self.finance_service.get_exchange_rate()
-                    suggested_qty = suggested_amount / (current_price * Decimal(str(exchange_rate)))
-                else:
-                    suggested_qty = suggested_amount / current_price
+            unit_price_krw = asset_values.get(str(matched_asset["id"]), {}).get("unit_price_krw")
+            if unit_price_krw and Decimal(str(unit_price_krw)) > 0:
+                suggested_qty = suggested_amount / Decimal(str(unit_price_krw))
 
         # 표시명 결정
         display_name = alloc.get("display_name")
