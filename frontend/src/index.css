@@ -5,26 +5,26 @@
 @layer base {
   :root {
     /* 무채색 라이트 테마 */
-    --background: 0 0% 99%;
-    --foreground: 0 0% 9%;
+    --background: 0 0% 100%;
+    --foreground: 220 16% 11%;
     --card: 0 0% 100%;
     --card-foreground: 0 0% 9%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 9%;
-    --primary: 0 0% 15%;
+    --primary: 224 72% 56%;
     --primary-foreground: 0 0% 98%;
     --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 15%;
+    --secondary-foreground: 218 7% 24%;
     --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 45%;
+    --muted-foreground: 218 3% 37%;
     --accent: 0 0% 96%;
-    --accent-foreground: 0 0% 15%;
+    --accent-foreground: 220 16% 11%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 90%;
     --input: 0 0% 90%;
-    --ring: 0 0% 15%;
-    --radius: 0.5rem;
+    --ring: 224 72% 56%;
+    --radius: 0.25rem;
   }
 
   .dark {
@@ -57,12 +57,21 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: "Universal Sans Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.43;
+    -webkit-font-smoothing: antialiased;
   }
+  h1, h2, h3 {
+    font-family: "Universal Sans Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    letter-spacing: normal !important;
+  }
+  button, a, input, select, textarea { transition-duration: 330ms !important; }
 }
 
 /* 고양이 발자국 커서 냥~ */
 .paw-cursor {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E🐾%3C/text%3E%3C/svg%3E"), auto;
+  cursor: default;
 }
 
 /* 수익/손실 색상 냥~ */
@@ -81,11 +90,11 @@
 @layer components {
   /* 글래스 효과 */
   .glass {
-    @apply bg-white/10 backdrop-blur-xl border border-white/20 shadow-lg;
+    @apply bg-white/75 backdrop-blur-xl border-0 shadow-none;
   }
 
   .glass-card {
-    @apply bg-white/5 backdrop-blur-lg border border-white/10 shadow-2xl;
+    @apply bg-white border-0 shadow-none;
   }
 
   .dark .glass {
@@ -104,10 +113,7 @@
   .gradient-card::before {
     content: '';
     @apply absolute inset-0 opacity-50;
-    background: linear-gradient(135deg,
-      hsl(var(--primary) / 0.1) 0%,
-      transparent 50%,
-      hsl(var(--primary) / 0.05) 100%);
+    background: none;
   }
 
   /* 호버 효과가 있는 카드 */
@@ -116,7 +122,8 @@
   }
 
   .hover-card:hover {
-    @apply -translate-y-1 shadow-xl;
+    @apply shadow-none;
+    transform: none;
   }
 
   /* 글로우 효과 */
@@ -125,11 +132,7 @@
   }
 
   .glow::after {
-    content: '';
-    @apply absolute inset-0 rounded-lg opacity-0 transition-opacity duration-300;
-    background: radial-gradient(circle at center, hsl(var(--primary) / 0.3), transparent 70%);
-    filter: blur(20px);
-    z-index: -1;
+    content: none;
   }
 
   .glow:hover::after {
@@ -191,12 +194,41 @@
 }
 
 @layer utilities {
+  /* Tesla system: surfaces stay flat and motion never changes geometry. */
+  [class*="bg-gradient"] {
+    background-image: none !important;
+  }
+
+  [class*="shadow-"] {
+    box-shadow: none !important;
+  }
+
+  main h1 {
+    font-size: clamp(1.75rem, 3vw, 2.5rem) !important;
+    line-height: 1.2 !important;
+    font-weight: 500 !important;
+  }
+
+  main h2, main h3 {
+    font-weight: 500 !important;
+  }
+
+  main > .container { isolation: isolate; }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+  }
+
+  main > div > div {
+    animation-duration: 330ms;
+  }
+
   .animate-float {
-    animation: float 3s ease-in-out infinite;
+    animation: none;
   }
 
   .animate-pulse-glow {
-    animation: pulse-glow 2s ease-in-out infinite;
+    animation: none;
   }
 
   .animate-slide-up {

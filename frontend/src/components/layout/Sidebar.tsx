@@ -8,9 +8,9 @@ import {
   Calculator,
   Target,
   Settings,
-  Cat,
   BookOpen,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store/useStore'
 import { APP_VERSION } from '@/lib/version'
@@ -18,7 +18,7 @@ import { APP_VERSION } from '@/lib/version'
 interface NavItem {
   title: string
   href: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: LucideIcon
 }
 
 const navItems: NavItem[] = [
@@ -60,12 +60,13 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'fixed left-0 top-14 z-40 h-[calc(100vh-3.5rem)] w-64 border-r bg-background transition-transform duration-300 ease-in-out md:translate-x-0',
+        'fixed left-0 top-16 z-40 h-[calc(100vh-4rem)] w-60 border-r border-border/70 bg-white transition-transform duration-[330ms] ease-in-out dark:bg-background md:translate-x-0',
         !isSidebarOpen && '-translate-x-full'
       )}
     >
-      <div className="flex h-full flex-col gap-2 p-4">
+      <div className="flex h-full flex-col gap-2 px-3 py-7">
         {/* 네비게이션 */}
+        <p className="px-4 pb-2 text-[11px] font-medium text-muted-foreground">Portfolio</p>
         <nav className="flex flex-col gap-1">
           {navItems.map((item) => (
             <NavLink
@@ -74,14 +75,14 @@ export function Sidebar() {
               end={item.href === '/rebalance'}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  'relative flex min-h-10 items-center gap-3 rounded px-4 py-2 text-sm font-medium transition-colors duration-[330ms]',
                   isActive
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'bg-[#eef2ff] text-[#2f55bd] dark:bg-primary/15 dark:text-blue-300'
                     : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                 )
               }
             >
-              <item.icon className="h-4 w-4" />
+              <item.icon className="h-[18px] w-[18px]" strokeWidth={1.75} />
               {item.title}
             </NavLink>
           ))}
@@ -89,13 +90,13 @@ export function Sidebar() {
 
         {/* 하단 정보 */}
         <div className="mt-auto">
-          <div className="rounded-lg border bg-card p-4">
-            <div className="flex items-center gap-2 text-sm">
-              <Cat className="h-5 w-5 text-primary" />
+          <div className="rounded bg-[#f7f7f7] p-4 dark:bg-muted">
+            <div className="flex items-center gap-3 text-sm">
+              <div className="flex h-8 w-8 items-center justify-center rounded bg-white text-xs font-medium text-[#171a20] dark:bg-background dark:text-foreground">M</div>
               <div>
-                <p className="font-medium">Meowney v{APP_VERSION}</p>
+                <p className="font-medium">Meowney</p>
                 <p className="text-xs text-muted-foreground">
-                  스마트한 집사의 투자 비서
+                  Version {APP_VERSION}
                 </p>
               </div>
             </div>
