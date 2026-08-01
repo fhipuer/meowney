@@ -95,8 +95,9 @@ export function RebalancePlanPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-end justify-between gap-4 border-b border-border/70 pb-6">
         <div>
+          <p className="mb-2 text-xs font-medium text-primary">Allocation plans</p>
           <h1 className="text-3xl font-bold tracking-tight">플랜 설정</h1>
           <p className="text-muted-foreground">
             리밸런싱 플랜을 생성하고 목표 배분을 설정합니다.

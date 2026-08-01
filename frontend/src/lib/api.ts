@@ -58,7 +58,7 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    const message = error.response?.data?.detail || '냥? 뭔가 잘못됐다옹! 🙀'
+    const message = error.response?.data?.detail || '요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.'
     console.error('API Error:', message)
     return Promise.reject(error)
   }

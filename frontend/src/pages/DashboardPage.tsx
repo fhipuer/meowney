@@ -13,7 +13,7 @@ export function DashboardPage() {
   const { data: summary, isLoading: summaryLoading } = useDashboardSummary()
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-6">
       {/* 페이지 헤더 */}
       <div className="flex items-end justify-between gap-4 border-b border-border/70 pb-6">
         <div>
@@ -25,14 +25,11 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* 시장 현황 */}
-      <MarketIndicators />
-
-      {/* 리밸런싱 알림 */}
-      <RebalanceAlert />
-
       {/* 요약 카드 */}
       <SummaryCards summary={summary} isLoading={summaryLoading} />
+
+      {/* 리밸런싱 인사이트 */}
+      <RebalanceAlert />
 
       {/* 차트 영역 */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -44,6 +41,9 @@ export function DashboardPage() {
         {/* v0.6.0: 자체 데이터 로딩 및 기간 선택 지원 */}
         <AssetTrendChart />
       </div>
+
+      {/* 시장 맥락 */}
+      <MarketIndicators />
 
       {/* 목표 진행률 (목표가 설정된 경우에만 표시) */}
       <GoalProgress />

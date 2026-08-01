@@ -69,6 +69,7 @@ const renderLabelWithLine = (props: {
     <g>
       {/* 리더 라인 */}
       <path
+        className="plan-chart-label"
         d={`M${startX},${startY} L${midX},${midY} L${endX},${midY}`}
         stroke={fill}
         fill="none"
@@ -76,6 +77,7 @@ const renderLabelWithLine = (props: {
       />
       {/* 라벨 텍스트 */}
       <text
+        className="plan-chart-label"
         x={textX}
         y={midY}
         textAnchor={textAnchor}
@@ -225,6 +227,15 @@ export function PlanAllocationChart({ className }: PlanAllocationChartProps) {
               </Pie>
             </PieChart>
           </ResponsiveContainer>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 sm:hidden">
+          {chartData.slice(0, 6).map((item) => (
+            <div key={item.name} className="flex min-w-0 items-center gap-2 text-xs">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+              <span className="truncate text-muted-foreground">{item.name}</span>
+              <span className="ml-auto font-medium tabular-nums">{item.percentage.toFixed(1)}%</span>
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>

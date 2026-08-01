@@ -3,16 +3,12 @@
  * 대시보드 상단에 표시되는 알림 배너
  */
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, X } from 'lucide-react'
-import { useState } from 'react'
+import { AlertCircle, ArrowRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
 import { dashboardApi } from '@/lib/api'
 import { useSettings } from '@/hooks/useSettings'
 
 export function RebalanceAlert() {
-  const [dismissed, setDismissed] = useState(false)
-
   // 편차 밴드 기본값을 알림 기준으로 사용 냥~
   const { data: settings } = useSettings()
   const alertThreshold = settings?.default_absolute_band ?? 5.0
@@ -24,41 +20,25 @@ export function RebalanceAlert() {
     enabled: alertThreshold > 0,
   })
 
-  if (dismissed || !alerts?.needs_rebalancing) {
+  if (!alerts?.needs_rebalancing) {
     return null
   }
 
   const topAlert = alerts.alerts[0]
 
   return (
-    <div className="relative rounded-lg border border-yellow-500/50 bg-yellow-50/50 p-4 dark:bg-yellow-950/20">
-      <button
-        onClick={() => setDismissed(true)}
-        className="absolute right-2 top-2 text-yellow-700 hover:text-yellow-900 dark:text-yellow-500"
-      >
-        <X className="h-4 w-4" />
-      </button>
-      <div className="flex items-start gap-3">
-        <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-500 flex-shrink-0 mt-0.5" />
-        <div className="flex-1">
-          <p className="font-medium text-yellow-800 dark:text-yellow-400">
-            리밸런싱이 필요합니다.
-          </p>
-          <p className="text-sm text-yellow-700 dark:text-yellow-500 mt-1">
-            {topAlert.category_name}이(가) 목표 대비{' '}
-            <span className="font-medium">
-              {topAlert.deviation.toFixed(1)}%
-            </span>{' '}
-            {topAlert.direction === 'over' ? '초과' : '부족'}했습니다.
-            {alerts.alerts.length > 1 && ` (외 ${alerts.alerts.length - 1}개)`}
-          </p>
-          <Link to="/rebalance" className="inline-block mt-2">
-            <Button variant="outline" size="sm" className="text-yellow-700 border-yellow-500/50 hover:bg-yellow-100">
-              리밸런싱 페이지에서 확인하기
-            </Button>
-          </Link>
-        </div>
+    <div className="flex flex-col gap-3 rounded border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm sm:flex-row sm:items-center dark:border-amber-900 dark:bg-amber-950/20">
+      <div className="flex min-w-0 items-center gap-2 text-amber-900 dark:text-amber-300">
+        <AlertCircle className="h-4 w-4 shrink-0" />
+        <span className="font-medium">배분 점검</span>
+        <span className="truncate text-amber-800/80 dark:text-amber-300/80">
+          {topAlert.category_name} {Math.abs(topAlert.deviation).toFixed(1)}%p {topAlert.direction === 'over' ? '초과' : '부족'}
+          {alerts.alerts.length > 1 && ` · 추가 ${alerts.alerts.length - 1}개`}
+        </span>
       </div>
+      <Link to="/rebalance" className="ml-auto inline-flex shrink-0 items-center gap-1 font-medium text-amber-900 hover:underline dark:text-amber-300">
+        확인 <ArrowRight className="h-3.5 w-3.5" />
+      </Link>
     </div>
   )
 }

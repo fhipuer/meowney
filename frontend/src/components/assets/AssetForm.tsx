@@ -27,6 +27,7 @@ import { useCreateAsset, useUpdateAsset } from '@/hooks/useAssets'
 import { dashboardApi, assetsApi } from '@/lib/api'
 import { formatKRW } from '@/lib/utils'
 import type { Asset, AssetCreate, AssetUpdate, TickerValidation } from '@/types'
+import { getPriceStatusLabel } from './asset-display'
 
 interface AssetFormProps {
   asset?: Asset
@@ -194,7 +195,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
         </DialogTrigger>
       )}
       <DialogContent
-        className="sm:max-w-[500px]"
+        className="max-h-[92vh] overflow-y-auto sm:max-w-[760px]"
         onInteractOutside={(e) => e.preventDefault()}
       >
         <form onSubmit={handleSubmit}>
@@ -209,9 +210,17 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
+          {isEditing && (
+            <div className="mt-5 grid grid-cols-2 gap-4 rounded border border-border/70 bg-muted/35 p-4 sm:grid-cols-3">
+              <div><p className="text-xs text-muted-foreground">현재 평가액</p><p className="mt-1 font-medium tabular-nums">{asset.market_value != null ? formatKRW(asset.market_value) : '-'}</p></div>
+              <div><p className="text-xs text-muted-foreground">수익률</p><p className="mt-1 font-medium tabular-nums">{asset.profit_rate != null ? `${asset.profit_rate >= 0 ? '+' : ''}${asset.profit_rate.toFixed(2)}%` : '-'}</p></div>
+              <div className="col-span-2 sm:col-span-1"><p className="text-xs text-muted-foreground">가격 상태</p><p className="mt-1 font-medium">{getPriceStatusLabel(asset.price_status)}</p></div>
+            </div>
+          )}
+
+          <div className="grid gap-5 py-5 md:grid-cols-2">
             {/* 자산명 */}
-            <div className="grid gap-2">
+            <div className="grid gap-2 md:col-span-2">
               <Label htmlFor="name">자산명 *</Label>
               <Input
                 id="name"
@@ -225,8 +234,8 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
             </div>
 
             {/* 자산 유형 & 통화 */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
+            <div className="grid grid-cols-2 gap-4 md:col-span-2">
+              <div className="grid gap-2 md:col-span-2">
                 <Label>자산 유형</Label>
                 <Select
                   value={formData.asset_type}
@@ -347,8 +356,8 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
             {/* 수량 & 평균 매수가 */}
             {!isCashType ? (
               <>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
+                <div className="grid grid-cols-2 gap-4 md:col-span-2">
+                  <div className="grid gap-2 md:col-span-2">
                     <Label htmlFor="quantity">수량 *</Label>
                     <Input
                       id="quantity"
@@ -440,7 +449,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
               </>
             ) : (
               /* 현금인 경우 - 현재 가치 */
-              <div className="grid gap-2">
+              <div className="grid gap-2 md:col-span-2">
                 <Label htmlFor="current_value">현재 금액 *</Label>
                 <Input
                   id="current_value"
@@ -457,7 +466,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
             )}
 
             {/* 메모 */}
-            <div className="grid gap-2">
+            <div className="grid gap-2 md:col-span-2">
               <Label htmlFor="notes">메모</Label>
               <Input
                 id="notes"
@@ -470,7 +479,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="border-t border-border/70 pt-5">
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
               취소
             </Button>
