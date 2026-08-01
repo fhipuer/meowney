@@ -144,7 +144,7 @@ class TestCalculateSummary:
                 "category_id": None,
             },
             {
-                "market_value": 1000,  # USD
+                "market_value": 1300000,  # 평가 엔진에서 이미 KRW로 환산됨
                 "quantity": 10,
                 "average_price": 80,  # USD
                 "currency": "USD",
@@ -159,7 +159,7 @@ class TestCalculateSummary:
             enriched_assets, exchange_rate=exchange_rate
         )
 
-        # KRW: 1,000,000 + USD: 1,000 * 1,300 = 2,300,000
+        # summary는 통화 변환 없이 KRW 평가액만 합산한다.
         expected_total_value = Decimal("1000000") + Decimal("1000") * exchange_rate
         assert summary.total_value == expected_total_value
 
@@ -168,11 +168,12 @@ class TestCalculateSummary:
         assert summary.total_principal == expected_principal
 
     @pytest.mark.asyncio
-    async def test_usd_default_exchange_rate(self, service):
-        """환율 파라미터 없을 때 기본값(1300) 사용 확인"""
+    async def test_usd_enriched_cost_basis_is_used(self, service):
+        """평가 엔진이 계산한 원화 원금을 summary가 그대로 사용하는지 확인"""
         enriched_assets = [
             {
-                "market_value": 100,  # USD
+                "market_value": 130000,  # 평가 엔진에서 이미 KRW로 환산됨
+                "cost_basis_krw": 117000,
                 "quantity": 1,
                 "average_price": 90,
                 "currency": "USD",
@@ -182,7 +183,6 @@ class TestCalculateSummary:
             },
         ]
 
-        # 환율 파라미터 없이 호출
         summary = await service.calculate_summary(enriched_assets)
 
         # 100 USD * 1300 (기본값) = 130,000 KRW
@@ -214,7 +214,7 @@ class TestCalculateSummary:
                 "category_id": None,
             },
             {
-                "market_value": 10810.53,  # USD
+                "market_value": Decimal("10810.53") * exchange_rate,
                 "quantity": 27,
                 "average_price": 379.12,
                 "currency": "USD",
@@ -223,7 +223,7 @@ class TestCalculateSummary:
                 "category_id": None,
             },
             {
-                "market_value": 27553.44,  # USD
+                "market_value": Decimal("27553.44") * exchange_rate,
                 "quantity": 274,
                 "average_price": 100.42,
                 "currency": "USD",
@@ -271,7 +271,7 @@ class TestCalculateSummary:
                 "category_id": None,
             },
             {
-                "market_value": 1000,  # USD -> 1,300,000 KRW
+                "market_value": 1300000,  # 평가 엔진에서 이미 KRW로 환산됨
                 "quantity": 10,
                 "average_price": 80,
                 "currency": "USD",

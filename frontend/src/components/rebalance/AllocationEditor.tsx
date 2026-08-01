@@ -473,15 +473,15 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
   const handleCurrentRatio = () => {
     if (!assets || assets.length === 0) return
 
-    const totalValue = assets.reduce((sum, a) => sum + (a.market_value || 0), 0)
+    const totalValue = assets.reduce((sum, a) => sum + (Number(a.market_value) || 0), 0)
     if (totalValue === 0) return
 
     // 개별 배분 업데이트
     setAllocations((prev) =>
       prev.map((alloc) => {
         const matched = alloc.matched_asset || matchItemToAsset(alloc, assets)
-        if (matched && matched.market_value) {
-          const pct = (matched.market_value / totalValue) * 100
+        if (matched && Number(matched.market_value) > 0) {
+          const pct = (Number(matched.market_value) / totalValue) * 100
           return { ...alloc, target_percentage: Math.round(pct * 10) / 10 }
         }
         return alloc
@@ -494,8 +494,8 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
         let groupValue = 0
         group.items.forEach((item) => {
           const matched = item.matched_asset || matchItemToAsset(item, assets)
-          if (matched && matched.market_value) {
-            groupValue += matched.market_value
+          if (matched && Number(matched.market_value) > 0) {
+            groupValue += Number(matched.market_value)
           }
         })
         const pct = groupValue > 0 ? (groupValue / totalValue) * 100 : 0

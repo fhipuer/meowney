@@ -179,16 +179,26 @@ class AssetService:
         total_value = Decimal("0")
         total_principal = Decimal("0")
         category_totals: dict[str, dict] = {}
+        unavailable_asset_count = 0
+        stale_asset_count = 0
 
         for asset in enriched_assets:
             # finance_service.enrich_assets_with_prices()에서 이미 원화 환산된 market_value 사용
-            market_value = Decimal(str(asset.get("market_value", 0)))
+            market_value_raw = asset.get("market_value")
+            if market_value_raw is None:
+                unavailable_asset_count += 1
+                continue
+            market_value = Decimal(str(market_value_raw))
+            if asset.get("price_status") == "stale":
+                stale_asset_count += 1
             quantity = Decimal(str(asset.get("quantity", 0)))
             avg_price = Decimal(str(asset.get("average_price", 0)))
             currency = asset.get("currency", "KRW")
 
-            # 현금은 수익 계산에서 제외: principal = market_value로 맞춤 냥~ 💰
-            if asset.get("asset_type") == "cash":
+            # 단일 평가 엔진이 계산한 원화 원금을 최우선으로 사용한다.
+            if asset.get("cost_basis_krw") is not None:
+                principal = Decimal(str(asset["cost_basis_krw"]))
+            elif asset.get("asset_type") == "cash":
                 principal = market_value
             elif currency == "USD":
                 # 매수시점 환율, 없으면 현재 환율로 폴백
@@ -243,6 +253,9 @@ class AssetService:
             total_principal=total_principal,
             total_profit=total_profit,
             profit_rate=round(profit_rate, 2),
+            valuation_complete=unavailable_asset_count == 0,
+            unavailable_asset_count=unavailable_asset_count,
+            stale_asset_count=stale_asset_count,
             asset_count=len(enriched_assets),
             allocations=allocations,
             last_updated=datetime.now(),

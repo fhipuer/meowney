@@ -2,7 +2,7 @@
  * 자산 목록 페이지 냥~ 🐱
  * v0.7.0: API 응답의 summary 사용 (프론트엔드 재계산 제거)
  */
-import { Wallet, TrendingUp, TrendingDown } from 'lucide-react'
+import { AlertTriangle, Clock3, Wallet, TrendingUp, TrendingDown } from 'lucide-react'
 import { AssetList } from '@/components/assets/AssetList'
 import { CountryRatioChart } from '@/components/rebalance/CountryRatioChart'
 import { AssetAllocationChart } from '@/components/rebalance/AssetAllocationChart'
@@ -46,6 +46,16 @@ export function AssetsPage() {
               </span>
             </div>
           </div>
+        </div>
+      )}
+
+      {summary && (!summary.valuation_complete || summary.stale_asset_count > 0) && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50/70 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
+          {summary.valuation_complete ? <Clock3 className="mt-0.5 h-4 w-4" /> : <AlertTriangle className="mt-0.5 h-4 w-4" />}
+          <p>
+            {summary.unavailable_asset_count > 0 && `${summary.unavailable_asset_count}개 자산의 시세를 확인하지 못했습니다. `}
+            {summary.stale_asset_count > 0 && `${summary.stale_asset_count}개 자산은 마지막 정상 시세를 사용했습니다.`}
+          </p>
         </div>
       )}
 

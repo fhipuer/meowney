@@ -10,7 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.config import settings
 from app.db.supabase import get_supabase_client
 from app.services.asset_service import AssetService
-from app.services.finance_service import FinanceService
+from app.services.finance_service import get_finance_service
 
 
 # 벤치마크 티커 목록 냥~
@@ -40,7 +40,7 @@ async def take_daily_snapshot():
     try:
         db = get_supabase_client()
         asset_service = AssetService(db)
-        finance_service = FinanceService()
+        finance_service = get_finance_service()
 
         # 모든 포트폴리오 조회
         portfolio_ids = await asset_service.get_all_portfolio_ids()
@@ -138,7 +138,7 @@ async def take_benchmark_snapshot():
 
     try:
         db = get_supabase_client()
-        finance_service = FinanceService()
+        finance_service = get_finance_service()
 
         today = date.today()
 

@@ -3,10 +3,72 @@ FinanceService 단위 테스트 냥~ 🐱
 v0.7.2: current_value 자산(현금, 금 등) 처리 테스트
 """
 import pytest
+import asyncio
+from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from app.services.finance_service import FinanceService
+
+
+class TestPriceCache:
+    @pytest.fixture(autouse=True)
+    def clear_shared_cache(self):
+        FinanceService._price_cache.clear()
+        FinanceService._inflight_price_tasks.clear()
+        yield
+        FinanceService._price_cache.clear()
+        FinanceService._inflight_price_tasks.clear()
+
+    @pytest.mark.asyncio
+    async def test_fresh_price_is_reused_across_service_instances(self):
+        first = FinanceService()
+        second = FinanceService()
+        quote = {"ticker": "TEST", "current_price": 100, "currency": "USD", "valid": True}
+
+        with patch.object(first, "_get_stock_info_sync", return_value=quote) as fetch:
+            assert (await first.get_stock_price("TEST"))["current_price"] == 100
+            assert (await second.get_stock_price("TEST"))["current_price"] == 100
+
+        assert fetch.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_concurrent_requests_are_merged(self):
+        service = FinanceService()
+        calls = 0
+
+        def fetch(_ticker):
+            nonlocal calls
+            calls += 1
+            return {"ticker": "TEST", "current_price": 100, "currency": "USD", "valid": True}
+
+        with patch.object(service, "_get_stock_info_sync", side_effect=fetch):
+            results = await asyncio.gather(*[service.get_stock_price("TEST") for _ in range(10)])
+
+        assert calls == 1
+        assert all(result["current_price"] == 100 for result in results)
+
+    @pytest.mark.asyncio
+    async def test_failed_refresh_uses_last_price_for_up_to_24_hours(self):
+        service = FinanceService()
+        cached_quote = {
+            "ticker": "TEST",
+            "current_price": 100,
+            "currency": "USD",
+            "valid": True,
+            "timestamp": datetime.now() - timedelta(minutes=10),
+            "source": "yfinance",
+        }
+        FinanceService._price_cache["TEST"] = {
+            "data": cached_quote,
+            "timestamp": datetime.now() - timedelta(minutes=10),
+        }
+
+        with patch.object(service, "_get_stock_info_sync", return_value={"ticker": "TEST", "valid": False}):
+            result = await service.get_stock_price("TEST")
+
+        assert result["current_price"] == 100
+        assert result["stale"] is True
 
 
 class TestEnrichAssetsWithPrices:
@@ -273,5 +335,6 @@ class TestEnrichAssetsWithPrices:
 
         usd_cash = enriched[0]
 
-        # current_value가 USD이므로 그대로 저장 (원화 환산은 summary에서)
-        assert usd_cash["market_value"] == Decimal("1000")
+        # current_value는 총 달러 잔액이고 market_value는 항상 KRW다.
+        assert usd_cash["market_value_usd"] == Decimal("1000")
+        assert usd_cash["market_value"] == Decimal("1300000.0")

@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import yfinance as yf
 
 from app.config import settings
+from app.services.valuation_service import calculate_asset_valuation
 
 
 class FinanceService:
@@ -21,10 +22,14 @@ class FinanceService:
 
     # 클래스 레벨 환율 캐시 (인스턴스 간 공유)
     _exchange_rate_cache: dict[str, dict] = {}
+    # 요청마다 서비스 인스턴스가 만들어져도 시세는 프로세스 전체에서 공유한다.
+    _price_cache: dict[str, dict] = {}
+    _inflight_price_tasks: dict[str, asyncio.Task] = {}
+    _price_cache_ttl = timedelta(minutes=5)
+    _stale_price_ttl = timedelta(hours=24)
 
     def __init__(self):
         self._executor = ThreadPoolExecutor(max_workers=5)
-        self._price_cache: dict[str, dict] = {}  # 간단한 메모리 캐시
 
     def _get_stock_info_sync(self, ticker: str) -> dict:
         """
@@ -50,6 +55,10 @@ class FinanceService:
                 "name": info.get("shortName") or info.get("longName"),
                 "exchange": info.get("exchange"),
                 "valid": current_price is not None,
+                "timestamp": datetime.now(),
+                "source": "yfinance",
+                "cached": False,
+                "stale": False,
             }
         except Exception as e:
             print(f"🙀 티커 조회 실패 냥: {ticker} - {e}")
@@ -66,13 +75,43 @@ class FinanceService:
         """
         비동기로 주식 가격 조회 냥~
         """
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            self._executor,
-            self._get_stock_info_sync,
-            ticker
-        )
-        return result
+        ticker = ticker.strip().upper()
+        now = datetime.now()
+        cached = FinanceService._price_cache.get(ticker)
+        if cached and now - cached["timestamp"] <= self._price_cache_ttl:
+            return {**cached["data"], "cached": True, "stale": False}
+
+        # 여러 API가 같은 종목을 동시에 요청해도 외부 호출은 하나만 수행한다.
+        inflight = FinanceService._inflight_price_tasks.get(ticker)
+        if inflight:
+            return await asyncio.shield(inflight)
+
+        task = asyncio.create_task(self._fetch_and_cache_stock_price(ticker, cached))
+        FinanceService._inflight_price_tasks[ticker] = task
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if FinanceService._inflight_price_tasks.get(ticker) is task:
+                FinanceService._inflight_price_tasks.pop(ticker, None)
+
+    async def _fetch_and_cache_stock_price(self, ticker: str, cached: dict | None) -> dict:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(self._executor, self._get_stock_info_sync, ticker)
+        now = datetime.now()
+        if result.get("valid") and result.get("current_price") is not None:
+            result = {
+                **result,
+                "timestamp": result.get("timestamp") or now,
+                "source": result.get("source") or "yfinance",
+                "cached": False,
+                "stale": False,
+            }
+            FinanceService._price_cache[ticker] = {"data": result, "timestamp": now}
+            return result
+
+        if cached and now - cached["timestamp"] <= self._stale_price_ttl:
+            return {**cached["data"], "cached": True, "stale": True}
+        return {**result, "cached": False, "stale": False}
 
     async def get_multiple_prices(self, tickers: list[str]) -> dict[str, dict]:
         """
@@ -239,6 +278,25 @@ class FinanceService:
                 asset_copy["profit_loss"] = Decimal("0")
                 asset_copy["profit_rate"] = 0.0
 
+            # 모든 최종 금액은 단일 순수 계산 엔진 결과로 덮어써 화면별 차이를 막는다.
+            valuation = calculate_asset_valuation(
+                asset,
+                prices.get(ticker) if ticker else None,
+                Decimal(str(current_exchange_rate)),
+            )
+            asset_copy.update({
+                "current_price": valuation.current_price,
+                "unit_price_krw": valuation.unit_price_krw,
+                "market_value": valuation.market_value_krw,
+                "market_value_usd": valuation.market_value_usd,
+                "cost_basis_krw": valuation.cost_basis_krw,
+                "profit_loss": valuation.profit_loss_krw,
+                "profit_rate": float(valuation.profit_rate) if valuation.profit_rate is not None else None,
+                "price_status": valuation.price_status,
+                "price_as_of": valuation.price_as_of,
+                "price_source": valuation.price_source,
+                "valuation_error": valuation.valuation_error,
+            })
             enriched.append(asset_copy)
 
         return enriched
@@ -255,17 +313,18 @@ class FinanceService:
 
         if result.get("valid") and result.get("current_price"):
             rate = float(result["current_price"])
-            # 성공 시 캐시 업데이트
-            FinanceService._exchange_rate_cache[cache_key] = {
-                "rate": rate,
-                "timestamp": datetime.now(),
-                "source": "yfinance"
-            }
+            # 지연 시세를 새 시세처럼 갱신하지 않는다.
+            if not result.get("stale"):
+                FinanceService._exchange_rate_cache[cache_key] = {
+                    "rate": rate,
+                    "timestamp": datetime.now(),
+                    "source": "yfinance"
+                }
             return rate
 
         # 실패 시 캐시된 환율 사용
         cached = FinanceService._exchange_rate_cache.get(cache_key)
-        if cached:
+        if cached and datetime.now() - cached["timestamp"] <= self._stale_price_ttl:
             print(f"⚠️ 환율 조회 실패, 캐시된 환율 사용 냥: {cached['rate']} ({cached['source']})")
             return cached["rate"]
 

@@ -2,7 +2,7 @@
  * 대시보드 요약 카드 컴포넌트 냥~ 🐱
  * 글래스모피즘 & 애니메이션 적용
  */
-import { ArrowRight, CalendarDays, TrendingUp, TrendingDown, Wallet, PiggyBank, Cat, Percent } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CalendarDays, Clock3, TrendingUp, TrendingDown, Wallet, PiggyBank, Cat, Percent } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { formatApproxKRW, formatDate, formatKRW, formatPercent, getProfitClass, cn, maskValue } from '@/lib/utils'
 import { useStore } from '@/store/useStore'
@@ -112,6 +112,15 @@ export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-12">
+      {(!summary.valuation_complete || summary.stale_asset_count > 0) && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50/70 p-3 text-sm text-amber-900 md:col-span-2 lg:col-span-12 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
+          {summary.valuation_complete ? <Clock3 className="mt-0.5 h-4 w-4" /> : <AlertTriangle className="mt-0.5 h-4 w-4" />}
+          <p>
+            {summary.unavailable_asset_count > 0 && `${summary.unavailable_asset_count}개 자산의 시세를 확인하지 못했습니다. `}
+            {summary.stale_asset_count > 0 && `${summary.stale_asset_count}개 자산은 마지막 정상 시세를 사용했습니다.`}
+          </p>
+        </div>
+      )}
       <StatCard
         title="총 자산"
         value={maskValue(formatKRW(summary.total_value), isPrivacyMode)}
