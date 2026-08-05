@@ -132,8 +132,38 @@ def test_markdown_characters_and_strategy_prompt_are_preserved_safely():
         strategy_prompt="변동성이 커지면 현금 비중을 검토해줘.",
     )
     assert "ETF \\| AI \\[Top\\] \\#1" in markdown
-    assert "## 사용자 전략 메모" in markdown
+    assert "## 플랜 전략 프롬프트" in markdown
     assert "변동성이 커지면" in markdown
+
+
+def test_strategy_prompt_replaces_default_guidance_and_keeps_document_order():
+    strategy_prompt = "  # 거시경제 레짐 가설\n\n산업 병목을 원문 그대로 분석한다.  "
+    markdown = render(
+        [{"name": "성장 자산", "target_percentage": 100, "items": [{"asset_id": "a1"}]}],
+        [asset()],
+        strategy_prompt=strategy_prompt,
+    )
+
+    assert strategy_prompt in markdown
+    assert markdown.count("# 포트폴리오 의사결정 지침") == 0
+    snapshot_position = markdown.index("# 실행 시점 포트폴리오 스냅샷")
+    strategy_position = markdown.index("## 플랜 전략 프롬프트")
+    comparison_position = markdown.index("## 현재 포트폴리오와 목표 포트폴리오 비교")
+    details_position = markdown.index("## 그룹별 상세")
+    assert snapshot_position < strategy_position < comparison_position < details_position
+
+
+def test_empty_strategy_prompt_uses_default_guidance_once_before_comparison():
+    markdown = render(
+        [{"name": "성장 자산", "target_percentage": 100, "items": [{"asset_id": "a1"}]}],
+        [asset()],
+        strategy_prompt="   ",
+    )
+
+    assert markdown.count("# 포트폴리오 의사결정 지침") == 1
+    assert markdown.index("# 포트폴리오 의사결정 지침") < markdown.index(
+        "## 현재 포트폴리오와 목표 포트폴리오 비교"
+    )
 
 
 def test_individual_allocation_asset_is_included_in_detail():

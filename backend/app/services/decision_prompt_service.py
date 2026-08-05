@@ -130,8 +130,11 @@ def build_snapshot_markdown(
     ]
     if warnings:
         lines += ["## 데이터 경고", ""] + [f"> ⚠️ {warning}" for warning in warnings] + [""]
-    if plan.get("strategy_prompt"):
-        lines += ["## 사용자 전략 메모", "", str(plan["strategy_prompt"]).strip(), ""]
+    strategy_prompt = str(plan.get("strategy_prompt") or "")
+    if strategy_prompt.strip():
+        lines += ["## 플랜 전략 프롬프트", "", strategy_prompt, ""]
+    else:
+        lines += [PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8").strip(), ""]
 
     lines += ["## 현재 포트폴리오와 목표 포트폴리오 비교", "", "| 자산군 | 실제 평가금액 | 실제 비중 | 목표 비중 | 차이 |", "| --- | ---: | ---: | ---: | ---: |"]
     table_value = Decimal("0")
@@ -222,7 +225,6 @@ class DecisionPromptService:
         portfolio = result.data[0] if result.data else {"base_currency": "KRW"}
         now = datetime.now().astimezone()
         snapshot = build_snapshot_markdown(plan, portfolio, enriched, summary, self.rebalance.match_item_to_asset, now)
-        template = PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8").strip()
-        markdown = f"{snapshot}\n\n{template}\n"
+        markdown = snapshot
         safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in str(plan["name"])).strip("-") or "plan"
         return markdown, f"portfolio-decision-prompt_{safe_name}_{now:%Y-%m-%d}.md"
