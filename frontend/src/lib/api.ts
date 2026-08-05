@@ -314,6 +314,20 @@ export const rebalanceApi = {
     return data
   },
 
+  // 최신 자산 평가를 포함한 AI 의사결정 프롬프트 다운로드
+  downloadDecisionPrompt: async (planId: string): Promise<{ blob: Blob; filename: string }> => {
+    const response = await apiClient.get<Blob>(
+      `/rebalance/plans/${planId}/decision-prompt`,
+      { responseType: 'blob' }
+    )
+    const disposition = response.headers['content-disposition'] as string | undefined
+    const encodedName = disposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+    return {
+      blob: response.data,
+      filename: encodedName ? decodeURIComponent(encodedName) : 'portfolio-decision-prompt.md',
+    }
+  },
+
   // 메인 플랜 자동 리밸런싱 계산 냥~
   calculateMain: async (portfolioId?: string): Promise<AssetRebalanceResponse> => {
     const params = portfolioId ? `?portfolio_id=${portfolioId}` : ''

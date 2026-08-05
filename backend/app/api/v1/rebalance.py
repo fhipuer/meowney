@@ -2,9 +2,10 @@
 리밸런싱 플랜 API 엔드포인트 냥~ 🐱
 """
 from typing import Optional
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from app.models.schemas import (
     MeowResponse,
@@ -17,6 +18,7 @@ from app.models.schemas import (
     AssetRebalanceResponse,
 )
 from app.services.rebalance_service import RebalanceService
+from app.services.decision_prompt_service import DecisionPromptService
 
 router = APIRouter(prefix="/rebalance", tags=["Rebalance Plans"])
 
@@ -56,6 +58,20 @@ async def get_plan(plan_id: UUID):
     if not plan:
         raise HTTPException(status_code=404, detail="플랜을 찾을 수 없다옹! 🙀")
     return plan
+
+
+@router.get("/plans/{plan_id}/decision-prompt")
+async def download_decision_prompt(plan_id: UUID):
+    """최신 평가액을 포함한 AI 의사결정 Markdown을 내려준다."""
+    try:
+        markdown, filename = await DecisionPromptService().export_markdown(plan_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(
+        content=markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
 
 
 @router.put("/plans/{plan_id}", response_model=RebalancePlanResponse)

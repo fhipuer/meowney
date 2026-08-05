@@ -2,7 +2,7 @@
  * 리밸런싱 플랜 관리 페이지
  */
 import { useState } from 'react'
-import { Plus, Star, Trash2, Edit2 } from 'lucide-react'
+import { Plus, Star, Trash2, Edit2, Download, Loader2, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,6 +27,8 @@ import {
 import { AllocationEditor } from '@/components/rebalance/AllocationEditor'
 import { TickerSparkline } from '@/components/rebalance/TickerSparkline'
 import type { RebalancePlan } from '@/types'
+import { rebalanceApi } from '@/lib/api'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
 export function RebalancePlanPage() {
   const { data: plans, isLoading } = usePlans()
@@ -40,6 +42,8 @@ export function RebalancePlanPage() {
   const [newPlanDescription, setNewPlanDescription] = useState('')
   const [newPlanStrategyPrompt, setNewPlanStrategyPrompt] = useState('')
   const [newPlanIsMain, setNewPlanIsMain] = useState(false)
+  const [downloadingPlanId, setDownloadingPlanId] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
 
   const handleCreatePlan = async () => {
     if (!newPlanName.trim()) return
@@ -66,6 +70,38 @@ export function RebalancePlanPage() {
 
   const handleSetMain = async (planId: string) => {
     await setMainPlanMutation.mutateAsync(planId)
+  }
+
+  const handleDownloadPrompt = async (planId: string) => {
+    setDownloadingPlanId(planId)
+    setDownloadError(null)
+    try {
+      const { blob, filename } = await rebalanceApi.downloadDecisionPrompt(planId)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+    } catch (error: unknown) {
+      let message = 'AI 의사결정 프롬프트를 만들지 못했습니다.'
+      if (error && typeof error === 'object' && 'response' in error) {
+        const response = (error as { response?: { data?: Blob } }).response
+        if (response?.data instanceof Blob) {
+          try {
+            const payload = JSON.parse(await response.data.text()) as { detail?: string }
+            if (payload.detail) message = payload.detail
+          } catch {
+            // JSON 오류 응답이 아니면 기본 메시지를 사용한다.
+          }
+        }
+      }
+      setDownloadError(message)
+    } finally {
+      setDownloadingPlanId(null)
+    }
   }
 
   if (isLoading) {
@@ -174,6 +210,13 @@ export function RebalancePlanPage() {
         </Dialog>
       </div>
 
+      {downloadError && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{downloadError}</AlertDescription>
+        </Alert>
+      )}
+
       {/* 플랜 목록 */}
       {(!plans || plans.length === 0) ? (
         <Card>
@@ -269,6 +312,20 @@ export function RebalancePlanPage() {
                       메인 플랜으로 설정
                     </Button>
                   )}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => handleDownloadPrompt(plan.id)}
+                    disabled={downloadingPlanId !== null}
+                  >
+                    {downloadingPlanId === plan.id ? (
+                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Download className="mr-2 h-3.5 w-3.5" />
+                    )}
+                    {downloadingPlanId === plan.id ? '최신 가격 확인 중...' : 'AI 의사결정 프롬프트 다운로드'}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
