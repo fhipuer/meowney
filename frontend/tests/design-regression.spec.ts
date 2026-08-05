@@ -33,6 +33,24 @@ test.describe('Calm Wealth Workspace', () => {
     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width)
   })
 
+  test('mobile portfolio legend is placed below the donut without clipped labels', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/')
+
+    const chart = page.getByTestId('portfolio-donut-chart')
+    const legend = page.getByTestId('portfolio-donut-legend')
+    await expect(chart).toBeVisible({ timeout: 30_000 })
+    await expect(legend).toBeVisible()
+    await page.waitForTimeout(1_000)
+
+    const chartBox = await chart.boundingBox()
+    const legendBox = await legend.boundingBox()
+    expect(chartBox).not.toBeNull()
+    expect(legendBox).not.toBeNull()
+    expect(legendBox!.y).toBeGreaterThanOrEqual(chartBox!.y + chartBox!.height)
+    expect(await legend.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  })
+
   test('asset management provides dense table and an accessible editor', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
     await page.goto('/assets')

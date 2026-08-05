@@ -296,7 +296,7 @@ export function PortfolioDonut({ allocations, isLoading, totalValueFromApi }: Po
   }
 
   return (
-    <Card className="h-[450px] border-0 bg-gradient-to-br from-background to-muted/30 overflow-hidden opacity-0 animate-slide-up">
+    <Card className="h-auto border-0 bg-gradient-to-br from-background to-muted/30 overflow-hidden opacity-0 animate-slide-up md:h-[450px]">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           포트폴리오 배분
@@ -307,10 +307,10 @@ export function PortfolioDonut({ allocations, isLoading, totalValueFromApi }: Po
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="relative">
-        <div className="flex items-center gap-4">
+      <CardContent className="relative pb-6">
+        <div className="flex flex-col items-center gap-4 md:flex-row">
           {/* 도넛 차트 - 크기 확대 및 반응형 */}
-          <div className="relative w-[220px] h-[220px] md:w-[260px] md:h-[260px] lg:w-[280px] lg:h-[280px] flex-shrink-0">
+          <div className="relative h-[220px] w-[220px] flex-shrink-0 md:h-[260px] md:w-[260px] lg:h-[280px] lg:w-[280px]" data-testid="portfolio-donut-chart">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -354,7 +354,7 @@ export function PortfolioDonut({ allocations, isLoading, totalValueFromApi }: Po
           </div>
 
           {/* 범례 */}
-          <div className="flex-1 pl-2 space-y-1.5 max-h-[280px] overflow-y-auto">
+          <div className="w-full min-w-0 space-y-1.5 overflow-x-hidden md:max-h-[280px] md:flex-1 md:overflow-y-auto md:pl-2" data-testid="portfolio-donut-legend">
             {chartData.map((item, index) => (
               <div
                 key={item.name}
