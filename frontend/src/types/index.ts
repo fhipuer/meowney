@@ -498,6 +498,13 @@ export interface RegimeSignal {
   status: string;
   reason: string;
   history?: { date: string; value: number }[];
+  display_period?: string;
+  display_metrics?: { label: string; value: number; unit: string; kind: string }[];
+  decision_role?: "core" | "corroborative" | "context";
+  usage?: "regime" | "trigger" | "display";
+  available_from?: string | null;
+  release_date?: string | null;
+  vintage_kind?: string;
 }
 
 export type ReviewUrgency = "required" | "watch" | "not_needed";

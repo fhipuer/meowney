@@ -97,8 +97,7 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
               {data.data_quality.status}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              coverage {Math.round(data.data_quality.overall_coverage * 100)}% ·
-              적중률 아님
+              핵심지표 최신성 {Math.round(data.data_quality.overall_coverage * 100)}%
             </p>
           </div>
         </div>
@@ -111,6 +110,24 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
       </CardContent>
     </Card>
   );
+}
+
+function ChangeInbox({ data }: { data: RegimeCurrent }) {
+  const items = [
+    ...data.triggers.map((trigger) => ({
+      key: trigger.rule_id,
+      label: trigger.severity === "critical" ? "긴급" : "경보",
+      text: trigger.summary,
+      tone: trigger.severity === "critical" ? "destructive" as const : "secondary" as const,
+    })),
+    ...(data.changes_since_snapshot || []).map((text, index) => ({
+      key: `change-${index}`, label: "상태 변화", text, tone: "outline" as const,
+    })),
+    ...(data.data_quality.status !== "충분" ? data.data_quality.reasons.map((text, index) => ({
+      key: `quality-${index}`, label: "데이터", text, tone: "outline" as const,
+    })) : []),
+  ].slice(0, 3)
+  return <Card><CardHeader className="pb-2"><CardTitle>마지막 확인 이후 변화</CardTitle><p className="text-sm text-muted-foreground">새 경보, 영역 변화와 데이터 공백을 우선 표시합니다.</p></CardHeader><CardContent>{items.length ? <ul className="divide-y">{items.map(item => <li key={item.key} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"><Badge variant={item.tone}>{item.label}</Badge><p className="text-sm leading-5">{item.text}</p></li>)}</ul> : <p className="text-sm text-muted-foreground">새로운 임계선 통과나 영역 상태 변화가 없습니다.</p>}</CardContent></Card>
 }
 
 function DriverList({
@@ -244,19 +261,24 @@ function MonitoringTable({ data }: { data: RegimeCurrent }) {
     conditions = data.macro_quadrant.financial_conditions;
   const count = (domain: string) =>
     data.triggers.filter((item) => item.domain === domain).length;
+  const countRateRules = (includeRestrictive: boolean) => data.triggers.filter((item) =>
+    item.domain === "rates" && (includeRestrictive
+      ? item.rule_id === "tightening.restrictive_level"
+      : item.rule_id !== "tightening.restrictive_level")
+  ).length;
   const rows = [
     [
       "성장·고용",
       `${data.macro_quadrant.growth_level?.label || "판정 불가"} / 모멘텀 ${signed(current?.growth.coordinate)}`,
       current?.growth.contributors[0]?.name || "자료 부족",
-      `품질 ${current?.growth.data_quality_label || current?.growth.confidence_label} ${current?.growth.data_quality_score ?? current?.growth.confidence ?? 0}점`,
+      `자료 상태 ${current?.growth.data_quality_label || current?.growth.confidence_label}`,
       count("growth"),
     ],
     [
       "물가",
       `${data.macro_quadrant.inflation_level?.label || "판정 불가"} / 모멘텀 ${signed(current?.inflation.coordinate)}`,
       current?.inflation.contributors[0]?.name || "자료 부족",
-      `품질 ${current?.inflation.data_quality_label || current?.inflation.confidence_label} ${current?.inflation.data_quality_score ?? current?.inflation.confidence ?? 0}점`,
+      `자료 상태 ${current?.inflation.data_quality_label || current?.inflation.confidence_label}`,
       count("inflation"),
     ],
     [
@@ -264,7 +286,7 @@ function MonitoringTable({ data }: { data: RegimeCurrent }) {
       conditions?.policy.label || "판정 불가",
       `Fed ${conditions?.policy.fed_funds?.toFixed(2) ?? "-"}% / Core PCE YoY ${conditions?.policy.core_pce_yoy?.toFixed(2) ?? "-"}% / 실질 정책금리 ${signed(conditions?.policy.real_policy_rate, 2)}%p`,
       `${data.coverage.domains.rates.status} ${Math.round(data.coverage.domains.rates.coverage * 100)}%`,
-      count("rates"),
+      countRateRules(true),
     ],
     [
       "장기금리 전달",
@@ -273,7 +295,7 @@ function MonitoringTable({ data }: { data: RegimeCurrent }) {
       data.rate_decomposition
         ? `20일 ${data.rate_decomposition.driver} · 명목 ${signed(data.rate_decomposition.nominal_change, 2)}%p`
         : "변화 분해 자료 부족",
-      count("rates"),
+      countRateRules(false),
     ],
     [
       "신용·금융여건",
@@ -292,8 +314,18 @@ function MonitoringTable({ data }: { data: RegimeCurrent }) {
           아닙니다.
         </p>
       </CardHeader>
-      <CardContent className="overflow-x-auto">
-        <table className="w-full min-w-[900px] text-sm">
+      <CardContent>
+        <div className="space-y-3 md:hidden">
+          {rows.map((row) => (
+            <div key={row[0]} className="rounded-lg border bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-3"><p className="font-medium">{row[0]}</p><Badge variant={row[4] ? "destructive" : "outline"}>{row[4] ? `경보 ${row[4]}개` : "신규 경보 없음"}</Badge></div>
+              <p className="mt-3 text-sm">{row[1]}</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{row[2]}</p>
+              <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">{row[3]}</p>
+            </div>
+          ))}
+        </div>
+        <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[900px] text-sm">
           <thead>
             <tr className="border-b text-left text-xs text-muted-foreground">
               <th className="pb-3 font-medium">영역</th>
@@ -318,7 +350,7 @@ function MonitoringTable({ data }: { data: RegimeCurrent }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </CardContent>
     </Card>
   );
@@ -459,6 +491,7 @@ export function RegimeCurrentOverview(props: CurrentOverviewProps) {
   return (
     <div className="space-y-8">
       <DecisionHeader data={props.data} />
+      <ChangeInbox data={props.data} />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(340px,1fr)]">
         <MacroQuadrant data={props.data.macro_quadrant} />
         <EvidencePanel data={props.data} />

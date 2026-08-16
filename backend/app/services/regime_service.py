@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -22,6 +22,13 @@ from app.services.regime_rules import (
 )
 from app.services.regime_quadrant import calculate_us_macro_quadrant
 from app.services.finance_service import get_finance_service
+from app.services.regime_catalog import (
+    display_history,
+    display_metrics,
+    display_period,
+    indicator_role,
+)
+from app.services.regime_fred import fetch_all_pages, history_start
 from app.services.regime_vintage import (
     RegimeVintageRepository,
     initial_release_params,
@@ -74,17 +81,6 @@ class RegimeService:
         if not settings.fred_api_key:
             return {"status": "configuration_required", "source": "fred", "saved": 0}
 
-        if not force:
-            with self.db.connect() as conn:
-                latest = conn.execute(
-                    "SELECT finished_at FROM regime_fetch_runs WHERE source='fred' AND status IN ('success','partial') "
-                    "ORDER BY finished_at DESC LIMIT 1"
-                ).fetchone()
-            if latest and latest["finished_at"]:
-                age = datetime.now(timezone.utc) - datetime.fromisoformat(latest["finished_at"])
-                if age.total_seconds() < 20 * 3600:
-                    return {"status": "cached", "source": "fred", "saved": 0, "evaluation": self.evaluate()}
-
         with self.db.connect() as conn:
             indicators = [dict(row) for row in conn.execute(
                 "SELECT * FROM regime_indicators WHERE source='fred' AND enabled=1"
@@ -92,6 +88,27 @@ class RegimeService:
             market_indicators = [dict(row) for row in conn.execute(
                 "SELECT * FROM regime_indicators WHERE source='yfinance' AND enabled=1"
             ).fetchall()]
+            fetch_status = {row["indicator_id"]: dict(row) for row in conn.execute(
+                "SELECT * FROM regime_indicator_fetch_status"
+            ).fetchall()}
+
+        now = datetime.now(timezone.utc)
+
+        def due(indicator: dict[str, Any]) -> bool:
+            if force:
+                return True
+            state = fetch_status.get(indicator["id"])
+            if not state or not state.get("last_success_at"):
+                return True
+            if state.get("status") == "failed":
+                retry_at = datetime.fromisoformat(state["retry_after"]) if state.get("retry_after") else now
+                return retry_at <= now
+            return now - datetime.fromisoformat(state["last_success_at"]) >= timedelta(hours=20)
+
+        indicators = [item for item in indicators if due(item)]
+        market_indicators = [item for item in market_indicators if due(item)]
+        if not indicators and not market_indicators:
+            return {"status": "cached", "source": "mixed", "saved": 0, "evaluation": self.evaluate()}
         run_id, started_at, saved = str(uuid4()), _now(), 0
         self.db.table("regime_fetch_runs").insert({
             "id": run_id, "source": "fred", "started_at": started_at, "status": "running"
@@ -104,16 +121,15 @@ class RegimeService:
                     async with semaphore:
                         params = {
                             "series_id": indicator["source_key"], "api_key": settings.fred_api_key,
-                            "file_type": "json", "sort_order": "desc", "limit": 420,
+                            "file_type": "json", "sort_order": "asc",
+                            "observation_start": history_start(indicator["frequency"]),
                         }
-                        response = await client.get(
-                            "https://api.stlouisfed.org/fred/series/observations", params=params
+                        observations = await fetch_all_pages(
+                            client, "https://api.stlouisfed.org/fred/series/observations", params
                         )
-                        if response.is_error:
-                            raise RuntimeError(f"FRED HTTP {response.status_code}")
                         fetched_at = _now()
                         rows = []
-                        for item in response.json().get("observations", []):
+                        for item in observations:
                             value = _float(item.get("value"))
                             if value is not None:
                                 rows.append((str(uuid4()), indicator["id"], item["date"], value, fetched_at, "fred"))
@@ -126,17 +142,20 @@ class RegimeService:
                     return []
                 try:
                     async with semaphore:
-                        response = await client.get(
-                            "https://api.stlouisfed.org/fred/series/observations",
-                            params=initial_release_params(indicator["source_key"], settings.fred_api_key, limit=420),
+                        params = initial_release_params(indicator["source_key"], settings.fred_api_key)
+                        params["observation_start"] = history_start(indicator["frequency"])
+                        params.pop("limit", None)
+                        params.pop("offset", None)
+                        observations = await fetch_all_pages(
+                            client, "https://api.stlouisfed.org/fred/series/observations", params
                         )
-                        if response.is_error:
-                            raise RuntimeError(f"FRED vintage HTTP {response.status_code}")
-                        return parse_initial_release_observations(indicator["id"], response.json(), _now())
+                        return parse_initial_release_observations(
+                            indicator["id"], {"observations": observations}, _now()
+                        )
                 except Exception as exc:
                     raise RuntimeError(f"{indicator['id']}.vintage: {type(exc).__name__}") from None
 
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=60) as client:
                 batches, vintage_batches = await asyncio.gather(
                     asyncio.gather(*(fetch_indicator(client, indicator) for indicator in indicators), return_exceptions=True),
                     asyncio.gather(*(fetch_initial_vintage(client, indicator) for indicator in indicators), return_exceptions=True),
@@ -145,6 +164,12 @@ class RegimeService:
             errors.extend(str(result) for result in vintage_batches if isinstance(result, Exception))
             rows = [row for batch in batches if isinstance(batch, list) for row in batch]
             vintage_rows = [row for batch in vintage_batches if isinstance(batch, list) for row in batch]
+            outcomes: dict[str, tuple[bool, str | None, str | None]] = {}
+            for indicator, result in zip(indicators, batches):
+                if isinstance(result, Exception):
+                    outcomes[indicator["id"]] = (False, str(result), None)
+                else:
+                    outcomes[indicator["id"]] = (True, None, max((row[2] for row in result), default=None))
             if market_indicators:
                 finance = get_finance_service()
                 market_batches = await asyncio.gather(
@@ -153,15 +178,16 @@ class RegimeService:
                 )
                 for indicator, result in zip(market_indicators, market_batches):
                     if isinstance(result, Exception) or not result.get("data"):
-                        errors.append(f"{indicator['id']}: yfinance unavailable")
+                        error = f"{indicator['id']}: yfinance unavailable"
+                        errors.append(error)
+                        outcomes[indicator["id"]] = (False, error, None)
                         continue
                     fetched_at = _now()
+                    outcomes[indicator["id"]] = (True, None, result["data"][-1]["date"])
                     rows.extend(
                         (str(uuid4()), indicator["id"], item["date"], float(item["close"]), fetched_at, "yfinance")
                         for item in result["data"]
                     )
-            if not rows and errors:
-                raise RuntimeError("; ".join(errors[:3]))
             with self.db.connect() as conn:
                 conn.executemany(
                     "INSERT INTO regime_observations(id,indicator_id,observation_date,value,fetched_at,source) "
@@ -169,10 +195,39 @@ class RegimeService:
                     "value=excluded.value,fetched_at=excluded.fetched_at,source=excluded.source",
                     rows,
                 )
+                metal_rows = conn.execute(
+                    "SELECT gold.observation_date,gold.value/silver.value AS ratio "
+                    "FROM regime_observations gold JOIN regime_observations silver "
+                    "ON silver.observation_date=gold.observation_date "
+                    "WHERE gold.indicator_id='market_gold' AND silver.indicator_id='market_silver' "
+                    "AND silver.value<>0 ORDER BY gold.observation_date"
+                ).fetchall()
+                conn.executemany(
+                    "INSERT INTO regime_observations(id,indicator_id,observation_date,value,fetched_at,source) "
+                    "VALUES(?,?,?,?,?,'derived') ON CONFLICT(indicator_id,observation_date) DO UPDATE SET "
+                    "value=excluded.value,fetched_at=excluded.fetched_at,source=excluded.source",
+                    [(str(uuid4()), "market_gold_silver_ratio", row["observation_date"],
+                      float(row["ratio"]), _now()) for row in metal_rows],
+                )
+                attempted_at = _now()
+                for indicator_id, (success, error, last_date) in outcomes.items():
+                    previous_failures = int(fetch_status.get(indicator_id, {}).get("failure_count") or 0)
+                    conn.execute(
+                        "INSERT INTO regime_indicator_fetch_status(indicator_id,last_attempted_at,last_success_at,"
+                        "last_observation_date,status,failure_count,retry_after,error) VALUES(?,?,?,?,?,?,?,?) "
+                        "ON CONFLICT(indicator_id) DO UPDATE SET last_attempted_at=excluded.last_attempted_at,"
+                        "last_success_at=COALESCE(excluded.last_success_at,regime_indicator_fetch_status.last_success_at),"
+                        "last_observation_date=COALESCE(excluded.last_observation_date,regime_indicator_fetch_status.last_observation_date),"
+                        "status=excluded.status,failure_count=excluded.failure_count,retry_after=excluded.retry_after,error=excluded.error",
+                        (indicator_id, attempted_at, attempted_at if success else None, last_date,
+                         "success" if success else "failed", 0 if success else previous_failures + 1,
+                         None if success else (now + timedelta(hours=1)).isoformat(), error),
+                    )
             RegimeVintageRepository(self.db).save(vintage_rows, run_id)
-            saved = len(rows)
+            saved = len(rows) + len(metal_rows)
+            run_status = "failed" if errors and not rows else "partial" if errors else "success"
             self.db.table("regime_fetch_runs").update({
-                "finished_at": _now(), "status": "partial" if errors else "success",
+                "finished_at": _now(), "status": run_status,
                 "observations_saved": saved, "error": "; ".join(errors[:3]) if errors else None,
             }).eq("id", run_id).execute()
         except Exception as exc:
@@ -181,7 +236,7 @@ class RegimeService:
             }).eq("id", run_id).execute()
             raise
         evaluation = self.evaluate()
-        return {"status": "partial" if errors else "success", "source": "fred", "saved": saved,
+        return {"status": run_status, "source": "mixed", "saved": saved,
                 "errors": errors[:3], "evaluation": evaluation}
 
     def _indicator_rows(self) -> list[dict[str, Any]]:
@@ -195,14 +250,25 @@ class RegimeService:
                     "WHERE indicator_id=? ORDER BY observation_date",
                     (definition["id"],),
                 ).fetchall()]
+                timing = conn.execute(
+                    "SELECT observation_date,available_from,release_date,vintage_kind "
+                    "FROM regime_observation_vintages WHERE indicator_id=? "
+                    "ORDER BY observation_date DESC,available_from DESC LIMIT 1",
+                    (definition["id"],),
+                ).fetchone()
+                definition["timing"] = dict(timing) if timing else None
         return definitions
 
     def _signal(self, indicator: dict[str, Any]) -> dict[str, Any]:
         observations = indicator["observations"]
         values = [float(row["value"]) for row in observations]
         if not values:
-            return {**{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "frequency")},
-                    "status": "unavailable", "score": 0, "reason": "수집된 데이터 없음"}
+            return {
+                **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "frequency")},
+                "status": "unavailable", "score": 0, "reason": "수집된 데이터 없음",
+                "history": [], "display_period": display_period(indicator["frequency"]),
+                "display_metrics": [], **indicator_role(indicator["id"]),
+            }
         p1, p3, p12 = FREQUENCY_PERIODS[indicator["frequency"]]
         latest, change1, change3, change12 = values[-1], _change(values, p1), _change(values, p3), _change(values, p12)
         score, reason = self._score(indicator["id"], latest, change3, change12, values, p3, p12)
@@ -218,7 +284,13 @@ class RegimeService:
             "score": score,
             "status": status,
             "reason": reason,
-            "history": [{"date": row["observation_date"], "value": float(row["value"])} for row in observations[-52:]],
+            "history": display_history(observations, indicator["frequency"]),
+            "display_period": display_period(indicator["frequency"]),
+            "display_metrics": display_metrics(indicator["id"], indicator["frequency"], values),
+            "available_from": indicator["timing"].get("available_from") if indicator.get("timing") else None,
+            "release_date": indicator["timing"].get("release_date") if indicator.get("timing") else None,
+            "vintage_kind": indicator["timing"].get("vintage_kind") if indicator.get("timing") else "latest_revised",
+            **indicator_role(indicator["id"]),
         }
 
     @staticmethod
@@ -241,6 +313,10 @@ class RegimeService:
         if key == "nfci":
             return (-2 if latest >= .5 else -1 if latest >= 0 else .5, f"현재 {latest:.2f}")
         if key in {"us10y", "tips10y", "bei10y", "term_premium", "fedfunds"}:
+            if key == "tips10y" and latest >= 2.25:
+                return (-1, f"현재 {latest:.2f}% · 제한적 실질금리")
+            if key == "term_premium" and latest >= 1.25:
+                return (-1, f"현재 {latest:.2f}% · 높은 기간 프리미엄")
             return (-1.5 if delta3 >= .5 else -.75 if delta3 >= .25 else .25, f"3개월 {delta3:+.2f}%p")
         if key == "curve2s10s":
             return (-1 if latest < -.5 else -.5 if latest < 0 else .5, f"현재 {latest:+.2f}%p")
@@ -288,14 +364,36 @@ class RegimeService:
             candidate = max((candidate, "경계"), key=REGIME_ORDER.index)
         if macro_quadrant.get("scope_status") == "macro_only" and candidate == "전환":
             candidate = "약화"
+        regime_inputs = [
+            (item["id"], item.get("observation_date"), item.get("value"))
+            for item in available
+            if item.get("usage") == "regime"
+            and (item.get("score", 0) < 0 or item["id"] in {"core_cpi", "core_pce", "tips10y", "term_premium"})
+        ]
+        basis_fingerprint = hashlib.sha256(
+            json.dumps({"rule_version": RULE_VERSION, "inputs": regime_inputs}, sort_keys=True).encode()
+        ).hexdigest()
         with self.db.connect() as conn:
             existing = conn.execute("SELECT * FROM regime_evaluations WHERE data_fingerprint=?", (fingerprint,)).fetchone()
             previous = conn.execute("SELECT * FROM regime_evaluations ORDER BY evaluated_at DESC LIMIT 1").fetchone()
-            prior_two = conn.execute("SELECT candidate_regime FROM regime_evaluations ORDER BY evaluated_at DESC LIMIT 2").fetchall()
         if existing:
             return self._evaluation_dict(dict(existing), signals, domains, macro_quadrant)
         current = previous["automatic_regime"] if previous else "유지"
-        confirmed = len(prior_two) >= 1 and all(row["candidate_regime"] == candidate for row in prior_two[:1])
+        with self.db.connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO regime_candidate_confirmations("
+                "id,candidate_regime,basis_fingerprint,observed_at,evidence_json,rule_version) VALUES(?,?,?,?,?,?)",
+                (str(uuid4()), candidate, basis_fingerprint, _now(), json.dumps(regime_inputs, ensure_ascii=False), RULE_VERSION),
+            )
+            recent_confirmations = conn.execute(
+                "SELECT candidate_regime FROM regime_candidate_confirmations WHERE rule_version=? "
+                "ORDER BY observed_at DESC LIMIT 2",
+                (RULE_VERSION,),
+            ).fetchall()
+        confirmed = (
+            len(recent_confirmations) >= 2
+            and all(row["candidate_regime"] == candidate for row in recent_confirmations)
+        )
         automatic = candidate if candidate == current or confirmed else current
         reasons = [f"{item['name']}: {reason}" for item in domains for reason in item["reasons"]]
         evaluation_id = str(uuid4())

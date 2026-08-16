@@ -16,6 +16,9 @@ const META: Record<string, { short: string; role: string; icon: typeof Globe2; g
   market_dollar: { short: '광의 달러', role: '글로벌 달러 긴축', icon: Landmark, group: 'fx' },
   market_wti: { short: 'WTI', role: '공급충격·에너지 물가', icon: Waves, group: 'real' },
   market_copper: { short: '구리', role: '글로벌 제조업 수요', icon: Coins, group: 'real' },
+  market_gold: { short: '금', role: '실질금리·달러·방어 수요', icon: Coins, group: 'hedge' },
+  market_silver: { short: '은', role: '산업 수요·귀금속 혼합', icon: Coins, group: 'hedge' },
+  market_gold_silver_ratio: { short: '금은비', role: '방어 선호·산업수요 상대 확인', icon: Gauge, group: 'hedge' },
 }
 
 const signed = (value?: number | null) => value == null ? '—' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`
@@ -24,6 +27,8 @@ const formatValue = (signal: RegimeSignal) => {
   if (signal.id === 'market_usdkrw') return signal.value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })
   if (signal.id === 'market_wti') return `$${signal.value.toFixed(1)}`
   if (signal.id === 'market_copper') return `$${signal.value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+  if (signal.id === 'market_gold' || signal.id === 'market_silver') return `$${signal.value.toLocaleString('en-US', { maximumFractionDigits: 1 })}`
+  if (signal.id === 'market_gold_silver_ratio') return `${signal.value.toFixed(1)}배`
   return signal.value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })
 }
 
@@ -41,7 +46,7 @@ function MarketCard({ signal }: { signal: RegimeSignal }) {
   return <Card className="bg-card/70">
     <CardContent className="p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/20 bg-primary/[0.07] text-primary"><Icon className="h-4 w-4" /></div><div><p className="font-medium">{meta.short}</p><p className="mt-0.5 text-xs text-muted-foreground">{meta.role}</p></div></div>
+        <div className="flex gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/20 bg-primary/[0.07] text-primary"><Icon className="h-4 w-4" /></div><div><div className="flex items-center gap-2"><p className="font-medium">{meta.short}</p><Badge variant="outline" className="text-[10px] font-normal">{signal.usage === 'trigger' ? '경보 전용' : '맥락 지표'}</Badge></div><p className="mt-0.5 text-xs text-muted-foreground">{meta.role}</p></div></div>
         <Badge variant="outline" className="font-normal text-muted-foreground">{signal.observation_date || '미수집'}</Badge>
       </div>
       <div className="mt-5 flex items-end justify-between gap-3"><p className="text-2xl font-semibold tabular-nums">{formatValue(signal)}</p><p className={`text-sm font-medium ${changeTone(signal.change_1m, inverse)}`}>1M {signed(signal.change_1m)}</p></div>
@@ -68,12 +73,12 @@ export function MarketIndicators({ signals, fetchedAt }: Props) {
   const group = (name: string) => available.filter(signal => META[signal.id].group === name)
 
   return <div className="space-y-6">
-    <div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className="text-xl font-semibold">시장 환경</h2><p className="mt-1 text-sm text-muted-foreground">레짐 DB 캐시를 사용해 자산가격, 스트레스, 달러와 실물 수요를 한 번에 봅니다.</p></div><div className="text-right text-xs text-muted-foreground"><p>외부 실시간 호출 없음</p><p className="mt-1">마지막 수집 {fetchedAt ? new Date(fetchedAt).toLocaleString('ko-KR') : '확인 불가'}</p></div></div>
+    <div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className="text-xl font-semibold">시장 환경</h2><p className="mt-1 text-sm text-muted-foreground">가격 충격과 거시 신호를 확인합니다. 시장가격만으로 자동 레짐을 변경하지 않습니다.</p></div><div className="text-right text-xs text-muted-foreground"><p>마지막 갱신</p><p className="mt-1">{fetchedAt ? new Date(fetchedAt).toLocaleString('ko-KR') : '확인 불가'}</p></div></div>
 
     <Card><CardHeader><CardTitle>위험자산 상대 흐름</CardTitle><p className="text-sm text-muted-foreground">각 지수의 표시 구간 시작값을 100으로 환산합니다. 지수 간 절대 수준 비교가 아닙니다.</p></CardHeader><CardContent>{trend.length > 1 ? <div className="h-80"><ResponsiveContainer width="100%" height="100%"><LineChart data={trend} margin={{ top: 8, right: 18, bottom: 4, left: 4 }}><CartesianGrid stroke="hsl(var(--chart-grid))" strokeDasharray="3 5" vertical={false} /><XAxis dataKey="date" tickFormatter={value => String(value).slice(5).replace('-', '.')} minTickGap={52} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis width={46} domain={[(minimum: number) => Math.floor(minimum - 5), (maximum: number) => Math.ceil(maximum + 5)]} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={label => `관측일 ${label}`} contentStyle={{ background: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 8 }} /><Legend /><Line type="monotone" dataKey="market_sp500" name="S&P 500" stroke="#60a5fa" dot={false} strokeWidth={2} connectNulls isAnimationActive={false} /><Line type="monotone" dataKey="market_nasdaq" name="NASDAQ" stroke="#a78bfa" dot={false} strokeWidth={2} connectNulls isAnimationActive={false} /><Line type="monotone" dataKey="market_kospi" name="KOSPI" stroke="#2dd4bf" dot={false} strokeWidth={2} connectNulls isAnimationActive={false} /></LineChart></ResponsiveContainer></div> : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">정규화 차트를 만들 장기 시계열이 부족합니다.</div>}</CardContent></Card>
 
-    {[['risk', '주요 시장'], ['stress', '스트레스'], ['fx', '달러·환율'], ['real', '실물·공급충격']].map(([id, title]) => group(id).length ? <section key={id}><div className="mb-3 flex items-center gap-3"><h3 className="text-sm font-medium">{title}</h3><div className="h-px flex-1 bg-border/70" /></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{group(id).map(signal => <MarketCard key={signal.id} signal={signal} />)}</div></section> : null)}
+    {[['risk', '주요 시장'], ['stress', '스트레스'], ['fx', '달러·환율'], ['real', '실물·공급충격'], ['hedge', '귀금속·방어 확인']].map(([id, title]) => group(id).length ? <section key={id}><div className="mb-3 flex items-center gap-3"><h3 className="text-sm font-medium">{title}</h3><div className="h-px flex-1 bg-border/70" /></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{group(id).map(signal => <MarketCard key={signal.id} signal={signal} />)}</div></section> : null)}
 
-    <p className="text-xs leading-5 text-muted-foreground">PER은 무료 자동 소스의 결측과 정의 불일치가 커서 제거했습니다. 밸류에이션은 신뢰 가능한 공시·운용사 계열을 확보한 뒤 별도 캐시로 복원합니다.</p>
+    <p className="text-xs leading-5 text-muted-foreground">금·은·금은비는 실제 보유자산과 방어 수요를 설명하는 확인 지표이며, 단독으로 자동 거시 레짐을 변경하지 않습니다. 밸류에이션은 신뢰 가능한 출처를 확보한 뒤 연결합니다.</p>
   </div>
 }

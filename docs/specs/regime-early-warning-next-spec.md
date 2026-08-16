@@ -2,7 +2,22 @@
 
 > 구현 상태 (2026-08-16): P1.5 1차 구현 완료. `required/watch/not_needed`, 초기 물가·금리·고용·신용·시장
 > trigger, freshness/coverage, 10Y 20관측일 분해, Snapshot 동결 필드와 점검 완료 acknowledgment를 반영했다.
-> 발표 일정, 데이터 vintage/revision, 63일 금리 분해, AI·반도체·전력 sentinel은 후속 단계다.
+> 발표 일정, 완전한 revision vintage, AI·반도체·전력 sentinel은 후속 단계다. 외부 공급자 작업은
+> 현재 거시 화면과 수집 신뢰성 개선이 안정된 뒤 재개한다.
+
+## 0. 외부 데이터 재개 체크포인트
+
+현재 단계에서는 아래 공급자를 새로 연결하지 않는다. 추후 사용자가 다음 작업을 물으면 이 순서로 재개한다.
+
+1. `SEC XBRL`: Microsoft·Alphabet·Meta·Amazon의 공시 총 CAPEX, 분기/TTM/YoY와 filed date
+2. `KOSIS/관세청·OpenDART·SEC`: 한국 반도체 수출과 삼성전자·SK하이닉스·Micron 매출/재고/CAPEX breadth
+3. `EIA`: 미국 총전력수요, 상업용 판매, 지역별 peak와 가동·계획 설비
+4. 신뢰 가능한 자동 공급자 미확보 상태 유지: DRAM/NAND/HBM 가격, 산업 재고, 변압기 lead time,
+   grid connection queue, 기업 orders/backlog
+
+재개 전제는 현재 P0 수집·시간축·단위·hysteresis 테스트가 안정되고 Snapshot이 새 계약을 보존하는 것이다.
+회사 공시는 scalar 거시 관측 테이블에 억지로 넣지 않고 filing/fact/derived metric 스키마를 별도로 둔다.
+정성적 경영진 가이던스 NLP와 비공식 산업가격 scraping은 초기 범위에서 제외한다.
 
 ## 1. 목표
 

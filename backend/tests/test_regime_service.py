@@ -41,12 +41,37 @@ def test_hysteresis_requires_second_distinct_confirmation(tmp_path):
     service = service_for(tmp_path)
     add_series(service, "us_unemployment", [4.0, 4.0, 4.1, 4.5])
     first = service.evaluate()
-    add_series(service, "us_claims", [200000, 205000, 210000, 240000])
+    service.db.table("regime_observations").insert({
+        "id": str(uuid4()), "indicator_id": "us_unemployment",
+        "observation_date": "2025-06-01", "value": 4.6,
+        "fetched_at": "2026-08-16T00:00:00+00:00", "source": "fred",
+    }).execute()
     second = service.evaluate()
 
     assert first["candidate_regime"] == "경계"
     assert second["candidate_regime"] == "경계"
     assert second["automatic_regime"] == "경계"
+
+
+def test_unrelated_market_update_does_not_confirm_macro_candidate(tmp_path):
+    service = service_for(tmp_path)
+    add_series(service, "us_unemployment", [4.0, 4.0, 4.1, 4.5])
+    first = service.evaluate()
+    add_series(service, "market_sp500", [100, 101])
+    second = service.evaluate()
+
+    assert first["candidate_regime"] == "경계"
+    assert second["candidate_regime"] == "경계"
+    assert second["automatic_regime"] == "유지"
+
+
+def test_restrictive_real_rate_level_is_visible_without_recent_jump():
+    score, reason = RegimeService._score(
+        "tips10y", 2.39, 0.0, 0.0, [2.39] * 64, 63, 252
+    )
+
+    assert score < 0
+    assert "제한적 실질금리" in reason
 
 
 def test_snapshot_keeps_auto_and_user_judgment_separate(tmp_path):

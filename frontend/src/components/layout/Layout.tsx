@@ -8,7 +8,7 @@ export function Layout() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <main className="min-h-[calc(100vh-4rem)] pb-20 md:pb-0">
+      <main className="min-h-[calc(100vh-4rem)] pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-0">
         <div className="container max-w-[1280px] px-4 py-7 sm:px-6 md:px-8 md:py-10">
           <Outlet />
         </div>

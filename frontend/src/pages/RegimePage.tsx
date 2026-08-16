@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Database, Download, RefreshCw } from 'lucide-react'
+import { HelpCircle, Database, Download, RefreshCw } from 'lucide-react'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { MarketIndicators } from '@/components/dashboard/MarketIndicators'
 import { RegimeCurrentOverview } from '@/components/regime/RegimeCurrentOverview'
@@ -36,26 +36,30 @@ const formatNumber = (value: number) => Math.abs(value) >= 1000
   ? value.toLocaleString('ko-KR', { maximumFractionDigits: 0 })
   : value.toLocaleString('ko-KR', { maximumFractionDigits: 2 })
 
-function ChangeMetric({ label, value }: { label: string; value?: number | null }) {
+function ChangeMetric({ label, value, unit = '%' }: { label: string; value?: number | null; unit?: string }) {
   return <div className="rounded-md bg-muted/50 px-3 py-2">
     <p className="text-[11px] text-muted-foreground">{label}</p>
     <p className={`mt-0.5 text-sm font-medium ${value != null && value < 0 ? 'text-red-500' : ''}`}>
-      {value == null ? '-' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`}
+      {value == null ? '-' : `${value > 0 ? '+' : ''}${value.toFixed(1)}${unit}`}
     </p>
   </div>
 }
 
 function SignalCard({ signal }: { signal: RegimeSignal }) {
   const history = signal.history || []
-  const periodLabels = signal.frequency === 'quarterly' ? ['전분기', null, '전년'] : ['1개월', '3개월', '1년']
+  const metrics = signal.display_metrics || []
+  const role = signal.usage === 'regime' ? '레짐 산출' : signal.usage === 'trigger' ? '경보 전용' : '맥락 지표'
+  const status = signal.usage === 'display' && signal.status !== 'unavailable'
+    ? '판정 미적용'
+    : signalStatusLabel[signal.status] || signal.status
   return <Card className="overflow-hidden">
     <CardHeader className="space-y-3 pb-2">
       <div className="flex items-start justify-between gap-3">
-        <div><CardTitle className="text-base">{signal.name}</CardTitle><p className="mt-1 text-xs text-muted-foreground">{signal.source.toUpperCase()} · 관측 {signal.observation_date || '미수집'}</p></div>
-        <Badge className={levelClass[signal.status] || ''}>{signalStatusLabel[signal.status] || signal.status}</Badge>
+        <div><div className="flex flex-wrap items-center gap-2"><CardTitle className="text-base">{signal.name}</CardTitle><Badge variant="outline" className="text-[10px] font-normal">{role}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{signal.source.toUpperCase()} · 관측 {signal.observation_date || '미수집'} · {signal.display_period}</p>{signal.available_from && <p className="mt-1 text-[11px] text-muted-foreground">이용 가능 {signal.available_from}{signal.vintage_kind === 'initial' ? ' · 초기 발표값' : ''}</p>}</div>
+        <Badge className={signal.usage === 'display' ? levelClass['데이터 없음'] : levelClass[signal.status] || ''}>{status}</Badge>
       </div>
       <div className="flex items-baseline gap-2"><span className="text-2xl font-semibold">{signal.value == null ? '-' : formatNumber(signal.value)}</span><span className="text-xs text-muted-foreground">{signal.unit}</span></div>
-      <div className={`grid gap-2 ${periodLabels[1] ? 'grid-cols-3' : 'grid-cols-2'}`}><ChangeMetric label={periodLabels[0]!} value={signal.change_1m} />{periodLabels[1] && <ChangeMetric label={periodLabels[1]} value={signal.change_3m} />}<ChangeMetric label={periodLabels[2]!} value={signal.change_12m} /></div>
+      <div className={`grid gap-2 ${metrics.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>{metrics.map(metric => <ChangeMetric key={`${metric.label}-${metric.unit}`} label={metric.label} value={metric.value} unit={metric.unit} />)}</div>
     </CardHeader>
     <CardContent className="pt-3">
       {history.length > 1 ? <div className="h-56 w-full">
@@ -64,10 +68,10 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
           <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={34} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
           <YAxis domain={['auto', 'auto']} width={58} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={formatNumber} />
           <Tooltip labelFormatter={label => `관측일 ${label}`} contentStyle={{ background: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 8 }} />
-          <Line type="monotone" dataKey="value" name={signal.name} stroke="hsl(var(--primary))" dot={false} activeDot={{ r: 4 }} strokeWidth={2} />
+          <Line type="monotone" dataKey="value" name={signal.name} stroke="hsl(var(--primary))" dot={false} activeDot={{ r: 4 }} strokeWidth={2} isAnimationActive={false} />
         </LineChart></ResponsiveContainer>
       </div> : <div className="flex h-40 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">차트를 그릴 관측값이 부족합니다.</div>}
-      <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">{signal.reason}</p>
+      <div className="mt-3 flex items-start gap-2 border-t pt-3 text-xs text-muted-foreground"><HelpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><p>{signal.reason} · {role} 지표입니다.</p></div>
     </CardContent>
   </Card>
 }
@@ -80,7 +84,7 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
   }))
   const chartData = [...byDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
   if (!chartData.length) return null
-  return <Card className="mb-6"><CardHeader className="pb-2"><CardTitle>명목금리 구성 비교</CardTitle><p className="text-sm text-muted-foreground">10Y 명목금리, 실질금리와 기대인플레이션을 동일 축에서 비교합니다.</p></CardHeader><CardContent className="pt-3"><div className="h-80"><ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 12, right: 20, bottom: 8, left: 4 }}><CartesianGrid strokeDasharray="3 3" opacity={0.2} /><XAxis dataKey="date" tickFormatter={formatDate} minTickGap={38} tick={{ fontSize: 11 }} /><YAxis width={52} tick={{ fontSize: 11 }} unit="%" /><Tooltip labelFormatter={label => `관측일 ${label}`} contentStyle={{ background: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 8 }} /><Legend /><Line type="monotone" dataKey="us10y" name="10Y 명목" stroke="#60a5fa" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="tips10y" name="10Y 실질" stroke="#f97316" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="bei10y" name="10Y BEI" stroke="#34d399" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></div></CardContent></Card>
+  return <Card className="mb-6"><CardHeader className="pb-2"><CardTitle>명목금리 구성 비교</CardTitle><p className="text-sm text-muted-foreground">10Y 명목금리, 실질금리와 기대인플레이션을 동일 축에서 비교합니다.</p></CardHeader><CardContent className="pt-3"><div className="h-80"><ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 12, right: 20, bottom: 8, left: 4 }}><CartesianGrid strokeDasharray="3 3" opacity={0.2} /><XAxis dataKey="date" tickFormatter={formatDate} minTickGap={38} tick={{ fontSize: 11 }} /><YAxis width={52} tick={{ fontSize: 11 }} unit="%" /><Tooltip labelFormatter={label => `관측일 ${label}`} contentStyle={{ background: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 8 }} /><Legend /><Line type="monotone" dataKey="us10y" name="10Y 명목" stroke="#60a5fa" dot={false} strokeWidth={2} isAnimationActive={false} /><Line type="monotone" dataKey="tips10y" name="10Y 실질" stroke="#f97316" dot={false} strokeWidth={2} isAnimationActive={false} /><Line type="monotone" dataKey="bei10y" name="10Y BEI" stroke="#34d399" dot={false} strokeWidth={2} isAnimationActive={false} /></LineChart></ResponsiveContainer></div></CardContent></Card>
 }
 
 function JudgmentEditor({ snapshot }: { snapshot: RegimeSnapshot }) {
@@ -103,7 +107,7 @@ export function RegimePage() {
   const data = current.data
 
   return <div className="space-y-8 pb-14 pt-3">
-    <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/70 pb-6"><div><p className="mb-2 text-xs font-medium text-primary">Deterministic Early Warning</p><h1 className="text-3xl font-bold">투자 레짐</h1><p className="mt-2 text-muted-foreground">상세 포트폴리오 점검이 필요한 순간을 데이터와 규칙으로 알려줍니다.</p></div><div className="flex gap-2"><Button variant="outline" onClick={() => regimeApi.downloadMarkdown()}><Download className="mr-2 h-4 w-4" />분석 데이터</Button><Button variant="outline" onClick={() => refresh.mutate()} disabled={refresh.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${refresh.isPending ? 'animate-spin' : ''}`} />데이터 새로고침</Button></div></div>
+    <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/70 pb-6"><div><p className="mb-2 text-xs font-medium text-primary">포트폴리오 조기경보</p><h1 className="text-3xl font-bold">투자 레짐</h1><p className="mt-2 text-muted-foreground">상세 포트폴리오 점검이 필요한 순간을 데이터와 규칙으로 알려줍니다.</p><details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer select-none text-primary">이 화면 읽는 법</summary><p className="mt-2 max-w-2xl leading-5">확정 레짐은 서로 다른 핵심 발표에서 같은 상태가 재확인된 느린 판단입니다. 후보 레짐은 최신 자료의 즉시 계산이며, 활성 경보는 레짐 확정 전에 점검을 촉구하는 임계선 통과입니다. 데이터 상태는 수집 완전성을 뜻하며 예측 적중률이 아닙니다.</p></details></div><div className="flex gap-2"><Button variant="outline" onClick={() => regimeApi.downloadMarkdown()}><Download className="mr-2 h-4 w-4" />분석 데이터</Button><Button variant="outline" onClick={() => refresh.mutate()} disabled={refresh.isPending}><RefreshCw className={`mr-2 h-4 w-4 ${refresh.isPending ? 'animate-spin' : ''}`} />데이터 새로고침</Button></div></div>
     {data?.last_fetch?.status === 'failed' && <Alert variant="destructive"><AlertTitle>최근 갱신 실패</AlertTitle><AlertDescription>마지막 정상 캐시를 표시합니다. {data.last_fetch.error}</AlertDescription></Alert>}
     {data?.is_stale && <Alert><Database className="h-4 w-4" /><AlertTitle>오래된 캐시 사용 중</AlertTitle><AlertDescription>마지막 정상 수집 후 {data.cache_age_hours}시간이 지났습니다.</AlertDescription></Alert>}
 

@@ -21,6 +21,8 @@ const signal = (id: string, name: string, value: number, history = true): Regime
     { date: '2026-07-14', value: value * 0.95 },
     { date: '2026-08-14', value },
   ] : [],
+  usage: id === 'market_sp500' || id === 'market_nasdaq' ? 'trigger' : 'display',
+  decision_role: id === 'market_sp500' || id === 'market_nasdaq' ? 'corroborative' : 'context',
 })
 
 describe('MarketIndicators cached market view', () => {
@@ -36,10 +38,11 @@ describe('MarketIndicators cached market view', () => {
       ]}
     />)
 
-    expect(html).toContain('외부 실시간 호출 없음')
+    expect(html).toContain('시장가격만으로 자동 레짐을 변경하지 않습니다')
     expect(html).toContain('위험자산 상대 흐름')
     expect(html).toContain('WTI')
     expect(html).toContain('구리')
     expect(html).toContain('표시 구간 시작값을 100으로 환산')
+    expect(html).toContain('경보 전용')
   })
 })
