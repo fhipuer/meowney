@@ -3,6 +3,7 @@ set -eu
 
 ARCHIVE="${1:?source archive path is required}"
 EXPECTED_SHA="${2:?sha256 is required}"
+ENV_UPLOAD="${3:-}"
 TARGET="/var/services/homes/fhipuer/meowney"
 STARTED_AT=$(date +%s)
 HISTORY_FILE="$TARGET/backups/deployment-history.log"
@@ -55,6 +56,11 @@ tar --exclude='./data' --exclude='./backups' --exclude='./.env' \
 
 step "3. 새 소스 적용 및 이미지 빌드"
 tar -xzf "$ARCHIVE" -C "$TARGET"
+if [ -n "$ENV_UPLOAD" ]; then
+  test -f "$ENV_UPLOAD"
+  mv "$ENV_UPLOAD" "$TARGET/.env"
+  chmod 600 "$TARGET/.env"
+fi
 chmod 755 deploy/*.sh
 $COMPOSE build
 

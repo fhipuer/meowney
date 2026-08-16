@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$AllowNonMain,
-    [switch]$AllowDirty
+    [switch]$AllowDirty,
+    [switch]$DeployEnv
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +32,11 @@ if ($LASTEXITCODE -ne 0) {
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "meowney-deploy"
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 $archive = Join-Path $tempRoot "meowney-source.tar.gz"
+$envUpload = "$NasHome/meowney.env.upload"
+
+if ($DeployEnv -and -not (Test-Path -LiteralPath (Join-Path $RepoRoot ".env"))) {
+    throw "-DeployEnv requires a local .env file at the repository root."
+}
 
 try {
     tar `
@@ -50,8 +56,15 @@ try {
         "$NasUser@${NasHostName}:$NasHome/nas-apply-release.sh"
     if ($LASTEXITCODE -ne 0) { throw "Release helper upload failed." }
 
+    if ($DeployEnv) {
+        scp -O -P $NasPort (Join-Path $RepoRoot ".env") `
+            "$NasUser@${NasHostName}:$envUpload"
+        if ($LASTEXITCODE -ne 0) { throw "Environment upload failed." }
+    }
+
+    $remoteEnvArg = if ($DeployEnv) { "'$envUpload'" } else { "''" }
     ssh -o BatchMode=yes -p $NasPort "$NasUser@$NasHostName" `
-        "sed -i 's/\r$//' '$NasHome/nas-apply-release.sh' && chmod 700 '$NasHome/nas-apply-release.sh' && '$NasHome/nas-apply-release.sh' '$NasHome/meowney-source.tar.gz' '$sha'"
+        "sed -i 's/\r$//' '$NasHome/nas-apply-release.sh' && chmod 700 '$NasHome/nas-apply-release.sh' && '$NasHome/nas-apply-release.sh' '$NasHome/meowney-source.tar.gz' '$sha' $remoteEnvArg"
     if ($LASTEXITCODE -ne 0) { throw "NAS release failed. Inspect NAS logs before retrying." }
 
     $health = Invoke-RestMethod -Uri "http://${NasHostName}:8000/health" -TimeoutSec 20

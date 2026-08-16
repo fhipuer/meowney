@@ -37,6 +37,13 @@
 powershell -ExecutionPolicy Bypass -File deploy/deploy-to-nas.ps1
 ```
 
+로컬 루트 `.env`를 운영 환경에 함께 반영해야 할 때만 명시적으로 다음 옵션을 사용한다.
+비밀값은 Git과 소스 아카이브에 포함되지 않고 SSH로 별도 전송되며 NAS에서 권한 `600`으로 저장된다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/deploy-to-nas.ps1 -DeployEnv
+```
+
 스크립트는 다음을 자동 수행한다.
 
 1. `main` 및 clean worktree 강제
