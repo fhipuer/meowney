@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Database, Save } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, Database, Save } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,11 +12,9 @@ export type CurrentOverviewProps = {
   data: RegimeCurrent;
   judgment: RegimeLevel | "";
   note: string;
-  reviewCompleted: boolean;
   snapshotPending: boolean;
   onJudgment: (value: RegimeLevel | "") => void;
   onNote: (value: string) => void;
-  onReviewCompleted: (value: boolean) => void;
   onSnapshot: () => void;
 };
 const signed = (value: number | null | undefined, digits = 1) =>
@@ -25,15 +23,15 @@ const signed = (value: number | null | undefined, digits = 1) =>
 function DecisionHeader({ data }: { data: RegimeCurrent }) {
   const limited = data.data_quality.status !== "충분";
   const title = data.needs_new_review
-    ? "지금 상세 점검 필요"
+    ? "지금 다시 상세점검하세요"
     : data.review_urgency === "watch"
-      ? "관찰 유지"
-      : "신규 중요 경보 없음";
+      ? "다음 발표까지 관찰하세요"
+      : "새 상세점검 사유 없음";
   const detail = data.needs_new_review
     ? data.review_reasons[0] || "중요 임계조건이 충족됐습니다."
     : limited
       ? "경보는 없지만 데이터 공백 때문에 정상 확정은 제한됩니다."
-      : "핵심 데이터에서 새 임계선 통과가 확인되지 않았습니다.";
+      : "마지막 상태 기록 이후 새 임계신호나 심각도 상승이 없습니다.";
   const calm =
     !data.needs_new_review && data.review_urgency === "not_needed" && !limited;
   const pressure =
@@ -48,7 +46,7 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
   return (
     <Card className={data.needs_new_review ? "border-red-400/50" : ""}>
       <CardContent className="p-7">
-        <div className="grid gap-6 lg:grid-cols-[minmax(390px,1.9fr)_repeat(3,minmax(135px,1fr))]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(390px,1.8fr)_repeat(3,minmax(135px,1fr))]">
           <div className="flex gap-4">
             {calm ? (
               <CheckCircle2 className="mt-1 h-7 w-7 shrink-0 text-emerald-400" />
@@ -58,9 +56,13 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
               />
             )}
             <div>
-              <p className="whitespace-nowrap text-xs font-medium text-muted-foreground">
-                포트폴리오 상세점검 판단
-              </p>
+              <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                <span>포트폴리오 점검</span>
+                <InfoTip label="상세점검 판단의 범위">
+                  상세 포트폴리오 분석을 다시 실행할 시점을 알립니다. 이 판단이
+                  포트폴리오 비중을 자동으로 변경하지는 않습니다.
+                </InfoTip>
+              </div>
               <h2 className="mt-1 text-2xl font-bold">{title}</h2>
               <p className="mt-2 text-sm font-medium">{environment}</p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
@@ -68,17 +70,17 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
               </p>
             </div>
           </div>
-          <div className="border-l pl-5">
-            <p className="text-xs text-muted-foreground">자동 거시 레짐</p>
+          <div className="rounded-lg bg-muted/25 p-4">
+            <p className="text-xs text-muted-foreground">확정 거시 상태</p>
             <p className="mt-2 text-xl font-semibold">
               {data.automatic_regime}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              후보 {data.candidate_regime} · 거시 전용
+              현재 후보 {data.candidate_regime} · 미국 거시 전용
             </p>
           </div>
-          <div className="border-l pl-5">
-            <p className="text-xs text-muted-foreground">현재 경제환경</p>
+          <div className="rounded-lg bg-muted/25 p-4">
+            <p className="text-xs text-muted-foreground">현재 경제상태</p>
             <p className="mt-2 text-xl font-semibold">
               {data.macro_quadrant.environment_point?.label ||
                 data.macro_quadrant.environment_label ||
@@ -88,24 +90,29 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
                   : "판정 불가")}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              점=절대수준 · 화살표=최근 압력
+              점=현재 수준 · 화살표=최근 상대 방향
             </p>
           </div>
-          <div className="border-l pl-5">
-            <p className="text-xs text-muted-foreground">데이터 품질</p>
+          <div className="rounded-lg bg-muted/25 p-4">
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span>자료 상태</span>
+              <InfoTip label="핵심지표 사용 가능 비율">
+                등록된 핵심지표 중 현재 계산에 사용할 수 있고 허용된 최신성
+                범위 안에 있는 비율입니다. 예측 정확도나 빈티지 완결도는 아닙니다.
+              </InfoTip>
+            </div>
             <p className="mt-2 text-xl font-semibold">
               {data.data_quality.status}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              핵심지표 최신성{" "}
-              {Math.round(data.data_quality.overall_coverage * 100)}%
+              핵심지표 사용 가능 {data.signals.filter((item) => item.status !== "unavailable").length}/{data.signals.length}
             </p>
           </div>
         </div>
         {data.review_acknowledged && (
           <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">
-            마지막 상세점검 당시 경보 집합은 확인됐습니다. 새로운 경보 또는
-            심각도 상승 시 다시 알립니다.
+            마지막 상태 기록에서 당시 경보를 확인했습니다. 새 경보 또는 심각도
+            상승이 생기면 다시 알립니다.
           </p>
         )}
       </CardContent>
@@ -145,13 +152,13 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
         <div className="flex items-center gap-1">
           <CardTitle>현재 점검 항목</CardTitle>
           <InfoTip label="현재 점검 항목 구성">
-            현재 활성화된 임계신호, 마지막 공식 Snapshot 이후 영역 판정 변화,
-            현재 데이터 공백을 함께 표시합니다. 활성 임계신호는 Snapshot 이후
+            현재 활성화된 임계신호, 마지막 공식 상태 기록 이후 영역 판정 변화,
+            현재 데이터 공백을 함께 표시합니다. 활성 임계신호는 상태 기록 이후
             새로 생긴 것만을 뜻하지 않습니다.
           </InfoTip>
         </div>
         <p className="text-sm text-muted-foreground">
-          활성 임계신호 · Snapshot 이후 영역 변화 · 데이터 공백
+          활성 임계신호 · 마지막 기록 이후 영역 변화 · 데이터 공백
         </p>
       </CardHeader>
       <CardContent>
@@ -169,7 +176,61 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
           </ul>
         ) : (
           <p className="text-sm text-muted-foreground">
-            새로운 임계선 통과나 영역 상태 변화가 없습니다.
+            현재 활성 임계신호, 영역 변화 또는 주요 데이터 공백이 없습니다.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function UpcomingEvents({ data }: { data: RegimeCurrent }) {
+  const domainName: Record<string, string> = {
+    growth: "성장·고용",
+    inflation: "물가",
+    rates: "금리",
+  };
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <CalendarClock className="h-5 w-5 text-primary" />
+          <CardTitle>다음 미국 BLS 발표</CardTitle>
+          <InfoTip label="발표 일정 출처">
+            미국 노동통계국(BLS)의 공식 발표 캘린더를 한국시간으로 변환합니다.
+            발표 직후 새로고침하면 관련 지표와 판정을 다시 계산합니다.
+          </InfoTip>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {data.upcoming_events.length ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {data.upcoming_events.slice(0, 2).map((event) => (
+              <a
+                key={event.id}
+                href={event.source_url}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg border bg-muted/20 p-4 transition-colors hover:border-primary/40"
+              >
+                <p className="font-medium">{event.event_type}</p>
+                <p className="mt-2 text-sm text-primary">
+                  {new Date(event.scheduled_at).toLocaleString("ko-KR", {
+                    month: "long",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {event.affected_domains.map((item) => domainName[item] || item).join(" · ")}
+                </p>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            발표 일정을 아직 동기화하지 않았습니다. 데이터 새로고침으로 불러올 수 있습니다.
           </p>
         )}
       </CardContent>
@@ -226,75 +287,12 @@ function EvidencePanel({ data }: { data: RegimeCurrent }) {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-1">
-            <CardTitle>
-              {data.triggers.length
-                ? "현재 판단을 바꾸는 신호"
-                : "현재 판단의 근거와 제한"}
-            </CardTitle>
-            <InfoTip label="판단 변경 신호 설명">
-              포트폴리오 상세점검의 우선순위를 바꿀 수 있는 High·Critical
-              임계신호입니다. 하나의 High 신호는 관찰, 서로 독립된 High 신호 두
-              묶음이나 Critical 신호는 상세점검 필요 조건이 됩니다.
-            </InfoTip>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {data.triggers.length ? (
-            <ul className="space-y-3">
-              {data.triggers.slice(0, 3).map((trigger) => (
-                <li key={trigger.rule_id} className="flex gap-2 text-sm">
-                  <Badge
-                    className="min-w-11 shrink-0 justify-center whitespace-nowrap px-3"
-                    variant={
-                      trigger.severity === "critical"
-                        ? "destructive"
-                        : "secondary"
-                    }
-                  >
-                    {trigger.severity === "critical" ? "긴급" : "높음"}
-                  </Badge>
-                  <span>{trigger.summary}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm leading-6 text-muted-foreground">
-              현재 활성화된 High·Critical 임계신호가 없습니다.
-            </p>
-          )}
-          {data.data_quality.status !== "충분" && (
-            <div className="mt-5 rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-4">
-              <div className="flex gap-2">
-                <Database className="mt-0.5 h-4 w-4 text-amber-300" />
-                <div>
-                  <p className="text-sm font-medium">판단 범위 제한</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    {data.data_quality.reasons.join(" · ")}
-                  </p>
-                  {data.data_quality.stale.length > 0 && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      오래됨:{" "}
-                      {data.data_quality.stale
-                        .slice(0, 3)
-                        .map((item) => `${item.name}(${item.observation_date})`)
-                        .join(", ")}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-1">
-            <CardTitle>좌표를 움직인 상위 기여</CardTitle>
+          <CardTitle>최근 방향을 만든 주요 지표</CardTitle>
             <InfoTip label="좌표 기여도 설명">
               각 지표의 최근 변화율을 자체 과거 분포에서 표준화한 뒤 영역별
-              가중치를 적용한 값입니다. 절대값이 클수록 현재 화살표 방향에 미친
-              영향이 큽니다. 성장에서는 양수=개선·음수=둔화, 물가에서는
-              양수=재가속·음수=완화입니다.
+            가중치를 적용한 값입니다. 절대값이 클수록 현재 화살표 방향에 미친
+            영향이 큽니다. 성장에서는 강세·약세, 물가에서는 상승압력·완화압력
+            방향을 뜻합니다.
             </InfoTip>
           </div>
         </CardHeader>
@@ -302,24 +300,34 @@ function EvidencePanel({ data }: { data: RegimeCurrent }) {
           <DriverList
             title="성장 모멘텀"
             contributors={current?.growth.contributors || []}
-            positive="개선 기여"
-            negative="둔화 기여"
+            positive="강세 기여"
+            negative="약세 기여"
           />
           <DriverList
             title="인플레이션 모멘텀"
             contributors={current?.inflation.contributors || []}
-            positive="재가속 기여"
-            negative="완화 기여"
+            positive="상승압력 기여"
+            negative="완화압력 기여"
           />
         </CardContent>
       </Card>
+      {data.data_quality.status !== "충분" && (
+        <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-4">
+          <div className="flex gap-2">
+            <Database className="mt-0.5 h-4 w-4 text-amber-300" />
+            <div>
+              <p className="text-sm font-medium">판단 범위 제한</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{data.data_quality.reasons.join(" · ")}</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function MonitoringTable({ data }: { data: RegimeCurrent }) {
-  const current = data.macro_quadrant.points.at(-1),
-    conditions = data.macro_quadrant.financial_conditions;
+function FinancialTransmission({ data }: { data: RegimeCurrent }) {
+  const conditions = data.macro_quadrant.financial_conditions;
   const count = (domain: string) =>
     data.triggers.filter((item) => item.domain === domain).length;
   const countRateRules = (includeRestrictive: boolean) =>
@@ -330,21 +338,7 @@ function MonitoringTable({ data }: { data: RegimeCurrent }) {
           ? item.rule_id === "tightening.restrictive_level"
           : item.rule_id !== "tightening.restrictive_level"),
     ).length;
-  const rows = [
-    [
-      "성장·고용",
-      `${data.macro_quadrant.growth_level?.label || "판정 불가"} / 모멘텀 ${signed(current?.growth.coordinate)}`,
-      current?.growth.contributors[0]?.name || "자료 부족",
-      `자료 상태 ${current?.growth.data_quality_label || current?.growth.confidence_label}`,
-      count("growth"),
-    ],
-    [
-      "물가",
-      `${data.macro_quadrant.inflation_level?.label || "판정 불가"} / 모멘텀 ${signed(current?.inflation.coordinate)}`,
-      current?.inflation.contributors[0]?.name || "자료 부족",
-      `자료 상태 ${current?.inflation.data_quality_label || current?.inflation.confidence_label}`,
-      count("inflation"),
-    ],
+  const cards = [
     [
       "정책 긴축",
       conditions?.policy.label || "판정 불가",
@@ -373,110 +367,116 @@ function MonitoringTable({ data }: { data: RegimeCurrent }) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-1">
-          <CardTitle>거시 전달경로 모니터</CardTitle>
+          <CardTitle>금융 전달경로</CardTitle>
           <InfoTip label="거시 전달경로 모니터 설명">
-            정책금리부터 실질금리·장기금리·신용여건으로 이어지는 긴축 전달
-            상태를 절대수준과 최근 변화로 확인합니다.
+            정책금리, 장기금리와 신용여건의 현재 절대수준 및 최근 변화를
+            함께 확인합니다.
           </InfoTip>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-3 md:hidden">
-          {rows.map((row) => (
-            <div key={row[0]} className="rounded-lg border bg-muted/20 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="font-medium">{row[0]}</p>
-                <Badge variant={row[4] ? "destructive" : "outline"}>
-                  {row[4] ? `경보 ${row[4]}개` : "신규 경보 없음"}
-                </Badge>
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))]">
+          {cards.map((card) => (
+            <div key={card[0]} className="rounded-lg border bg-muted/15 p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{card[0]}</p>
+                  <p className="mt-2 text-lg font-semibold">{card[1]}</p>
+                </div>
+                {card[4] > 0 && <Badge variant="destructive">활성 {card[4]}</Badge>}
               </div>
-              <p className="mt-3 text-sm">{row[1]}</p>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                {row[2]}
-              </p>
-              <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">
-                {row[3]}
-              </p>
+              <p className="mt-4 text-sm leading-6">{card[2]}</p>
+              <p className="mt-4 border-t pt-3 text-xs leading-5 text-muted-foreground">{card[3]}</p>
             </div>
           ))}
-        </div>
-        <div className="hidden overflow-x-auto md:block">
-          <table className="w-full min-w-[900px] text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs text-muted-foreground">
-                <th className="pb-3 font-medium">영역</th>
-                <th className="pb-3 font-medium">수준 / 방향</th>
-                <th className="pb-3 font-medium">실제값과 분해</th>
-                <th className="pb-3 font-medium">품질 / 변화</th>
-                <th className="pb-3 font-medium">
-                  <span className="flex items-center justify-end gap-1">
-                    활성 경보
-                    <InfoTip label="활성 경보 의미">
-                      사전에 정의한 점검 임계선을 현재 통과한 규칙의 수입니다.
-                      0개는 새 임계선 통과가 없다는 뜻이며 금융여건이
-                      완화적이라는 판정은 아닙니다.
-                    </InfoTip>
-                  </span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row[0]} className="border-b last:border-0">
-                  <td className="py-4 font-medium">{row[0]}</td>
-                  <td className="py-4">{row[1]}</td>
-                  <td className="py-4 text-muted-foreground">{row[2]}</td>
-                  <td className="py-4 text-muted-foreground">{row[3]}</td>
-                  <td className="py-4 text-right">
-                    <Badge variant={row[4] ? "destructive" : "outline"}>
-                      {row[4] ? `${row[4]}개` : "없음"}
-                    </Badge>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function ThesisPanel() {
+function ThesisPanel({ data }: { data: RegimeCurrent }) {
+  const ai = data.ai_capex;
+  const memory = data.memory_cycle;
   return (
     <Card>
       <CardHeader>
-        <CardTitle>AI 인프라 투자 가설</CardTitle>
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle>AI 인프라 관측범위</CardTitle>
+          <Badge variant="outline">부분 관측</Badge>
+          <InfoTip label="AI 인프라 관측범위 설명">
+            연결된 자동 데이터와 아직 연결되지 않은 핵심 병목을 함께 표시합니다.
+            공시 CAPEX는 기업 전체 투자액이므로 AI 전용 금액과 동일하지 않습니다.
+          </InfoTip>
+        </div>
         <p className="text-sm text-muted-foreground">
-          거시 환경과 독립적으로 판단해야 하는 구조적 사이클입니다.
+          자동화된 보조지표와 아직 판단에 사용하지 않는 데이터 공백을 구분합니다.
         </p>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-5 md:grid-cols-[220px_1fr]">
-          <div className="rounded-lg border border-dashed p-5">
-            <Badge variant="outline">판정 불가</Badge>
-            <p className="mt-4 text-lg font-semibold">CAPEX 데이터 미연결</p>
-            <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
-              <span>SEC XBRL 연동 대기</span>
-              <InfoTip label="AI 투자 판정 데이터 기준">
-                AI 투자 사이클은 기업 공시 CAPEX로 판정합니다. 주가 흐름은
-                CAPEX의 대체 데이터로 사용하지 않습니다.
-              </InfoTip>
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr))]">
+          {[
+            ["하이퍼스케일러 총 CAPEX", "연결", "AI 투자강도 보조"],
+            ["공개 DRAM 가격 표본", memory.state === "판정 불가" ? "제한" : "연결", "가격 방향 보조"],
+            ["공개 NAND 가격 표본", memory.nand_state === "판정 불가" ? "제한" : "연결", "가격 방향 보조"],
+            ["Server DRAM", "미연결", "종합판정 미사용"],
+            ["HBM", "미연결", "종합판정 미사용"],
+          ].map((item) => (
+            <div key={item[0]} className="rounded-lg bg-muted/25 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <p className="min-w-0 text-sm font-medium leading-5">{item[0]}</p>
+                <Badge className="shrink-0 whitespace-nowrap" variant={item[1] === "연결" ? "secondary" : "outline"}>{item[1]}</Badge>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">{item[2]}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr))]">
+          <div className="rounded-lg border bg-muted/10 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">공시 총 CAPEX</p>
+              <Badge variant={ai.coverage >= 0.75 ? "secondary" : "outline"}>{ai.state}</Badge>
+            </div>
+            <p className="mt-3 text-xl font-semibold">{ai.coverage ? `증가 기업 ${ai.companies.filter((item) => (item.yoy || 0) > 0).length}/${ai.companies.length}` : "데이터 미연결"}</p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{ai.reason}</p>
+            <div className="mt-4 grid gap-2 text-xs [grid-template-columns:repeat(auto-fit,minmax(125px,1fr))]">
+              {ai.companies.map((company) => (
+                <div key={company.id} className="rounded-md bg-muted/30 px-3 py-2">
+                  <span className="block text-muted-foreground">{company.name}</span>
+                  <span className="mt-1 block font-medium text-foreground">
+                    {company.yoy == null ? "-" : `${company.yoy > 0 ? "+" : ""}${company.yoy.toFixed(0)}% YoY`}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
-          <div>
-            <p className="text-sm font-medium">판정에 필요한 데이터</p>
-            <ul className="mt-3 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
-              <li>· 4개사 분기 CAPEX</li>
-              <li>· 합산 TTM과 YoY</li>
-              <li>· 공시일과 회계기간</li>
-              <li>· 실적시즌 coverage</li>
-            </ul>
-            <p className="mt-4 text-xs text-muted-foreground">
-              Microsoft · Alphabet · Meta · Amazon SEC XBRL 연동 후 `확대 가속 /
-              높은 투자 지속·감속 / 축소`를 구분합니다.
-            </p>
+          <div className="rounded-lg border bg-muted/10 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">공개 DRAM 가격 표본</p>
+              <Badge variant={memory.state === "판정 불가" ? "outline" : "secondary"}>{memory.state === "가격 상승" ? "상승" : memory.state}</Badge>
+            </div>
+            <p className="mt-3 text-sm font-medium leading-5">{memory.reason}</p>
+            <a href={memory.source_url} target="_blank" rel="noreferrer" className="mt-3 block text-xs text-primary hover:underline">
+              TrendForce 공개 DRAM 가격표
+            </a>
           </div>
+          <div className="rounded-lg border bg-muted/10 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">공개 NAND 가격 표본</p>
+              <Badge variant={memory.nand_state === "판정 불가" ? "outline" : "secondary"}>{memory.nand_state}</Badge>
+            </div>
+            <p className="mt-3 text-sm font-medium leading-5">{memory.nand_reason}</p>
+            <a href={memory.nand_source_url || memory.source_url} target="_blank" rel="noreferrer" className="mt-3 block text-xs text-primary hover:underline">
+              TrendForce 공개 NAND 가격표
+            </a>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-4 text-xs text-muted-foreground">
+          <span>자동 판정: 총 CAPEX·공개 DRAM·공개 NAND 표본</span>
+          <InfoTip label="자동 판정 방법">
+            {ai.methodology} DRAM과 NAND는 공개 가격표의 동일 상품 변화 방향을
+            별도로 계산합니다.
+          </InfoTip>
         </div>
       </CardContent>
     </Card>
@@ -491,15 +491,15 @@ function SnapshotPanel(props: CurrentOverviewProps) {
         <div className="flex items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-1">
-              <p className="font-semibold">공식 Snapshot 기록</p>
-              <InfoTip label="Snapshot 기록 기준">
-                버튼을 누른 시각의 판정과 그 판정에 사용된 지표별
-                관측일·원자료를 함께 보존합니다. 기록 시각과 경제지표 관측일은
-                다를 수 있습니다.
+              <p className="font-semibold">현재 상태 기록</p>
+              <InfoTip label="상태 기록 기준">
+                버튼을 누른 시각의 판정, 지표별 표시값과 관측일, 규칙 버전 및
+                점검 신호를 저장합니다. 저장하면 당시 활성 경보도 확인한 것으로
+                처리되며, 같은 경보는 새 변화가 생길 때 다시 알립니다.
               </InfoTip>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              판정 기준시점과 원자료를 동결해 History에 보존합니다.
+              현재 판정과 계산 입력을 기록합니다.
             </p>
           </div>
           <span className="text-sm text-primary">기록 열기</span>
@@ -514,7 +514,7 @@ function SnapshotPanel(props: CurrentOverviewProps) {
             </p>
           </div>
           <div>
-            <p className="text-muted-foreground">환경 좌표 기준일</p>
+            <p className="text-muted-foreground">가장 최근 관측일</p>
             <p className="mt-1">{data.macro_quadrant.as_of_date || "-"}</p>
           </div>
           <div>
@@ -525,7 +525,7 @@ function SnapshotPanel(props: CurrentOverviewProps) {
             </p>
           </div>
           <div>
-            <p className="text-muted-foreground">마지막 수집</p>
+            <p className="text-muted-foreground">마지막 데이터 수집시각</p>
             <p className="mt-1">
               {data.data_quality.last_fetched_at
                 ? new Date(data.data_quality.last_fetched_at).toLocaleString(
@@ -554,26 +554,9 @@ function SnapshotPanel(props: CurrentOverviewProps) {
             placeholder="판단 메모 (선택)"
           />
           <Button onClick={props.onSnapshot} disabled={props.snapshotPending}>
-            <Save className="mr-2 h-4 w-4" />이 기준으로 저장
+            <Save className="mr-2 h-4 w-4" />현재 상태 기록
           </Button>
         </div>
-        <label className="mt-4 flex items-start gap-3 text-sm">
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={props.reviewCompleted}
-            onChange={(event) => props.onReviewCompleted(event.target.checked)}
-          />
-          <span>
-            <span className="font-medium">
-              외부 상세 포트폴리오 점검도 완료함
-            </span>
-            <span className="mt-1 block text-xs text-muted-foreground">
-              선택한 경우에만 당시 경보 집합을 확인 완료로 기록합니다. 외부
-              리포트 본문은 저장하지 않습니다.
-            </span>
-          </span>
-        </label>
       </div>
     </details>
   );
@@ -588,8 +571,9 @@ export function RegimeCurrentOverview(props: CurrentOverviewProps) {
         <MacroQuadrant data={props.data.macro_quadrant} />
         <EvidencePanel data={props.data} />
       </div>
-      <MonitoringTable data={props.data} />
-      <ThesisPanel />
+      <FinancialTransmission data={props.data} />
+      <ThesisPanel data={props.data} />
+      <UpcomingEvents data={props.data} />
       <SnapshotPanel {...props} />
     </div>
   );

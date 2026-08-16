@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HelpCircle, Database, Download, RefreshCw } from "lucide-react";
 import {
   CartesianGrid,
+  Bar,
+  BarChart,
   Legend,
   Line,
   LineChart,
@@ -22,6 +24,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { InfoTip } from "@/components/ui/info-tip";
 import { regimeApi } from "@/lib/api";
 import type {
+  RegimeCurrent,
   RegimeLevel,
   RegimeSignal,
   RegimeSnapshot,
@@ -35,6 +38,7 @@ const DOMAIN_TABS = [
   { id: "inflation", label: "물가" },
   { id: "rates", label: "금리" },
   { id: "liquidity", label: "유동성·신용" },
+  { id: "ai", label: "AI CAPEX·메모리" },
 ];
 const levelClass: Record<string, string> = {
   유지: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
@@ -47,9 +51,15 @@ const levelClass: Record<string, string> = {
   "데이터 없음": "border-slate-400/20 bg-slate-400/10 text-slate-400",
 };
 const urgencyLabel: Record<ReviewUrgency, string> = {
-  required: "지금 상세 점검 필요",
-  watch: "관찰 필요",
-  not_needed: "상세 점검 불필요",
+  required: "지금 다시 상세점검",
+  watch: "다음 발표까지 관찰",
+  not_needed: "새 상세점검 사유 없음",
+};
+const memoryStateLabel: Record<string, string> = {
+  "가격 확장": "관측가격 큰 폭 상승",
+  "가격 상승": "관측가격 상승",
+  "하락 관찰": "관측가격 하락 관찰",
+  "가격 유지": "관측가격 변화 미미",
 };
 const signalStatusLabel: Record<string, string> = {
   강함: "우호 범위",
@@ -147,7 +157,7 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
             {signal.available_from && (
               <p className="mt-1 text-[11px] text-muted-foreground">
                 이용 가능 {signal.available_from}
-                {signal.vintage_kind === "initial" ? " · 초기 발표값" : ""}
+                {signal.vintage_kind === "initial" ? " · 초도 발표일 기록 보유" : ""}
               </p>
             )}
           </div>
@@ -269,9 +279,16 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
   return (
     <Card className="mb-6">
       <CardHeader className="pb-2">
-        <CardTitle>명목금리 구성 비교</CardTitle>
+        <div className="flex items-center gap-1">
+          <CardTitle>미국 10년 금리의 수준 구성</CardTitle>
+          <InfoTip label="10년 금리 구성 읽는 법">
+            명목 10년 금리는 실질금리(TIPS)와 기대인플레이션(BEI)의 합으로
+            나눠 봅니다. 기간 프리미엄은 별도 추정치이며 최근 금리 변화의
+            원인은 거시 전달경로에서 확인합니다.
+          </InfoTip>
+        </div>
         <p className="text-sm text-muted-foreground">
-          10Y 명목금리, 실질금리와 기대인플레이션을 동일 축에서 비교합니다.
+          명목 10Y ≈ 실질 10Y(TIPS) + 기대인플레이션(BEI)
         </p>
       </CardHeader>
       <CardContent className="pt-3">
@@ -333,6 +350,192 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
   );
 }
 
+function AiCapexDashboard({
+  data,
+  memory,
+}: {
+  data: NonNullable<RegimeCurrent["ai_capex"]>;
+  memory: RegimeCurrent["memory_cycle"];
+}) {
+  const chartData = Array.from(
+    new Set(data.companies.flatMap((company) => company.history.map((point) => point.period))),
+  )
+    .sort()
+    .slice(-8)
+    .map((period) => ({
+      period,
+      ...Object.fromEntries(
+        data.companies.map((company) => [
+          company.id,
+          company.history.find((point) => point.period === period)?.value == null
+            ? null
+            : (company.history.find((point) => point.period === period)?.value as number) / 1e9,
+        ]),
+      ),
+    }));
+  const colors: Record<string, string> = {
+    microsoft: "#60a5fa",
+    alphabet: "#fbbf24",
+    meta: "#a78bfa",
+    amazon: "#34d399",
+  };
+  return (
+    <div className="space-y-6">
+      <div className="px-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-xl font-semibold">하이퍼스케일러 설비투자 프록시</h2>
+          <Badge variant={data.coverage >= 0.75 ? "secondary" : "outline"}>{data.state}</Badge>
+          <InfoTip label="설비투자 프록시의 범위">
+            SEC 공시의 기업 전체 현금 CAPEX입니다. AI 인프라 투자도 포함하지만
+            AI 전용 금액은 분리되지 않으므로 투자 강도의 보조지표로 사용합니다.
+          </InfoTip>
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">{data.reason}</p>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>기업별 분기 총 현금 CAPEX</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            SEC 공시 기준 · 십억 달러
+          </p>
+        </CardHeader>
+        <CardContent>
+          {chartData.length ? (
+            <div className="h-96">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 12, right: 12, bottom: 8, left: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                  <XAxis dataKey="period" tickFormatter={formatDate} tick={{ fontSize: 11 }} />
+                  <YAxis width={48} tick={{ fontSize: 11 }} unit="B" />
+                  <Tooltip
+                    formatter={(value: number, name: string) => [`$${Number(value).toFixed(1)}B`, data.companies.find((item) => item.id === name)?.name || name]}
+                    labelFormatter={(label) => `회계기간 종료 ${label}`}
+                    contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }}
+                  />
+                  <Legend formatter={(value) => data.companies.find((item) => item.id === value)?.name || value} />
+                  {data.companies.map((company) => (
+                    <Bar key={company.id} dataKey={company.id} stackId="capex" fill={colors[company.id]} isAnimationActive={false} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+              데이터 새로고침으로 SEC 공시를 수집해주세요.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      <MemoryCyclePanel data={memory} />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {data.companies.map((company) => (
+          <Card key={company.id}>
+            <CardHeader className="pb-2"><CardTitle className="text-base">{company.name}</CardTitle></CardHeader>
+            <CardContent>
+              <p className="text-2xl font-semibold">{company.latest_capex == null ? "-" : `$${(company.latest_capex / 1e9).toFixed(1)}B`}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                YoY {company.yoy == null ? "-" : `${company.yoy > 0 ? "+" : ""}${company.yoy.toFixed(1)}%`} · TTM {company.ttm == null ? "-" : `$${(company.ttm / 1e9).toFixed(1)}B`}
+              </p>
+              <p className="mt-3 text-xs text-muted-foreground">기준 {company.latest_period || "미수집"}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
+        <span>산출 방식</span>
+        <InfoTip label="CAPEX 산출 방식">{data.methodology}</InfoTip>
+      </div>
+    </div>
+  );
+}
+
+function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
+  const seriesPriority: Record<string, number> = {
+    dram_contract_ddr5_sodimm_8gb: 0,
+    dram_spot_ddr5_16gb: 1,
+    dram_module_spot_ddr5_rdimm_32gb: 2,
+    dram_spot_ddr5_16gb_ett: 3,
+    dram_contract_ddr4_16gb: 4,
+    dram_spot_ddr4_16gb: 5,
+    nand_wafer_spot_512gb_tlc: 10,
+    nand_wafer_spot_256gb_tlc: 11,
+    nand_client_ssd_contract_1tb: 12,
+    nand_client_ssd_contract_512gb: 13,
+  };
+  const ordered = [...data.series].sort((a, b) => {
+    return (seriesPriority[a.series_id] ?? 99) - (seriesPriority[b.series_id] ?? 99);
+  });
+  const dramSeries = ordered.filter((item) => !item.market_type.startsWith("nand_"));
+  const nandSeries = ordered.filter((item) => item.market_type.startsWith("nand_"));
+  const priceCard = (item: (typeof ordered)[number]) => (
+    <div key={item.series_id} className="rounded-lg border bg-muted/20 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-medium leading-5">{item.product_name}</p>
+        <Badge variant="outline" className="shrink-0 text-[10px]">
+          {item.market_type === "contract" ? "월간 Contract"
+            : item.market_type === "module_spot" ? "Module Spot"
+              : item.market_type === "nand_wafer_spot" ? "TLC Wafer Spot"
+                : item.market_type === "nand_client_ssd_contract" ? "Client SSD Contract" : "Spot"}
+        </Badge>
+      </div>
+      <p className="mt-4 text-2xl font-semibold">{item.price_average.toLocaleString("en-US", { maximumFractionDigits: 3 })}</p>
+      <p className={`mt-1 text-sm ${(item.change_percent || 0) > 0 ? "text-amber-300" : (item.change_percent || 0) < 0 ? "text-sky-300" : "text-muted-foreground"}`}>
+        {item.change_percent == null ? "변화율 미제공" : `${item.change_percent > 0 ? "+" : ""}${item.change_percent.toFixed(2)}%`}
+      </p>
+      <p className="mt-3 text-xs text-muted-foreground">기준 {item.observation_date}{item.period_label ? ` · ${item.period_label}` : ""}</p>
+    </div>
+  );
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center gap-3">
+          <CardTitle>공개 DRAM 가격 표본</CardTitle>
+          <Badge variant={data.state === "판정 불가" ? "outline" : "secondary"}>{memoryStateLabel[data.state] || data.state}</Badge>
+          <InfoTip label="공개 DRAM 표본의 범위">
+            공개된 DDR5 SO-DIMM Contract와 일부 Spot 가격을 봅니다. Server
+            DRAM·HBM·NAND 전체를 대표하지 않으며 AI 수요의 직접 판정에는
+            사용하지 않습니다.
+          </InfoTip>
+        </div>
+        <p className="text-sm text-muted-foreground">{data.reason}</p>
+      </CardHeader>
+      <CardContent>
+        {dramSeries.length ? (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {dramSeries.map(priceCard)}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">공개 가격표를 아직 수집하지 않았습니다.</p>
+        )}
+        <div className="mt-7 border-t pt-6">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <h3 className="font-semibold">공개 NAND 가격 표본</h3>
+            <Badge variant={data.nand_state === "판정 불가" ? "outline" : "secondary"}>{data.nand_state}</Badge>
+            <InfoTip label="공개 NAND 표본의 범위">
+              512Gb TLC wafer spot을 주 방향 신호로 사용하고 PC Client SSD
+              계약가격을 함께 표시합니다. Enterprise SSD 계약가격·재고·출하량을
+              직접 측정하는 지표는 아닙니다.
+            </InfoTip>
+          </div>
+          <p className="mb-4 text-sm text-muted-foreground">{data.nand_reason}</p>
+          {nandSeries.length ? (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{nandSeries.map(priceCard)}</div>
+          ) : (
+            <p className="text-sm text-muted-foreground">NAND 공개 가격표를 아직 수집하지 않았습니다.</p>
+          )}
+        </div>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-xs text-muted-foreground">
+          <span>{data.limitations} · 가격 이력은 수집 시작일부터 축적됩니다.</span>
+          <span className="flex gap-3">
+            <a href={data.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">DRAM 원본</a>
+            <a href={data.nand_source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">NAND 원본</a>
+          </span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function JudgmentEditor({ snapshot }: { snapshot: RegimeSnapshot }) {
   const client = useQueryClient();
   const [level, setLevel] = useState<RegimeLevel | "">(
@@ -381,7 +584,6 @@ export function RegimePage() {
   const client = useQueryClient();
   const [judgment, setJudgment] = useState<RegimeLevel | "">("");
   const [note, setNote] = useState("");
-  const [reviewCompleted, setReviewCompleted] = useState(false);
   const current = useQuery({
     queryKey: ["regime", "current"],
     queryFn: regimeApi.getCurrent,
@@ -399,11 +601,9 @@ export function RegimePage() {
       regimeApi.createSnapshot({
         user_regime: judgment || undefined,
         user_note: note || undefined,
-        review_completed: reviewCompleted,
       }),
     onSuccess: () => {
       setNote("");
-      setReviewCompleted(false);
       client.invalidateQueries({ queryKey: ["regime"] });
     },
   });
@@ -414,7 +614,7 @@ export function RegimePage() {
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/70 pb-6">
         <div>
           <div className="mb-2 flex items-center gap-1 text-xs font-medium text-primary">
-            <span>포트폴리오 조기경보</span>
+            <span>포트폴리오 조기점검</span>
             <InfoTip label="투자 레짐 판정 체계">
               확정 레짐은 독립된 핵심 발표에서 재확인된 상태, 후보 레짐은 최신
               자료의 즉시 계산입니다. 데이터 품질은 수집 완전성을 뜻하며 예측
@@ -432,7 +632,7 @@ export function RegimePage() {
             onClick={() => regimeApi.downloadMarkdown()}
           >
             <Download className="mr-2 h-4 w-4" />
-            분석 데이터
+            상세점검용 데이터
           </Button>
           <Button
             variant="outline"
@@ -468,7 +668,7 @@ export function RegimePage() {
         <TabsList>
           <TabsTrigger value="current">현재</TabsTrigger>
           <TabsTrigger value="indicators">지표</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
+          <TabsTrigger value="history">기록</TabsTrigger>
         </TabsList>
         <TabsContent value="current" className="mt-0 space-y-8 pt-3">
           {data ? (
@@ -476,11 +676,9 @@ export function RegimePage() {
               data={data}
               judgment={judgment}
               note={note}
-              reviewCompleted={reviewCompleted}
               snapshotPending={snapshot.isPending}
               onJudgment={setJudgment}
               onNote={setNote}
-              onReviewCompleted={setReviewCompleted}
               onSnapshot={() => snapshot.mutate()}
             />
           ) : (
@@ -514,6 +712,13 @@ export function RegimePage() {
               />
             </TabsContent>
             {DOMAIN_TABS.filter((tab) => tab.id !== "market").map((tab) => {
+              if (tab.id === "ai") {
+                return (
+                  <TabsContent key={tab.id} value={tab.id} className="mt-0">
+                    {data && <AiCapexDashboard data={data.ai_capex} memory={data.memory_cycle} />}
+                  </TabsContent>
+                );
+              }
               const signals =
                 data?.signals.filter((signal) => signal.domain === tab.id) ||
                 [];
@@ -547,14 +752,10 @@ export function RegimePage() {
               <Card key={item.id}>
                 <CardContent className="p-6">
                   <div className="flex flex-wrap items-center gap-3">
-                    <span className="font-medium">
-                      {new Date(item.created_at).toLocaleString("ko-KR")}
-                    </span>
+                    <span className="font-medium">기록 {new Date(item.created_at).toLocaleString("ko-KR")}</span>
+                    <span className="text-xs text-muted-foreground">거시 기준 {item.as_of_date || "-"}</span>
                     <Badge className={levelClass[item.automatic_regime]}>
-                      자동 {item.automatic_regime}
-                    </Badge>
-                    <Badge variant="outline">
-                      사용자 {item.user_regime || "미입력"}
+                      확정 {item.automatic_regime}
                     </Badge>
                     {item.review_urgency && (
                       <Badge variant="secondary">
@@ -562,9 +763,15 @@ export function RegimePage() {
                       </Badge>
                     )}
                   </div>
+                  <div className="mt-4 grid gap-3 rounded-lg bg-muted/20 p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                    <p><span className="text-muted-foreground">사용자 판정</span><span className="mt-1 block font-medium">{item.user_regime || "미입력"}</span></p>
+                    <p><span className="text-muted-foreground">경제환경</span><span className="mt-1 block font-medium">{item.macro_quadrant?.environment_point?.label || "미확인"}</span></p>
+                    <p><span className="text-muted-foreground">활성 임계신호</span><span className="mt-1 block font-medium">{item.triggers?.length || 0}개</span></p>
+                    <p><span className="text-muted-foreground">AI·메모리 보조지표</span><span className="mt-1 block font-medium">CAPEX {item.ai_capex?.state || "미확인"} · DRAM {item.memory_cycle?.state ? memoryStateLabel[item.memory_cycle.state] || item.memory_cycle.state : "미확인"} · NAND {item.memory_cycle?.nand_state || "미확인"}</span></p>
+                  </div>
                   <p className="mt-3 text-sm text-muted-foreground">
                     {item.reasons?.slice(0, 3).join(" · ") ||
-                      "주요 악화 사유 없음"}
+                      "저장된 주요 판정 사유 없음"}
                   </p>
                   <JudgmentEditor snapshot={item} />
                 </CardContent>
@@ -573,7 +780,8 @@ export function RegimePage() {
           ) : (
             <Card>
               <CardContent className="p-8 text-center text-muted-foreground">
-                아직 공식 Snapshot이 없습니다.
+                아직 비교 기준이 없습니다. 현재 탭에서 첫 상태를 기록하면 이후
+                경보와 판정 변화를 비교할 수 있습니다.
               </CardContent>
             </Card>
           )}

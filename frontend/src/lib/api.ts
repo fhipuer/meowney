@@ -249,7 +249,7 @@ export const regimeApi = {
     const { data } = await apiClient.get<RegimeSnapshot[]>('/regime/history')
     return data
   },
-  createSnapshot: async (payload: { user_regime?: RegimeLevel; user_note?: string; review_completed?: boolean }): Promise<RegimeSnapshot> => {
+  createSnapshot: async (payload: { user_regime?: RegimeLevel; user_note?: string }): Promise<RegimeSnapshot> => {
     const { data } = await apiClient.post<RegimeSnapshot>('/regime/snapshots', payload)
     return data
   },

@@ -552,6 +552,55 @@ export interface RegimeCurrent {
   changes_since_snapshot: string[];
   cache_age_hours: number | null;
   is_stale: boolean;
+  upcoming_events: Array<{
+    id: string;
+    event_type: string;
+    scheduled_at: string;
+    importance: string;
+    status: string;
+    source: string;
+    source_url: string;
+    affected_domains: string[];
+  }>;
+  ai_capex: {
+    state: string;
+    reason: string;
+    coverage: number;
+    methodology: string;
+    companies: Array<{
+      id: string;
+      name: string;
+      latest_period: string | null;
+      latest_capex: number | null;
+      yoy: number | null;
+      ttm: number | null;
+      history: Array<{ period: string; value: number }>;
+      fetch_status: { status: string; last_success_at?: string } | null;
+    }>;
+  };
+  memory_cycle: {
+    state: string;
+    reason: string;
+    nand_state: string;
+    nand_reason: string;
+    source: string;
+    source_url: string;
+    nand_source_url: string;
+    limitations: string;
+    fetch_status: { status: string; last_success_at?: string; error?: string } | null;
+    series: Array<{
+      series_id: string;
+      market_type: "contract" | "spot" | "module_spot" | "nand_wafer_spot" | "nand_client_ssd_contract";
+      product_name: string;
+      observation_date: string;
+      period_label: string | null;
+      price_high: number | null;
+      price_low: number | null;
+      price_average: number;
+      change_percent: number | null;
+      history: Array<{ observation_date: string; price_average: number; change_percent: number | null }>;
+    }>;
+  };
   review_urgency: ReviewUrgency;
   review_reasons: string[];
   triggers: RegimeTrigger[];
@@ -703,6 +752,8 @@ export interface RegimeSnapshot {
   last_fetched_at?: string | null;
   observation_range?: { from: string | null; to: string | null };
   macro_quadrant?: RegimeCurrent["macro_quadrant"];
+  ai_capex?: RegimeCurrent["ai_capex"];
+  memory_cycle?: RegimeCurrent["memory_cycle"];
 }
 
 // ============================================

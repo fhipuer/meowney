@@ -12,6 +12,9 @@ from app.db.database import get_database_client
 from app.services.asset_service import AssetService
 from app.services.finance_service import get_finance_service
 from app.services.regime_service import RegimeService
+from app.services.regime_events import RegimeEventService
+from app.services.regime_sec import SecCapexService
+from app.services.regime_memory import MemoryPriceService
 
 
 # 벤치마크 티커 목록 냥~
@@ -184,3 +187,9 @@ async def take_all_snapshots():
         await RegimeService().refresh()
     except Exception as exc:
         print(f"❌ 레짐 데이터 갱신 실패, 기존 캐시 유지: {exc}")
+    try:
+        await RegimeEventService().refresh()
+        await SecCapexService().refresh()
+        await MemoryPriceService().refresh()
+    except Exception as exc:
+        print(f"❌ 일정/SEC 데이터 갱신 실패, 기존 캐시 유지: {exc}")

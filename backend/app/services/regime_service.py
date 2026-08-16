@@ -415,6 +415,10 @@ class RegimeService:
                 "macro_quadrant": macro_quadrant}
 
     def current(self) -> dict[str, Any]:
+        from app.services.regime_events import RegimeEventService
+        from app.services.regime_sec import SecCapexService
+        from app.services.regime_memory import MemoryPriceService
+
         evaluation = self.evaluate()
         with self.db.connect() as conn:
             latest_fetch = conn.execute("SELECT * FROM regime_fetch_runs ORDER BY started_at DESC LIMIT 1").fetchone()
@@ -469,6 +473,9 @@ class RegimeService:
         evaluation["cache_age_hours"] = round((datetime.now(timezone.utc) - max(fetched_times)).total_seconds() / 3600, 1) if fetched_times else None
         evaluation["is_stale"] = evaluation["cache_age_hours"] is not None and evaluation["cache_age_hours"] > 48
         evaluation["data_quality"] = self._data_quality(evaluation["signals"], coverage)
+        evaluation["upcoming_events"] = RegimeEventService().upcoming()
+        evaluation["ai_capex"] = SecCapexService().summary()
+        evaluation["memory_cycle"] = MemoryPriceService().summary()
         return evaluation
 
     @staticmethod
@@ -582,8 +589,7 @@ class RegimeService:
         signals.append("단기채 방어 유지" if any(value in {"둔화", "약화"} for value in states.values()) else "단기채 방어 필요 낮음")
         return signals
 
-    def create_snapshot(self, user_regime: str | None, user_note: str | None,
-                        review_completed: bool = False) -> dict[str, Any]:
+    def create_snapshot(self, user_regime: str | None, user_note: str | None) -> dict[str, Any]:
         current = self.current()
         if user_regime and user_regime not in REGIME_ORDER:
             raise ValueError("지원하지 않는 사용자 레짐")
@@ -596,21 +602,26 @@ class RegimeService:
             "portfolio_json": current["portfolio"], "target_plan_json": current["target_plan"],
             "review_urgency": current["review_urgency"], "triggers_json": current["triggers"],
             "coverage_json": current["coverage"], "rule_version": current["rule_version"],
-            "review_completed": review_completed,
+            "review_completed": True,
             "as_of_date": current["macro_quadrant"].get("as_of_date"),
             "last_fetched_at": current["data_quality"].get("last_fetched_at"),
             "observation_range_json": current["data_quality"].get("observation_range"),
             "macro_quadrant_json": current["macro_quadrant"],
+            "ai_capex_json": current["ai_capex"],
+            "upcoming_events_json": current["upcoming_events"],
+            "memory_cycle_json": current["memory_cycle"],
         }
         self.db.table("regime_snapshots").insert(payload).execute()
-        if review_completed:
-            self._insert_acknowledgment(current, user_note)
+        self._insert_acknowledgment(current, user_note)
         return self.get_snapshot(snapshot_id)
 
     def _portfolio_context(self) -> tuple[dict[str, Any], dict[str, Any] | None]:
         with self.db.connect() as conn:
             portfolio = conn.execute("SELECT * FROM portfolios ORDER BY created_at LIMIT 1").fetchone()
-            assets = conn.execute("SELECT * FROM assets WHERE is_active=1 ORDER BY name").fetchall()
+            assets = conn.execute(
+                "SELECT * FROM assets WHERE is_active=1 AND portfolio_id=? ORDER BY name",
+                (portfolio["id"],),
+            ).fetchall() if portfolio else []
             plan = conn.execute("SELECT * FROM rebalance_plans WHERE is_main=1 AND is_active=1 LIMIT 1").fetchone()
             target = None
             if plan:
@@ -641,7 +652,7 @@ class RegimeService:
 
     @staticmethod
     def _snapshot_dict(row: dict[str, Any]) -> dict[str, Any]:
-        for key in ("raw_data_json", "signals_json", "domains_json", "reasons_json", "portfolio_json", "target_plan_json", "triggers_json", "coverage_json", "observation_range_json", "macro_quadrant_json"):
+        for key in ("raw_data_json", "signals_json", "domains_json", "reasons_json", "portfolio_json", "target_plan_json", "triggers_json", "coverage_json", "observation_range_json", "macro_quadrant_json", "ai_capex_json", "upcoming_events_json", "memory_cycle_json"):
             row[key.removesuffix("_json")] = json.loads(row[key]) if row.get(key) else None
             row.pop(key, None)
         return row
@@ -652,6 +663,24 @@ class RegimeService:
                  f"- 자동 레짐: {current['automatic_regime']}", "", "## 영역별 상태", ""]
         lines += [f"- {item['name']}: {item['state']} ({item['score']:+.2f})" for item in current["domains"]]
         lines += ["", "## 판정 사유", ""] + [f"- {reason}" for reason in current["reasons"]]
+        ai = current["ai_capex"]
+        lines += ["", "## AI 투자 사이클", "", f"- 판정: {ai['state']}",
+                  f"- 근거: {ai['reason']}", f"- Coverage: {ai['coverage'] * 100:.0f}%"]
+        lines += [
+            f"- {item['name']}: 최근 분기 ${item['latest_capex'] / 1e9:.1f}B / YoY {item['yoy']:+.1f}% / TTM ${item['ttm'] / 1e9:.1f}B"
+            for item in ai["companies"]
+            if item.get("latest_capex") is not None and item.get("yoy") is not None and item.get("ttm") is not None
+        ]
+        memory = current["memory_cycle"]
+        lines += ["", "## 메모리 가격 사이클", "", f"- 판정: {memory['state']}",
+                  f"- 근거: {memory['reason']}", f"- 제한: {memory['limitations']}"]
+        lines += [
+            f"- {item['product_name']} ({item['market_type']}): {item['price_average']:.3f} / 변화 {item['change_percent']:+.2f}% / 기준 {item['observation_date']}"
+            for item in memory["series"] if item.get("change_percent") is not None
+        ]
+        lines += ["", "## 다음 핵심 발표", ""]
+        lines += [f"- {item['scheduled_at']}: {item['event_type']} ({', '.join(item['affected_domains'])})"
+                  for item in current["upcoming_events"]]
         lines += ["", "## 현재 포트폴리오", ""]
         lines += [f"- {item.get('name')}: {item.get('ticker') or item.get('asset_type')}" for item in current["portfolio"]["assets"]]
         if current["target_plan"]:

@@ -3,7 +3,6 @@ Meowney API 메인 엔트리포인트 냥~
 고양이 집사의 자산 관리 서버
 """
 import sys
-import io
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,9 +12,11 @@ from app.api.v1.router import api_router
 from app.services.scheduler_service import start_scheduler, shutdown_scheduler
 
 # Windows 콘솔 인코딩 문제 해결
-if sys.platform == "win32" and sys.stdout.isatty() and hasattr(sys.stdout, "buffer"):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 @asynccontextmanager
@@ -41,7 +42,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Meowney API",
     description="🐱 고양이 집사의 자산 관리 API - 냥이와 함께하는 포트폴리오 관리",
-    version="1.3.3",
+    version="1.5.4",
     lifespan=lifespan,
     docs_url="/docs" if settings.debug else None,
     redoc_url="/redoc" if settings.debug else None,

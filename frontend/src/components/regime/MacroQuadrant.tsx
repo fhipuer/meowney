@@ -100,18 +100,18 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
       <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-2">
         <div>
           <div className="flex items-center gap-1">
-            <CardTitle>미국 거시경제 상태와 압력 방향</CardTitle>
+            <CardTitle>미국 거시경제 현재 수준과 최근 방향</CardTitle>
             <InfoTip label="거시경제 상태 차트 읽는 법">
-              점은 성장과 물가의 현재 절대 환경, 화살표는 최근 발표 지표가
-              가리키는 압력의 방향과 상대 강도입니다. 화살표는 실제 이동 경로나
-              예측이 아닙니다.
+              점은 지표 원수치가 아니라 성장과 물가를 기준점과 비교한 합성
+              위치입니다. 화살표는 최근 관측치로 계산한 상대 방향과 강도이며
+              실제 이동 경로나 전망이 아닙니다.
             </InfoTip>
           </div>
         </div>
         <div className="text-right">
           <Badge variant="secondary">{environment}</Badge>
           <p className="mt-2 text-xs text-muted-foreground">
-            데이터 기준 {data.as_of_date || "-"}
+            가장 최근 관측일 {data.as_of_date || "-"}
           </p>
         </div>
       </CardHeader>
@@ -207,7 +207,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   fontSize="13"
                   fontWeight="600"
                 >
-                  성장 취약 · 물가 안정
+                  성장 취약 · 물가 목표 부근
                 </text>
                 <text
                   x={SIZE - PAD - 12}
@@ -216,7 +216,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   fontSize="13"
                   fontWeight="600"
                 >
-                  성장 확장 · 물가 안정
+                  성장 확장 · 물가 목표 부근
                 </text>
                 <text
                   x={SIZE / 2}
@@ -224,7 +224,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   textAnchor="middle"
                   fontSize="12"
                 >
-                  성장 절대수준 · 취약 ← → 확장
+                  성장 수준 · 취약 ← → 확장
                 </text>
                 <text
                   x="18"
@@ -233,7 +233,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   fontSize="12"
                   transform={`rotate(-90 18 ${SIZE / 2})`}
                 >
-                  물가 절대수준 · 안정 ← → 압력
+                  물가 압력 수준 · 목표 부근 ← → 높음
                 </text>
                 {endpoint && (
                   <line
@@ -262,13 +262,13 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   fontSize="12"
                   fontWeight="700"
                 >
-                  현재 상태
+                  현재 환경 위치
                 </text>
               </svg>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border p-4">
-                <p className="text-xs text-muted-foreground">현재 절대 환경</p>
+                <p className="text-xs text-muted-foreground">현재 수준 · 모형 기준</p>
                 <p className="mt-1 font-semibold">
                   {data.growth_level?.label || "-"} · 물가{" "}
                   {data.inflation_level?.label || "-"}
@@ -278,7 +278,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                 </p>
               </div>
               <div className="rounded-lg border p-4">
-                <p className="text-xs text-muted-foreground">최근 지표 압력</p>
+                <p className="text-xs text-muted-foreground">최근 지표의 상대 방향</p>
                 <p className="mt-1 font-semibold">
                   {vector?.direction || "판정 불가"} · {vector?.strength || "-"}
                 </p>
@@ -287,10 +287,10 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                 </p>
               </div>
               <div className="rounded-lg border p-4">
-                <p className="text-xs text-muted-foreground">침체 해석</p>
-                <p className="mt-1 font-semibold">4분면만으로 판정하지 않음</p>
+                <p className="text-xs text-muted-foreground">침체 확인 기준</p>
+                <p className="mt-1 font-semibold">노동·실질활동·신용 종합</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  성장 수준·노동·실질활동·신용을 함께 확인합니다.
+                  상세점검 신호에서 교차 확인
                 </p>
               </div>
             </div>

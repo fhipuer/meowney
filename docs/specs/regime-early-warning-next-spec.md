@@ -289,6 +289,30 @@ Snapshot 확장
 
 SEC XBRL 기반 hyperscaler CAPEX와 AI 영역
 
+> 구현 완료 (v1.4.0): Microsoft·Alphabet·Meta·Amazon의 SEC submissions/companyfacts를
+> filing/fact/derived metric 스키마에 캐시한다. 현금 CAPEX 누적값은 직전 누적값을
+> 차감해 분기로 정규화하며 분기·TTM·YoY·기업 breadth와 coverage를 표시한다.
+> `확대 가속 / 높은 투자 지속 / 혼조 / 감속 관찰 / 판정 불가`는 결정론적 규칙으로
+> 계산한다. 정성적 가이던스, 리스·구매약정과 AI 매출 분리는 후속 범위다.
+
+> 발표 일정 1차 구현 (v1.4.0): 별도 캘린더 페이지 대신 현재 화면의 `다음 핵심 발표`
+> 카드에 BLS 공식 ICS의 CPI·PPI·고용보고서·JOLTS를 한국시간으로 표시한다.
+> BEA GDP/PCE, FOMC, 한국 공식 일정과 기업 실적 발표일은 후속 연결 대상이다.
+
+> 메모리 가격 1차 구현 (v1.5.0): TrendForce 비로그인 공개 가격표를 하루 최대 1회
+> 확인하고 DDR5 월간 Contract를 핵심 가격 신호, DDR5 Spot을 선행 보조,
+> DDR4를 공급전환 맥락 신호로 로컬 캐시한다. 제품명과 필수 열을 allowlist로
+> 검증하며 구조 변경 시 새 값을 저장하지 않고 기존 캐시를 유지한다. 공개 최신값을
+> 수집 시작일부터 축적하므로 유료 과거 이력 및 Server DRAM·HBM 계약가격을
+> 대체하지 않는다. 다음 단계는 Micron ASP/bit shipment 및 국내 2개사 IR 연동이다.
+
+> NAND 가격 확장 (v1.5.3): 같은 공개 페이지 계열에서 512Gb·256Gb TLC wafer
+> spot과 1TB·512GB PC Client SSD 계약가격을 하루 최대 1회 캐시한다. 512Gb TLC
+> wafer spot을 NAND 방향 판정의 주 표본으로 사용하고 Client SSD 계약가격은 맥락
+> 지표로만 표시한다. Enterprise SSD 계약가격·재고·출하량은 직접 측정하지 않는다.
+> HBM은 무료 공개 계약가격이나 표준 XBRL 항목이 없어 임의 프록시를 만들지 않으며,
+> SK하이닉스·Micron·삼성 공시 기반 출하·매출·가이던스 수집기로 후속 연결한다.
+
 ### P2.5
 
 반도체 공개 재무/가이던스 signal, KOSIS 반도체 수출. 신뢰 가능한 자동 출처가 없는 산업 가격과

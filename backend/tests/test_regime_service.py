@@ -25,6 +25,19 @@ def add_series(service, indicator_id, values):
         }).execute()
 
 
+def test_portfolio_context_does_not_mix_assets_from_other_portfolios(tmp_path):
+    service = service_for(tmp_path)
+    with service.db.connect() as conn:
+        conn.execute("INSERT INTO assets(id,portfolio_id,name,asset_type) VALUES(?,?,?,'stock')",
+                     ("main-asset", "00000000-0000-0000-0000-000000000010", "기준 자산"))
+        conn.execute("INSERT INTO portfolios(id,name) VALUES('other-portfolio','다른 포트폴리오')")
+        conn.execute("INSERT INTO assets(id,portfolio_id,name,asset_type) VALUES('other-asset','other-portfolio','제외 자산','stock')")
+
+    portfolio, _ = service._portfolio_context()
+
+    assert [item["name"] for item in portfolio["assets"]] == ["기준 자산"]
+
+
 def test_same_data_produces_same_evaluation(tmp_path):
     service = service_for(tmp_path)
     add_series(service, "us_unemployment", [4.0, 4.0, 4.1, 4.5])
@@ -76,7 +89,7 @@ def test_restrictive_real_rate_level_is_visible_without_recent_jump():
 
 def test_snapshot_keeps_auto_and_user_judgment_separate(tmp_path):
     service = service_for(tmp_path)
-    snapshot = service.create_snapshot("경계", "정기 점검", review_completed=True)
+    snapshot = service.create_snapshot("경계", "정기 점검")
 
     assert snapshot["automatic_regime"] == "유지"
     assert snapshot["user_regime"] == "경계"
@@ -92,14 +105,14 @@ def test_snapshot_keeps_auto_and_user_judgment_separate(tmp_path):
     assert acknowledgment["evaluation_id"] == snapshot["evaluation_id"]
 
 
-def test_snapshot_does_not_imply_external_review_without_explicit_choice(tmp_path):
+def test_snapshot_acknowledges_current_alerts_without_separate_choice(tmp_path):
     service = service_for(tmp_path)
     snapshot = service.create_snapshot("유지", "상태만 기록")
 
-    assert snapshot["review_completed"] == 0
+    assert snapshot["review_completed"] == 1
     with service.db.connect() as conn:
         count = conn.execute("SELECT COUNT(*) FROM regime_review_acknowledgments").fetchone()[0]
-    assert count == 0
+    assert count == 1
 
 
 def test_acknowledgment_covers_same_or_lower_severity_but_not_new_or_escalated_trigger():
