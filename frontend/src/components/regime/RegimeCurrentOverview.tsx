@@ -48,7 +48,7 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
   return (
     <Card className={data.needs_new_review ? "border-red-400/50" : ""}>
       <CardContent className="p-7">
-        <div className="grid gap-6 lg:grid-cols-[minmax(280px,1.5fr)_repeat(3,minmax(150px,1fr))]">
+        <div className="grid gap-6 lg:grid-cols-[minmax(390px,1.9fr)_repeat(3,minmax(135px,1fr))]">
           <div className="flex gap-4">
             {calm ? (
               <CheckCircle2 className="mt-1 h-7 w-7 shrink-0 text-emerald-400" />
@@ -58,7 +58,7 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
               />
             )}
             <div>
-              <p className="text-xs font-medium text-muted-foreground">
+              <p className="whitespace-nowrap text-xs font-medium text-muted-foreground">
                 포트폴리오 상세점검 판단
               </p>
               <h2 className="mt-1 text-2xl font-bold">{title}</h2>
@@ -117,7 +117,7 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
   const items = [
     ...data.triggers.map((trigger) => ({
       key: trigger.rule_id,
-      label: trigger.severity === "critical" ? "긴급" : "경보",
+      label: trigger.severity === "critical" ? "긴급 임계" : "활성 임계",
       text: trigger.summary,
       tone:
         trigger.severity === "critical"
@@ -142,9 +142,16 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle>마지막 확인 이후 변화</CardTitle>
+        <div className="flex items-center gap-1">
+          <CardTitle>현재 점검 항목</CardTitle>
+          <InfoTip label="현재 점검 항목 구성">
+            현재 활성화된 임계신호, 마지막 공식 Snapshot 이후 영역 판정 변화,
+            현재 데이터 공백을 함께 표시합니다. 활성 임계신호는 Snapshot 이후
+            새로 생긴 것만을 뜻하지 않습니다.
+          </InfoTip>
+        </div>
         <p className="text-sm text-muted-foreground">
-          새 경보, 영역 변화와 데이터 공백을 우선 표시합니다.
+          활성 임계신호 · Snapshot 이후 영역 변화 · 데이터 공백
         </p>
       </CardHeader>
       <CardContent>
@@ -218,11 +225,18 @@ function EvidencePanel({ data }: { data: RegimeCurrent }) {
     <div className="space-y-5">
       <Card>
         <CardHeader>
-          <CardTitle>
-            {data.triggers.length
-              ? "현재 판단을 바꾸는 신호"
-              : "현재 판단의 근거와 제한"}
-          </CardTitle>
+          <div className="flex items-center gap-1">
+            <CardTitle>
+              {data.triggers.length
+                ? "현재 판단을 바꾸는 신호"
+                : "현재 판단의 근거와 제한"}
+            </CardTitle>
+            <InfoTip label="판단 변경 신호 설명">
+              포트폴리오 상세점검의 우선순위를 바꿀 수 있는 High·Critical
+              임계신호입니다. 하나의 High 신호는 관찰, 서로 독립된 High 신호 두
+              묶음이나 Critical 신호는 상세점검 필요 조건이 됩니다.
+            </InfoTip>
+          </div>
         </CardHeader>
         <CardContent>
           {data.triggers.length ? (
@@ -230,6 +244,7 @@ function EvidencePanel({ data }: { data: RegimeCurrent }) {
               {data.triggers.slice(0, 3).map((trigger) => (
                 <li key={trigger.rule_id} className="flex gap-2 text-sm">
                   <Badge
+                    className="min-w-11 shrink-0 justify-center whitespace-nowrap px-3"
                     variant={
                       trigger.severity === "critical"
                         ? "destructive"
@@ -244,9 +259,7 @@ function EvidencePanel({ data }: { data: RegimeCurrent }) {
             </ul>
           ) : (
             <p className="text-sm leading-6 text-muted-foreground">
-              활성 High/Critical 임계 신호가 없습니다. 이는 모든 환경이
-              양호하다는 뜻이 아니라 정의된 경보선의 신규 통과가 없다는
-              뜻입니다.
+              현재 활성화된 High·Critical 임계신호가 없습니다.
             </p>
           )}
           {data.data_quality.status !== "충분" && (
@@ -275,7 +288,15 @@ function EvidencePanel({ data }: { data: RegimeCurrent }) {
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>좌표를 움직인 상위 기여</CardTitle>
+          <div className="flex items-center gap-1">
+            <CardTitle>좌표를 움직인 상위 기여</CardTitle>
+            <InfoTip label="좌표 기여도 설명">
+              각 지표의 최근 변화율을 자체 과거 분포에서 표준화한 뒤 영역별
+              가중치를 적용한 값입니다. 절대값이 클수록 현재 화살표 방향에 미친
+              영향이 큽니다. 성장에서는 양수=개선·음수=둔화, 물가에서는
+              양수=재가속·음수=완화입니다.
+            </InfoTip>
+          </div>
         </CardHeader>
         <CardContent className="grid gap-6 md:grid-cols-2 xl:grid-cols-1">
           <DriverList

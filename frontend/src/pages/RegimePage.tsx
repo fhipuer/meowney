@@ -52,12 +52,41 @@ const urgencyLabel: Record<ReviewUrgency, string> = {
   not_needed: "상세 점검 불필요",
 };
 const signalStatusLabel: Record<string, string> = {
-  강함: "개선 신호",
-  중립: "임계 변화 없음",
-  둔화: "악화 접근",
-  약화: "악화 신호",
+  강함: "우호 범위",
+  중립: "중립 범위",
+  둔화: "주의 범위",
+  약화: "악화 범위",
   unavailable: "미수집",
 };
+
+export function signalRuleHelp(signal: RegimeSignal) {
+  if (["us_unemployment", "us_claims"].includes(signal.id))
+    return "최근 3개월 노동시장 변화로 판정합니다. 실업률·실업수당 상승은 악화 방향, 하락은 개선 방향입니다.";
+  if (
+    ["cpi", "core_cpi", "pce", "core_pce", "ppi", "wages"].includes(signal.id)
+  )
+    return "최근 3개월 연율을 사용합니다. 물가·임금 상승세 재가속은 악화 방향, 목표 수준을 향한 둔화는 개선 방향입니다.";
+  if (
+    ["us10y", "tips10y", "bei10y", "term_premium", "fedfunds"].includes(
+      signal.id,
+    )
+  )
+    return "주로 최근 3개월 금리 변화로 판정하며, 실질금리와 기간 프리미엄은 높은 절대수준도 함께 봅니다. 상승은 금융여건 악화 방향입니다.";
+  if (["hy_oas", "ig_oas", "nfci", "curve2s10s"].includes(signal.id))
+    return "현재 절대수준을 중심으로 판정합니다. 신용스프레드·NFCI 상승은 악화 방향이며, 장단기금리차는 역전 폭 확대가 악화 방향입니다.";
+  if (
+    [
+      "us_gdp",
+      "us_payrolls",
+      "us_retail",
+      "us_indpro",
+      "fed_assets",
+      "bank_reserves",
+    ].includes(signal.id)
+  )
+    return "주로 12개월 변화율을 사용합니다. 성장·고용·생산·유동성 증가는 개선 방향, 감소는 악화 방향입니다.";
+  return "판정 기간과 개선·악화 방향은 지표별 규칙을 따릅니다. 아래 판정 근거에서 이번 계산에 사용된 기간과 값을 확인할 수 있습니다.";
+}
 const formatDate = (value: string) => value.slice(2, 7).replace("-", ".");
 const formatNumber = (value: number) =>
   Math.abs(value) >= 1000
@@ -122,15 +151,18 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
               </p>
             )}
           </div>
-          <Badge
-            className={
-              signal.usage === "display"
-                ? levelClass["데이터 없음"]
-                : levelClass[signal.status] || ""
-            }
-          >
-            {status}
-          </Badge>
+          <div className="flex shrink-0 items-center gap-1">
+            <Badge
+              className={`${signal.usage === "display" ? levelClass["데이터 없음"] : levelClass[signal.status] || ""} whitespace-nowrap`}
+            >
+              {status}
+            </Badge>
+            {signal.usage !== "display" && (
+              <InfoTip label={`${signal.name} 판정 기준`}>
+                {signalRuleHelp(signal)} 현재 판정 근거: {signal.reason}.
+              </InfoTip>
+            )}
+          </div>
         </div>
         <div className="flex items-baseline gap-2">
           <span className="text-2xl font-semibold">
