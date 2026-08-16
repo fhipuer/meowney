@@ -6,13 +6,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from uuid import uuid4
 from app.db.database import database
 from app.services.asset_service import AssetService
 
 router = APIRouter()
 
 # 현재 스키마 버전 냥~
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 
 
 class ExportData(BaseModel):
@@ -93,6 +94,7 @@ async def export_data(portfolio_id: Optional[str] = None):
         clean_portfolios = []
         for p in portfolios:
             clean_portfolios.append({
+                "_portfolio_key": p.get("id"),
                 "name": p.get("name"),
                 "description": p.get("description"),
                 "base_currency": p.get("base_currency", "KRW"),
@@ -102,9 +104,12 @@ async def export_data(portfolio_id: Optional[str] = None):
         clean_assets = []
         for a in assets:
             clean_assets.append({
+                "_asset_key": a.get("id"),
+                "_portfolio_key": a.get("portfolio_id"),
                 "name": a.get("name"),
                 "ticker": a.get("ticker"),
                 "asset_type": a.get("asset_type", "stock"),
+                "category_id": a.get("category_id"),
                 "quantity": float(a.get("quantity", 0)),
                 "average_price": float(a.get("average_price", 0)),
                 "currency": a.get("currency", "KRW"),
@@ -118,6 +123,8 @@ async def export_data(portfolio_id: Optional[str] = None):
         clean_plans = []
         for p in plans:
             clean_plans.append({
+                "_plan_key": p.get("id"),
+                "_portfolio_key": p.get("portfolio_id"),
                 "name": p.get("name"),
                 "description": p.get("description"),
                 "strategy_prompt": p.get("strategy_prompt"),
@@ -131,8 +138,15 @@ async def export_data(portfolio_id: Optional[str] = None):
         for a in allocations:
             plan = next((p for p in plans if p["id"] == a.get("plan_id")), None)
             clean_allocations.append({
+                "_allocation_key": a.get("id"),
+                "_plan_key": a.get("plan_id"),
+                "asset_id": a.get("asset_id"),
                 "ticker": a.get("ticker"),
                 "target_percentage": float(a.get("target_percentage", 0)),
+                "display_name": a.get("display_name"),
+                "alias": a.get("alias"),
+                "absolute_band": a.get("absolute_band"),
+                "relative_band": a.get("relative_band"),
                 "_plan_name": plan.get("name") if plan else None
             })
 
@@ -151,27 +165,20 @@ async def export_data(portfolio_id: Optional[str] = None):
 
 @router.post("/import")
 async def import_data(request: ImportRequest):
-    """
-    데이터 가져오기 냥~ 🐱
-    JSON 데이터를 가져와 저장합니다
-    """
+    """백업을 원자적으로 복원한다. 같은 백업의 반복 실행은 멱등적이다."""
     try:
         data = request.data
         merge_strategy = request.merge_strategy
-
-        # 스키마 버전 확인
         schema_version = data.get("schema_version", "0.0.0")
         if not schema_version.startswith("1."):
             raise HTTPException(status_code=400, detail=f"지원하지 않는 스키마 버전이다냥~ 😿: {schema_version}")
+        if merge_strategy not in {"replace", "merge"}:
+            raise HTTPException(status_code=400, detail="merge_strategy는 replace 또는 merge여야 합니다.")
 
         portfolios_data = data.get("portfolios", [])
         assets_data = data.get("assets", [])
         plans_data = data.get("rebalance_plans", [])
         allocations_data = data.get("plan_allocations", [])
-
-        created_portfolios = {}
-        created_plans = {}
-
         stats = {
             "portfolios_created": 0,
             "portfolios_updated": 0,
@@ -180,122 +187,109 @@ async def import_data(request: ImportRequest):
             "allocations_created": 0
         }
 
-        # 데이터가 모두 비어있으면 바로 성공 반환
         if not portfolios_data and not assets_data and not plans_data and not allocations_data:
-            return {
-                "success": True,
-                "message": "가져올 데이터가 없다냥~ 🐱",
-                "stats": stats
-            }
+            return {"success": True, "message": "가져올 데이터가 없다냥~ 🐱", "stats": stats}
 
-        # 1. 포트폴리오 생성
-        for p_data in portfolios_data:
-            portfolio_name = p_data.get("name", "가져온 포트폴리오")
+        portfolio_keys = [p.get("_portfolio_key") for p in portfolios_data]
+        if any(not key for key in portfolio_keys):
+            names = [p.get("name", "가져온 포트폴리오") for p in portfolios_data]
+            if len(names) != len(set(names)):
+                raise HTTPException(
+                    status_code=400,
+                    detail="동일한 이름의 포트폴리오가 있는 구형 백업은 안전하게 복원할 수 없습니다. 새 형식으로 다시 내보내세요.",
+                )
+        if len([k for k in portfolio_keys if k]) != len(set(k for k in portfolio_keys if k)):
+            raise HTTPException(status_code=400, detail="백업에 중복된 포트폴리오 식별자가 있습니다.")
 
-            # 기존 포트폴리오 확인
-            existing = database.table("portfolios").select("*").eq("name", portfolio_name).execute()
-
-            if existing.data:
-                if merge_strategy == "replace":
-                    # 기존 데이터 삭제 후 새로 생성
-                    portfolio_id = existing.data[0]["id"]
-                    database.table("assets").delete().eq("portfolio_id", portfolio_id).execute()
-                    # 플랜 배분 먼저 삭제
-                    plans_to_delete = database.table("rebalance_plans").select("id").eq("portfolio_id", portfolio_id).execute()
-                    for plan in (plans_to_delete.data or []):
-                        database.table("plan_allocations").delete().eq("plan_id", plan["id"]).execute()
-                    database.table("rebalance_plans").delete().eq("portfolio_id", portfolio_id).execute()
-                    database.table("portfolios").delete().eq("id", portfolio_id).execute()
-
-                    # 새 포트폴리오 생성
-                    new_portfolio = database.table("portfolios").insert({
-                        "name": portfolio_name,
-                        "description": p_data.get("description"),
-                        "base_currency": p_data.get("base_currency", "KRW"),
-                        "target_value": p_data.get("target_value")
-                    }).execute()
-                    if new_portfolio.data:
-                        created_portfolios[portfolio_name] = new_portfolio.data[0]["id"]
-                        stats["portfolios_created"] += 1
-                else:
-                    # merge 모드: 기존 포트폴리오 ID 사용
-                    created_portfolios[portfolio_name] = existing.data[0]["id"]
+        with database._lock, database.connect() as conn:
+            portfolio_map: dict[str, str] = {}
+            name_map: dict[str, str] = {}
+            for p_data in portfolios_data:
+                source_key = p_data.get("_portfolio_key")
+                portfolio_name = p_data.get("name", "가져온 포트폴리오")
+                existing = conn.execute("SELECT id FROM portfolios WHERE id=?", (source_key,)).fetchone() if source_key else None
+                if not existing and not source_key:
+                    matches = conn.execute("SELECT id FROM portfolios WHERE name=?", (portfolio_name,)).fetchall()
+                    if len(matches) > 1:
+                        raise HTTPException(status_code=400, detail=f"'{portfolio_name}' 포트폴리오가 여러 개라 구형 백업을 매핑할 수 없습니다.")
+                    existing = matches[0] if matches else None
+                portfolio_id = existing["id"] if existing else (source_key or str(uuid4()))
+                if existing:
                     stats["portfolios_updated"] += 1
-            else:
-                # 새 포트폴리오 생성
-                new_portfolio = database.table("portfolios").insert({
-                    "name": portfolio_name,
-                    "description": p_data.get("description"),
-                    "base_currency": p_data.get("base_currency", "KRW"),
-                    "target_value": p_data.get("target_value")
-                }).execute()
-
-                if new_portfolio.data:
-                    created_portfolios[portfolio_name] = new_portfolio.data[0]["id"]
+                    if merge_strategy == "replace":
+                        conn.execute("DELETE FROM rebalance_plans WHERE portfolio_id=?", (portfolio_id,))
+                        conn.execute("DELETE FROM assets WHERE portfolio_id=?", (portfolio_id,))
+                    conn.execute(
+                        "UPDATE portfolios SET name=?,description=?,base_currency=?,target_value=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (portfolio_name, p_data.get("description"), p_data.get("base_currency", "KRW"), p_data.get("target_value"), portfolio_id),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO portfolios(id,name,description,base_currency,target_value) VALUES (?,?,?,?,?)",
+                        (portfolio_id, portfolio_name, p_data.get("description"), p_data.get("base_currency", "KRW"), p_data.get("target_value")),
+                    )
                     stats["portfolios_created"] += 1
+                if source_key:
+                    portfolio_map[source_key] = portfolio_id
+                name_map[portfolio_name] = portfolio_id
 
-        # 포트폴리오가 없으면 기본 생성
-        if not created_portfolios:
-            default_portfolio = database.table("portfolios").select("*").limit(1).execute()
-            if default_portfolio.data:
-                created_portfolios["default"] = default_portfolio.data[0]["id"]
-            else:
-                new_default = database.table("portfolios").insert({
-                    "name": "가져온 포트폴리오",
-                    "base_currency": "KRW"
-                }).execute()
-                created_portfolios["default"] = new_default.data[0]["id"]
+            if not portfolio_map and not name_map:
+                row = conn.execute("SELECT id,name FROM portfolios ORDER BY created_at LIMIT 1").fetchone()
+                if not row:
+                    portfolio_id = str(uuid4())
+                    conn.execute("INSERT INTO portfolios(id,name,base_currency) VALUES (?,?,?)", (portfolio_id, "가져온 포트폴리오", "KRW"))
+                    name_map["default"] = portfolio_id
+                else:
+                    name_map["default"] = row["id"]
 
-        # 2. 자산 생성
-        for a_data in assets_data:
-            portfolio_name = a_data.get("_portfolio_name", "default")
-            portfolio_id = created_portfolios.get(portfolio_name) or list(created_portfolios.values())[0]
+            asset_map: dict[str, str] = {}
+            for a_data in assets_data:
+                source_key = a_data.get("_asset_key")
+                asset_id = source_key or str(uuid4())
+                portfolio_id = portfolio_map.get(a_data.get("_portfolio_key")) or name_map.get(a_data.get("_portfolio_name")) or next(iter(portfolio_map.values()), next(iter(name_map.values())))
+                values = (
+                    asset_id, portfolio_id, a_data.get("category_id"), a_data.get("name", "알 수 없는 자산"),
+                    a_data.get("ticker"), a_data.get("asset_type", "stock"), a_data.get("quantity", 0),
+                    a_data.get("average_price", 0), a_data.get("currency", "KRW"), a_data.get("current_value"),
+                    a_data.get("purchase_exchange_rate"), a_data.get("notes"), int(a_data.get("is_active", True)),
+                )
+                conn.execute(
+                    "INSERT INTO assets(id,portfolio_id,category_id,name,ticker,asset_type,quantity,average_price,currency,current_value,purchase_exchange_rate,notes,is_active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET portfolio_id=excluded.portfolio_id,category_id=excluded.category_id,name=excluded.name,ticker=excluded.ticker,asset_type=excluded.asset_type,quantity=excluded.quantity,average_price=excluded.average_price,currency=excluded.currency,current_value=excluded.current_value,purchase_exchange_rate=excluded.purchase_exchange_rate,notes=excluded.notes,is_active=excluded.is_active,updated_at=CURRENT_TIMESTAMP",
+                    values,
+                )
+                if source_key:
+                    asset_map[source_key] = asset_id
+                stats["assets_created"] += 1
 
-            database.table("assets").insert({
-                "portfolio_id": portfolio_id,
-                "name": a_data.get("name", "알 수 없는 자산"),
-                "ticker": a_data.get("ticker"),
-                "asset_type": a_data.get("asset_type", "stock"),
-                "quantity": a_data.get("quantity", 0),
-                "average_price": a_data.get("average_price", 0),
-                "currency": a_data.get("currency", "KRW"),
-                "current_value": a_data.get("current_value"),
-                "purchase_exchange_rate": a_data.get("purchase_exchange_rate"),
-                "notes": a_data.get("notes"),
-                "is_active": a_data.get("is_active", True)
-            }).execute()
-            stats["assets_created"] += 1
-
-        # 3. 리밸런싱 플랜 생성
-        for plan_data in plans_data:
-            portfolio_name = plan_data.get("_portfolio_name", "default")
-            portfolio_id = created_portfolios.get(portfolio_name) or list(created_portfolios.values())[0]
-            plan_name = plan_data.get("name", "가져온 플랜")
-
-            new_plan = database.table("rebalance_plans").insert({
-                "portfolio_id": portfolio_id,
-                "name": plan_name,
-                "description": plan_data.get("description"),
-                "strategy_prompt": plan_data.get("strategy_prompt"),
-                "is_main": plan_data.get("is_main", False),
-                "is_active": plan_data.get("is_active", True)
-            }).execute()
-
-            if new_plan.data:
-                created_plans[plan_name] = new_plan.data[0]["id"]
+            plan_map: dict[str, str] = {}
+            plan_name_map: dict[str, str] = {}
+            for plan_data in plans_data:
+                source_key = plan_data.get("_plan_key")
+                plan_id = source_key or str(uuid4())
+                portfolio_id = portfolio_map.get(plan_data.get("_portfolio_key")) or name_map.get(plan_data.get("_portfolio_name")) or next(iter(portfolio_map.values()), next(iter(name_map.values())))
+                plan_name = plan_data.get("name", "가져온 플랜")
+                conn.execute(
+                    "INSERT INTO rebalance_plans(id,portfolio_id,name,description,strategy_prompt,is_main,is_active) VALUES (?,?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET portfolio_id=excluded.portfolio_id,name=excluded.name,description=excluded.description,strategy_prompt=excluded.strategy_prompt,is_main=excluded.is_main,is_active=excluded.is_active,updated_at=CURRENT_TIMESTAMP",
+                    (plan_id, portfolio_id, plan_name, plan_data.get("description"), plan_data.get("strategy_prompt"), int(plan_data.get("is_main", False)), int(plan_data.get("is_active", True))),
+                )
+                if source_key:
+                    plan_map[source_key] = plan_id
+                plan_name_map[plan_name] = plan_id
                 stats["plans_created"] += 1
 
-        # 4. 플랜 배분 생성
-        for alloc_data in allocations_data:
-            plan_name = alloc_data.get("_plan_name")
-            plan_id = created_plans.get(plan_name)
-
-            if plan_id:
-                database.table("plan_allocations").insert({
-                    "plan_id": plan_id,
-                    "ticker": alloc_data.get("ticker"),
-                    "target_percentage": alloc_data.get("target_percentage", 0)
-                }).execute()
+            for alloc_data in allocations_data:
+                plan_id = plan_map.get(alloc_data.get("_plan_key")) or plan_name_map.get(alloc_data.get("_plan_name"))
+                if not plan_id:
+                    continue
+                allocation_id = alloc_data.get("_allocation_key") or str(uuid4())
+                asset_id = asset_map.get(alloc_data.get("asset_id")) or alloc_data.get("asset_id")
+                conn.execute(
+                    "INSERT INTO plan_allocations(id,plan_id,asset_id,ticker,target_percentage,display_name,alias,absolute_band,relative_band) VALUES (?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET plan_id=excluded.plan_id,asset_id=excluded.asset_id,ticker=excluded.ticker,target_percentage=excluded.target_percentage,display_name=excluded.display_name,alias=excluded.alias,absolute_band=excluded.absolute_band,relative_band=excluded.relative_band,updated_at=CURRENT_TIMESTAMP",
+                    (allocation_id, plan_id, asset_id, alloc_data.get("ticker"), alloc_data.get("target_percentage", 0), alloc_data.get("display_name"), alloc_data.get("alias"), alloc_data.get("absolute_band"), alloc_data.get("relative_band")),
+                )
                 stats["allocations_created"] += 1
 
         return {
@@ -317,7 +311,7 @@ async def get_schema_info():
     """
     return {
         "current_version": SCHEMA_VERSION,
-        "supported_versions": ["1.0.0"],
+        "supported_versions": ["1.0.0", "1.1.0"],
         "fields": {
             "portfolios": ["name", "description", "base_currency", "target_value"],
             "assets": ["name", "ticker", "asset_type", "quantity", "average_price", "currency", "current_value", "purchase_exchange_rate", "notes", "is_active"],

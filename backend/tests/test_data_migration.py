@@ -87,3 +87,46 @@ async def test_export_import_roundtrip(client: AsyncClient):
     data = import_response.json()
     assert data["success"] == True
     assert "stats" in data
+
+
+@pytest.mark.asyncio
+async def test_replace_import_is_idempotent_with_duplicate_portfolio_names(client: AsyncClient):
+    """식별자가 다른 동명 포트폴리오를 반복 복원해도 자산이 늘지 않는다."""
+    backup = {
+        "schema_version": "1.1.0",
+        "portfolios": [
+            {"_portfolio_key": "10000000-0000-0000-0000-000000000001", "name": "같은 이름"},
+            {"_portfolio_key": "10000000-0000-0000-0000-000000000002", "name": "같은 이름"},
+        ],
+        "assets": [
+            {"_asset_key": "20000000-0000-0000-0000-000000000001", "_portfolio_key": "10000000-0000-0000-0000-000000000001", "name": "자산 A", "quantity": 1},
+            {"_asset_key": "20000000-0000-0000-0000-000000000002", "_portfolio_key": "10000000-0000-0000-0000-000000000002", "name": "자산 B", "quantity": 2},
+        ],
+        "rebalance_plans": [],
+        "plan_allocations": [],
+    }
+
+    for _ in range(2):
+        response = await client.post("/api/v1/data/import", json={"data": backup, "merge_strategy": "replace"})
+        assert response.status_code == 200, response.text
+
+    exported = (await client.get("/api/v1/data/export")).json()
+    restored_assets = [a for a in exported["assets"] if a.get("_portfolio_key", "").startswith("10000000-")]
+    assert len(restored_assets) == 2
+    assert {a["_asset_key"] for a in restored_assets} == {
+        "20000000-0000-0000-0000-000000000001",
+        "20000000-0000-0000-0000-000000000002",
+    }
+
+
+@pytest.mark.asyncio
+async def test_legacy_backup_rejects_ambiguous_duplicate_names(client: AsyncClient):
+    backup = {
+        "schema_version": "1.0.0",
+        "portfolios": [{"name": "중복"}, {"name": "중복"}],
+        "assets": [],
+        "rebalance_plans": [],
+        "plan_allocations": [],
+    }
+    response = await client.post("/api/v1/data/import", json={"data": backup, "merge_strategy": "replace"})
+    assert response.status_code == 400
