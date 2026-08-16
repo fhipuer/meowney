@@ -33,7 +33,7 @@ fi
 echo "3. 이미지 빌드 및 DB 마이그레이션"
 $COMPOSE build
 $COMPOSE run --rm meowney-backend python -c \
-  "from app.db.supabase import get_supabase_client; get_supabase_client().migrate()"
+  "from app.db.database import get_database_client; get_database_client().migrate()"
 
 echo "4. 서비스 교체 및 상태 확인"
 $COMPOSE up -d --remove-orphans

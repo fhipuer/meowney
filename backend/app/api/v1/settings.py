@@ -5,7 +5,7 @@
 from uuid import UUID
 from fastapi import APIRouter, HTTPException
 
-from app.api.deps import SupabaseDep
+from app.api.deps import DatabaseDep
 from app.models.schemas import UserSettingsResponse, UserSettingsUpdate
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -15,7 +15,7 @@ DEFAULT_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 @router.get("", response_model=UserSettingsResponse)
-async def get_settings(db: SupabaseDep):
+async def get_settings(db: DatabaseDep):
     """
     사용자 설정 조회 냥~ 🐱
     설정이 없으면 기본값으로 자동 생성
@@ -42,7 +42,7 @@ async def get_settings(db: SupabaseDep):
 
 
 @router.put("", response_model=UserSettingsResponse)
-async def update_settings(settings: UserSettingsUpdate, db: SupabaseDep):
+async def update_settings(settings: UserSettingsUpdate, db: DatabaseDep):
     """
     사용자 설정 업데이트 냥~ 🐱
     """

@@ -23,4 +23,4 @@ ENV PYTHONDONTWRITEBYTECODE=1
 EXPOSE 8000
 
 # 서버 실행
-CMD ["sh", "-c", "python -c 'from app.db.supabase import get_supabase_client; get_supabase_client()' && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "python -c 'from app.db.database import get_database_client; get_database_client()' && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

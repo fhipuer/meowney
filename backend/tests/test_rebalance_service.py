@@ -17,7 +17,7 @@ class TestRebalanceValuationSafety:
         portfolio_id = UUID("550e8400-e29b-41d4-a716-446655440001")
         asset = {"id": "asset-1", "ticker": "MISSING", "name": "Missing"}
 
-        with patch("app.services.rebalance_service.get_supabase_client"):
+        with patch("app.services.rebalance_service.get_database_client"):
             service = RebalanceService()
         service.get_plan = AsyncMock(return_value={
             "name": "Safety plan",
@@ -51,7 +51,7 @@ class TestMatchItemToAsset:
     @pytest.fixture
     def service(self):
         """RebalanceService 인스턴스 (DB 모킹)"""
-        with patch("app.services.rebalance_service.get_supabase_client"):
+        with patch("app.services.rebalance_service.get_database_client"):
             return RebalanceService()
 
     def test_match_by_asset_id_string(self, service):
@@ -189,7 +189,7 @@ class TestGetAssetValues:
     @pytest.fixture
     def service(self):
         """RebalanceService 인스턴스"""
-        with patch("app.services.rebalance_service.get_supabase_client"):
+        with patch("app.services.rebalance_service.get_database_client"):
             svc = RebalanceService()
             svc.finance_service = MagicMock()
             return svc
@@ -304,7 +304,7 @@ class TestCalculateGroupSuggestion:
     @pytest.fixture
     def service(self):
         """RebalanceService 인스턴스"""
-        with patch("app.services.rebalance_service.get_supabase_client"):
+        with patch("app.services.rebalance_service.get_database_client"):
             svc = RebalanceService()
             svc.finance_service = MagicMock()
             return svc
@@ -404,7 +404,7 @@ class TestCalculateAllocationSuggestion:
     @pytest.fixture
     def service(self):
         """RebalanceService 인스턴스"""
-        with patch("app.services.rebalance_service.get_supabase_client"):
+        with patch("app.services.rebalance_service.get_database_client"):
             svc = RebalanceService()
             svc.finance_service = MagicMock()
             svc.finance_service.get_exchange_rate = AsyncMock(return_value=1300.0)

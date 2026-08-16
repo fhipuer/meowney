@@ -3,17 +3,27 @@ Meowney 환경 설정 냥~ 🐱
 고양이 집사의 비밀 설정 파일
 """
 from pydantic_settings import BaseSettings
+from pydantic_settings import SettingsConfigDict
 from functools import lru_cache
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
     """앱 설정 - 환경변수에서 자동으로 읽어옴"""
 
-    # Supabase 설정
+    model_config = SettingsConfigDict(
+        env_file=(PROJECT_ROOT / ".env", PROJECT_ROOT / "backend" / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # 로컬 SQLite 설정
     database_url: str = "sqlite:///./data/meowney.db"
-    supabase_url: str | None = None
-    supabase_anon_key: str | None = None
-    supabase_service_role_key: str | None = None
+    fred_api_key: str | None = None
+    kosis_api_key: str | None = None
 
     # 앱 설정
     debug: bool = False
@@ -27,12 +37,6 @@ class Settings(BaseSettings):
 
     # 환율 설정
     default_usd_krw_rate: float = 1350.0
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
-
 
 @lru_cache
 def get_settings() -> Settings:

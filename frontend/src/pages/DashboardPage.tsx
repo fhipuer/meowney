@@ -6,7 +6,7 @@ import { PortfolioDonut } from '@/components/dashboard/PortfolioDonut'
 import { AssetTrendChart } from '@/components/dashboard/AssetTrendChart'
 import { RebalanceAlert } from '@/components/dashboard/RebalanceAlert'
 import { GoalProgress } from '@/components/dashboard/GoalProgress'
-import { MarketIndicators } from '@/components/dashboard/MarketIndicators'
+import { RegimeSummary } from '@/components/regime/RegimeSummary'
 import { useDashboardSummary } from '@/hooks/useDashboard'
 
 export function DashboardPage() {
@@ -42,8 +42,8 @@ export function DashboardPage() {
         <AssetTrendChart />
       </div>
 
-      {/* 시장 맥락 */}
-      <MarketIndicators />
+      {/* 시장 맥락 축약본 */}
+      <RegimeSummary />
 
       {/* 목표 진행률 (목표가 설정된 경우에만 표시) */}
       <GoalProgress />

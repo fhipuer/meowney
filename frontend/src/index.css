@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+/* CardContent is also used without CardHeader throughout the app. Only remove
+   duplicated top padding for the header + content composition. */
+[data-slot="card-header"] + [data-slot="card-content"]:not([data-explicit-top-padding="true"]) {
+  padding-top: 0;
+}
+
 @layer base {
   :root {
     /* 무채색 라이트 테마 */

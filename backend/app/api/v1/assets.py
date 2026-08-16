@@ -7,7 +7,7 @@ from typing import Optional
 
 from decimal import Decimal
 
-from app.api.deps import SupabaseDep
+from app.api.deps import DatabaseDep
 from app.models.schemas import (
     AssetCreate,
     AssetUpdate,
@@ -37,7 +37,7 @@ async def validate_ticker(ticker: str):
 
 @router.get("", response_model=AssetsListResponse)
 async def get_assets(
-    db: SupabaseDep,
+    db: DatabaseDep,
     portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID (없으면 기본 포트폴리오)"),
     include_inactive: bool = Query(False, description="비활성 자산 포함 여부"),
 ):
@@ -81,7 +81,7 @@ async def get_assets(
 
 @router.get("/{asset_id}", response_model=AssetResponse)
 async def get_asset(
-    db: SupabaseDep,
+    db: DatabaseDep,
     asset_id: UUID,
 ):
     """
@@ -103,7 +103,7 @@ async def get_asset(
 
 @router.post("", response_model=AssetResponse)
 async def create_asset(
-    db: SupabaseDep,
+    db: DatabaseDep,
     asset_data: AssetCreate,
 ):
     """
@@ -128,7 +128,7 @@ async def create_asset(
 
 @router.put("/{asset_id}", response_model=AssetResponse)
 async def update_asset(
-    db: SupabaseDep,
+    db: DatabaseDep,
     asset_id: UUID,
     asset_data: AssetUpdate,
 ):
@@ -160,7 +160,7 @@ async def update_asset(
 
 @router.delete("/{asset_id}", response_model=MeowResponse)
 async def delete_asset(
-    db: SupabaseDep,
+    db: DatabaseDep,
     asset_id: UUID,
     hard_delete: bool = Query(False, description="True면 완전 삭제, False면 비활성화"),
 ):

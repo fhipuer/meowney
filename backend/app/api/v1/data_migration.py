@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
-from app.db.supabase import supabase
+from app.db.database import database
 from app.services.asset_service import AssetService
 
 router = APIRouter()
@@ -31,6 +31,20 @@ class ImportRequest(BaseModel):
     merge_strategy: str = "replace"  # replace: 기존 데이터 삭제 후 가져오기, merge: 병합
 
 
+def _select_in_batches(table_name: str, column: str, values: list, batch_size: int = 500) -> list:
+    """SQLite의 바인드 변수 한도를 넘지 않도록 IN 조회를 나눈다."""
+    rows = []
+    for start in range(0, len(values), batch_size):
+        result = (
+            database.table(table_name)
+            .select("*")
+            .in_(column, values[start:start + batch_size])
+            .execute()
+        )
+        rows.extend(result.data or [])
+    return rows
+
+
 @router.get("/export")
 async def export_data(portfolio_id: Optional[str] = None):
     """
@@ -40,9 +54,9 @@ async def export_data(portfolio_id: Optional[str] = None):
     try:
         # 포트폴리오 조회
         if portfolio_id:
-            portfolios_query = supabase.table("portfolios").select("*").eq("id", portfolio_id)
+            portfolios_query = database.table("portfolios").select("*").eq("id", portfolio_id)
         else:
-            portfolios_query = supabase.table("portfolios").select("*")
+            portfolios_query = database.table("portfolios").select("*")
 
         portfolios_result = portfolios_query.execute()
         portfolios = portfolios_result.data or []
@@ -62,12 +76,10 @@ async def export_data(portfolio_id: Optional[str] = None):
             }
 
         # 자산 조회
-        assets_result = supabase.table("assets").select("*").in_("portfolio_id", portfolio_ids).execute()
-        assets = assets_result.data or []
+        assets = _select_in_batches("assets", "portfolio_id", portfolio_ids)
 
         # 리밸런싱 플랜 조회
-        plans_result = supabase.table("rebalance_plans").select("*").in_("portfolio_id", portfolio_ids).execute()
-        plans = plans_result.data or []
+        plans = _select_in_batches("rebalance_plans", "portfolio_id", portfolio_ids)
 
         # 플랜 ID 목록
         plan_ids = [p["id"] for p in plans]
@@ -75,8 +87,7 @@ async def export_data(portfolio_id: Optional[str] = None):
         # 플랜 배분 조회
         allocations = []
         if plan_ids:
-            allocations_result = supabase.table("plan_allocations").select("*").in_("plan_id", plan_ids).execute()
-            allocations = allocations_result.data or []
+            allocations = _select_in_batches("plan_allocations", "plan_id", plan_ids)
 
         # 민감 정보 제거 및 정리
         clean_portfolios = []
@@ -182,22 +193,22 @@ async def import_data(request: ImportRequest):
             portfolio_name = p_data.get("name", "가져온 포트폴리오")
 
             # 기존 포트폴리오 확인
-            existing = supabase.table("portfolios").select("*").eq("name", portfolio_name).execute()
+            existing = database.table("portfolios").select("*").eq("name", portfolio_name).execute()
 
             if existing.data:
                 if merge_strategy == "replace":
                     # 기존 데이터 삭제 후 새로 생성
                     portfolio_id = existing.data[0]["id"]
-                    supabase.table("assets").delete().eq("portfolio_id", portfolio_id).execute()
+                    database.table("assets").delete().eq("portfolio_id", portfolio_id).execute()
                     # 플랜 배분 먼저 삭제
-                    plans_to_delete = supabase.table("rebalance_plans").select("id").eq("portfolio_id", portfolio_id).execute()
+                    plans_to_delete = database.table("rebalance_plans").select("id").eq("portfolio_id", portfolio_id).execute()
                     for plan in (plans_to_delete.data or []):
-                        supabase.table("plan_allocations").delete().eq("plan_id", plan["id"]).execute()
-                    supabase.table("rebalance_plans").delete().eq("portfolio_id", portfolio_id).execute()
-                    supabase.table("portfolios").delete().eq("id", portfolio_id).execute()
+                        database.table("plan_allocations").delete().eq("plan_id", plan["id"]).execute()
+                    database.table("rebalance_plans").delete().eq("portfolio_id", portfolio_id).execute()
+                    database.table("portfolios").delete().eq("id", portfolio_id).execute()
 
                     # 새 포트폴리오 생성
-                    new_portfolio = supabase.table("portfolios").insert({
+                    new_portfolio = database.table("portfolios").insert({
                         "name": portfolio_name,
                         "description": p_data.get("description"),
                         "base_currency": p_data.get("base_currency", "KRW"),
@@ -212,7 +223,7 @@ async def import_data(request: ImportRequest):
                     stats["portfolios_updated"] += 1
             else:
                 # 새 포트폴리오 생성
-                new_portfolio = supabase.table("portfolios").insert({
+                new_portfolio = database.table("portfolios").insert({
                     "name": portfolio_name,
                     "description": p_data.get("description"),
                     "base_currency": p_data.get("base_currency", "KRW"),
@@ -225,11 +236,11 @@ async def import_data(request: ImportRequest):
 
         # 포트폴리오가 없으면 기본 생성
         if not created_portfolios:
-            default_portfolio = supabase.table("portfolios").select("*").limit(1).execute()
+            default_portfolio = database.table("portfolios").select("*").limit(1).execute()
             if default_portfolio.data:
                 created_portfolios["default"] = default_portfolio.data[0]["id"]
             else:
-                new_default = supabase.table("portfolios").insert({
+                new_default = database.table("portfolios").insert({
                     "name": "가져온 포트폴리오",
                     "base_currency": "KRW"
                 }).execute()
@@ -240,7 +251,7 @@ async def import_data(request: ImportRequest):
             portfolio_name = a_data.get("_portfolio_name", "default")
             portfolio_id = created_portfolios.get(portfolio_name) or list(created_portfolios.values())[0]
 
-            supabase.table("assets").insert({
+            database.table("assets").insert({
                 "portfolio_id": portfolio_id,
                 "name": a_data.get("name", "알 수 없는 자산"),
                 "ticker": a_data.get("ticker"),
@@ -261,7 +272,7 @@ async def import_data(request: ImportRequest):
             portfolio_id = created_portfolios.get(portfolio_name) or list(created_portfolios.values())[0]
             plan_name = plan_data.get("name", "가져온 플랜")
 
-            new_plan = supabase.table("rebalance_plans").insert({
+            new_plan = database.table("rebalance_plans").insert({
                 "portfolio_id": portfolio_id,
                 "name": plan_name,
                 "description": plan_data.get("description"),
@@ -280,7 +291,7 @@ async def import_data(request: ImportRequest):
             plan_id = created_plans.get(plan_name)
 
             if plan_id:
-                supabase.table("plan_allocations").insert({
+                database.table("plan_allocations").insert({
                     "plan_id": plan_id,
                     "ticker": alloc_data.get("ticker"),
                     "target_percentage": alloc_data.get("target_percentage", 0)

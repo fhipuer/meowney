@@ -1,4 +1,4 @@
-"""Small SQLite client compatible with the Supabase query subset used by Meowney."""
+"""Meowney에서 사용하는 fluent query 인터페이스 기반 SQLite client."""
 from __future__ import annotations
 
 import json

@@ -7,6 +7,7 @@ const Card = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
+    data-slot="card"
     className={cn(
       "rounded-md border border-border/70 bg-card text-card-foreground shadow-none",
       className
@@ -22,6 +23,7 @@ const CardHeader = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
+    data-slot="card-header"
     className={cn("flex flex-col space-y-1.5 p-6", className)}
     {...props}
   />
@@ -58,9 +60,22 @@ CardDescription.displayName = "CardDescription"
 const CardContent = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("p-5 pt-0 md:p-6 md:pt-0", className)} {...props} />
-))
+>(({ className, ...props }, ref) => {
+  // A standalone CardContent needs normal top padding. When it follows a
+  // CardHeader, index.css removes only that duplicated top padding. Explicit
+  // p/py/pt utilities remain an intentional per-card override.
+  const hasExplicitTopPadding = /(?:^|\s)(?:[a-z-]+:)*(?:!?p-|!?py-|!?pt-)/.test(className ?? "")
+
+  return (
+    <div
+      ref={ref}
+      data-slot="card-content"
+      data-explicit-top-padding={hasExplicitTopPadding ? "true" : undefined}
+      className={cn("p-5 md:p-6", className)}
+      {...props}
+    />
+  )
+})
 CardContent.displayName = "CardContent"
 
 const CardFooter = React.forwardRef<

@@ -1,0 +1,306 @@
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { RegimeCurrent } from "@/types";
+
+type Quadrant = RegimeCurrent["macro_quadrant"];
+
+const SIZE = 520;
+const PAD = 66;
+const PLOT = SIZE - PAD * 2;
+const x = (value: number) => PAD + ((value + 100) / 200) * PLOT;
+const y = (value: number) => PAD + ((100 - value) / 200) * PLOT;
+const signed = (value: number | null | undefined) =>
+  value == null ? "-" : `${value > 0 ? "+" : ""}${value.toFixed(1)}`;
+
+function pressureEndpoint(
+  startX: number,
+  startY: number,
+  dx: number,
+  dy: number,
+  score: number,
+) {
+  const norm = Math.hypot(dx, dy);
+  if (norm < 15) return null;
+  const length = 28 + Math.min(1, score) * 42;
+  const unitX = dx / norm;
+  const unitY = -dy / norm;
+  const boundary = Math.min(
+    unitX > 0
+      ? (SIZE - PAD - startX) / unitX
+      : unitX < 0
+        ? (PAD - startX) / unitX
+        : Infinity,
+    unitY > 0
+      ? (SIZE - PAD - startY) / unitY
+      : unitY < 0
+        ? (PAD - startY) / unitY
+        : Infinity,
+  );
+  const safeLength = Math.min(length, Math.max(0, boundary * 0.85));
+  return { x: startX + unitX * safeLength, y: startY + unitY * safeLength };
+}
+
+export function MacroQuadrant({ data }: { data: Quadrant }) {
+  const legacyPoint = data.points?.at(-1);
+  const levelX = data.environment_point?.growth ?? data.growth_level?.score;
+  const levelY =
+    data.environment_point?.inflation ?? data.inflation_level?.score;
+  const vector =
+    data.pressure_vector ??
+    data.momentum_vector ??
+    (legacyPoint?.growth.coordinate != null &&
+    legacyPoint.inflation.coordinate != null
+      ? {
+          dx: legacyPoint.growth.coordinate,
+          dy: legacyPoint.inflation.coordinate,
+          direction: `${legacyPoint.growth.coordinate <= -15 ? "성장 둔화" : legacyPoint.growth.coordinate >= 15 ? "성장 개선" : "성장 변화 미미"}·${legacyPoint.inflation.coordinate <= -15 ? "물가 완화" : legacyPoint.inflation.coordinate >= 15 ? "물가 재가속" : "물가 변화 미미"}`,
+          strength:
+            Math.hypot(
+              legacyPoint.growth.coordinate,
+              legacyPoint.inflation.coordinate,
+            ) < 25
+              ? "완만"
+              : "뚜렷함",
+          strength_score: Math.min(
+            1,
+            Math.hypot(
+              legacyPoint.growth.coordinate,
+              legacyPoint.inflation.coordinate,
+            ) /
+              (100 * Math.SQRT2),
+          ),
+          semantics: "relative_recent_pressure" as const,
+          is_displacement: false as const,
+          trajectory_available: false as const,
+        }
+      : undefined);
+  const available = levelX != null && levelY != null;
+  const startX = available ? x(levelX) : 0;
+  const startY = available ? y(levelY) : 0;
+  const endpoint =
+    available && vector?.dx != null && vector.dy != null
+      ? pressureEndpoint(
+          startX,
+          startY,
+          vector.dx,
+          vector.dy,
+          vector.strength_score ?? 0,
+        )
+      : null;
+  const environment =
+    data.environment_point?.label ??
+    data.environment_label ??
+    (data.growth_level && data.inflation_level
+      ? `${data.growth_level.label}·물가 ${data.inflation_level.label}`
+      : "판정 불가");
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-2">
+        <div>
+          <CardTitle>미국 거시경제 상태와 압력 방향</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            점은 현재 절대수준, 화살표는 최근 지표가 가리키는 압력 방향입니다.
+          </p>
+        </div>
+        <div className="text-right">
+          <Badge variant="secondary">{environment}</Badge>
+          <p className="mt-2 text-xs text-muted-foreground">
+            데이터 기준 {data.as_of_date || "-"}
+          </p>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-3">
+        {available ? (
+          <>
+            <div className="mx-auto w-full max-w-[620px] overflow-hidden rounded-lg border bg-muted/10">
+              <svg
+                viewBox={`0 0 ${SIZE} ${SIZE}`}
+                role="img"
+                aria-label={`현재 환경 ${environment}. 최근 압력 ${vector?.direction || "판정 불가"}`}
+                className="h-auto w-full text-foreground"
+              >
+                <defs>
+                  <marker
+                    id="pressure-arrow"
+                    markerWidth="8"
+                    markerHeight="8"
+                    refX="7"
+                    refY="4"
+                    orient="auto"
+                  >
+                    <path d="M0,0 L8,4 L0,8 Z" fill="#2563eb" />
+                  </marker>
+                </defs>
+                <rect
+                  x={PAD}
+                  y={PAD}
+                  width={PLOT / 2}
+                  height={PLOT / 2}
+                  fill="#fef2f2"
+                  opacity="0.55"
+                />
+                <rect
+                  x={SIZE / 2}
+                  y={PAD}
+                  width={PLOT / 2}
+                  height={PLOT / 2}
+                  fill="#fff7ed"
+                  opacity="0.55"
+                />
+                <rect
+                  x={PAD}
+                  y={SIZE / 2}
+                  width={PLOT / 2}
+                  height={PLOT / 2}
+                  fill="#eff6ff"
+                  opacity="0.55"
+                />
+                <rect
+                  x={SIZE / 2}
+                  y={SIZE / 2}
+                  width={PLOT / 2}
+                  height={PLOT / 2}
+                  fill="#ecfdf5"
+                  opacity="0.55"
+                />
+                {[-50, 0, 50].map((value) => (
+                  <g key={value} opacity="0.22">
+                    <line
+                      x1={x(value)}
+                      x2={x(value)}
+                      y1={PAD}
+                      y2={SIZE - PAD}
+                      stroke="currentColor"
+                      strokeDasharray={value === 0 ? undefined : "4 5"}
+                    />
+                    <line
+                      x1={PAD}
+                      x2={SIZE - PAD}
+                      y1={y(value)}
+                      y2={y(value)}
+                      stroke="currentColor"
+                      strokeDasharray={value === 0 ? undefined : "4 5"}
+                    />
+                  </g>
+                ))}
+                <text x={PAD + 12} y={PAD + 24} fontSize="13" fontWeight="600">
+                  성장 취약 · 물가 압력
+                </text>
+                <text
+                  x={SIZE - PAD - 12}
+                  y={PAD + 24}
+                  textAnchor="end"
+                  fontSize="13"
+                  fontWeight="600"
+                >
+                  성장 확장 · 물가 압력
+                </text>
+                <text
+                  x={PAD + 12}
+                  y={SIZE - PAD - 14}
+                  fontSize="13"
+                  fontWeight="600"
+                >
+                  성장 취약 · 물가 안정
+                </text>
+                <text
+                  x={SIZE - PAD - 12}
+                  y={SIZE - PAD - 14}
+                  textAnchor="end"
+                  fontSize="13"
+                  fontWeight="600"
+                >
+                  성장 확장 · 물가 안정
+                </text>
+                <text
+                  x={SIZE / 2}
+                  y={SIZE - 17}
+                  textAnchor="middle"
+                  fontSize="12"
+                >
+                  성장 절대수준 · 취약 ← → 확장
+                </text>
+                <text
+                  x="18"
+                  y={SIZE / 2}
+                  textAnchor="middle"
+                  fontSize="12"
+                  transform={`rotate(-90 18 ${SIZE / 2})`}
+                >
+                  물가 절대수준 · 안정 ← → 압력
+                </text>
+                {endpoint && (
+                  <line
+                    x1={startX}
+                    y1={startY}
+                    x2={endpoint.x}
+                    y2={endpoint.y}
+                    stroke="#2563eb"
+                    strokeWidth="5"
+                    strokeDasharray="7 5"
+                    opacity="0.72"
+                    markerEnd="url(#pressure-arrow)"
+                  />
+                )}
+                <circle
+                  cx={startX}
+                  cy={startY}
+                  r="10"
+                  fill="#111827"
+                  stroke="white"
+                  strokeWidth="3"
+                />
+                <text
+                  x={startX + 14}
+                  y={startY - 13}
+                  fontSize="12"
+                  fontWeight="700"
+                >
+                  현재 상태
+                </text>
+              </svg>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg border p-4">
+                <p className="text-xs text-muted-foreground">현재 절대 환경</p>
+                <p className="mt-1 font-semibold">
+                  {data.growth_level?.label || "-"} · 물가{" "}
+                  {data.inflation_level?.label || "-"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  성장 {signed(levelX)} / 물가 {signed(levelY)}
+                </p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-xs text-muted-foreground">최근 지표 압력</p>
+                <p className="mt-1 font-semibold">
+                  {vector?.direction || "판정 불가"} · {vector?.strength || "-"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  성장 {signed(vector?.dx)} / 물가 {signed(vector?.dy)}
+                </p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-xs text-muted-foreground">침체 해석</p>
+                <p className="mt-1 font-semibold">4분면만으로 판정하지 않음</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  성장 수준·노동·실질활동·신용을 함께 확인합니다.
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+              화살표는 실제 이동 경로나 전망치가 아닙니다. 길이는 최근 압력의
+              상대 강도를 제한된 범위로만 표현합니다. 과거 이동 궤적은 시점기준
+              이력이 쌓인 뒤 제공합니다.
+            </p>
+          </>
+        ) : (
+          <div className="flex h-80 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
+            현재 절대 위치를 계산할 자료가 부족합니다.
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

@@ -1,0 +1,101 @@
+from datetime import date, timedelta
+from uuid import uuid4
+
+from app.db.sqlite_client import SQLiteClient
+from app.services.regime_service import RegimeService
+
+
+def service_for(tmp_path):
+    service = RegimeService.__new__(RegimeService)
+    service.db = SQLiteClient(tmp_path / "regime.db")
+    return service
+
+
+def add_series(service, indicator_id, values):
+    start = date(2025, 1, 1)
+    for index, value in enumerate(values):
+        service.db.table("regime_observations").insert({
+            "id": str(uuid4()),
+            "indicator_id": indicator_id,
+            "observation_date": (start + timedelta(days=index * 31)).isoformat(),
+            "value": value,
+            "fetched_at": "2026-08-16T00:00:00+00:00",
+            "source": "fred",
+        }).execute()
+
+
+def test_same_data_produces_same_evaluation(tmp_path):
+    service = service_for(tmp_path)
+    add_series(service, "us_unemployment", [4.0, 4.0, 4.1, 4.5])
+
+    first = service.evaluate()
+    second = service.evaluate()
+
+    assert first["id"] == second["id"]
+    assert first["candidate_regime"] == "경계"
+    assert first["automatic_regime"] == "유지"
+
+
+def test_hysteresis_requires_second_distinct_confirmation(tmp_path):
+    service = service_for(tmp_path)
+    add_series(service, "us_unemployment", [4.0, 4.0, 4.1, 4.5])
+    first = service.evaluate()
+    add_series(service, "us_claims", [200000, 205000, 210000, 240000])
+    second = service.evaluate()
+
+    assert first["candidate_regime"] == "경계"
+    assert second["candidate_regime"] == "경계"
+    assert second["automatic_regime"] == "경계"
+
+
+def test_snapshot_keeps_auto_and_user_judgment_separate(tmp_path):
+    service = service_for(tmp_path)
+    snapshot = service.create_snapshot("경계", "정기 점검", review_completed=True)
+
+    assert snapshot["automatic_regime"] == "유지"
+    assert snapshot["user_regime"] == "경계"
+    assert snapshot["user_note"] == "정기 점검"
+    assert snapshot["signals"] is not None
+    assert snapshot["portfolio"] is not None
+    assert snapshot["review_urgency"] in {"required", "watch", "not_needed"}
+    assert snapshot["coverage"] is not None
+    assert snapshot["rule_version"]
+    with service.db.connect() as conn:
+        acknowledgment = conn.execute("SELECT * FROM regime_review_acknowledgments").fetchone()
+    assert acknowledgment is not None
+    assert acknowledgment["evaluation_id"] == snapshot["evaluation_id"]
+
+
+def test_snapshot_does_not_imply_external_review_without_explicit_choice(tmp_path):
+    service = service_for(tmp_path)
+    snapshot = service.create_snapshot("유지", "상태만 기록")
+
+    assert snapshot["review_completed"] == 0
+    with service.db.connect() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM regime_review_acknowledgments").fetchone()[0]
+    assert count == 0
+
+
+def test_acknowledgment_covers_same_or_lower_severity_but_not_new_or_escalated_trigger():
+    ack = {"trigger_state": {"credit.hy": "high"}}
+    same = [{"rule_id": "credit.hy", "severity": "high"}]
+    lower = [{"rule_id": "credit.hy", "severity": "medium"}]
+    escalated = [{"rule_id": "credit.hy", "severity": "critical"}]
+    new = same + [{"rule_id": "rates.jump", "severity": "high"}]
+
+    assert RegimeService._acknowledges(ack, same)
+    assert RegimeService._acknowledges(ack, lower)
+    assert not RegimeService._acknowledges(ack, escalated)
+    assert not RegimeService._acknowledges(ack, new)
+
+
+def test_complete_review_records_only_ack_context_and_optional_short_note(tmp_path):
+    service = service_for(tmp_path)
+    result = service.complete_review(" 외부 점검 완료 ")
+
+    assert result["review_acknowledged"] is True
+    assert result["needs_new_review"] is False
+    assert result["latest_acknowledgment"]["note"] == "외부 점검 완료"
+    with service.db.connect() as conn:
+        row = conn.execute("SELECT * FROM regime_review_acknowledgments").fetchone()
+    assert set(dict(row)) == {"id", "completed_at", "evaluation_id", "trigger_state_json", "note"}

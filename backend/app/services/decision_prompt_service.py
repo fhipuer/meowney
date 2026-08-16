@@ -130,12 +130,6 @@ def build_snapshot_markdown(
     ]
     if warnings:
         lines += ["## 데이터 경고", ""] + [f"> ⚠️ {warning}" for warning in warnings] + [""]
-    strategy_prompt = str(plan.get("strategy_prompt") or "")
-    if strategy_prompt.strip():
-        lines += ["## 플랜 전략 프롬프트", "", strategy_prompt, ""]
-    else:
-        lines += [PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8").strip(), ""]
-
     lines += ["## 현재 포트폴리오와 목표 포트폴리오 비교", "", "| 자산군 | 실제 평가금액 | 실제 비중 | 목표 비중 | 차이 |", "| --- | ---: | ---: | ---: | ---: |"]
     table_value = Decimal("0")
     table_actual = Decimal("0")
@@ -161,27 +155,35 @@ def build_snapshot_markdown(
     lines.append(f"| **합계** | **{_money(table_value, base_currency)}** | **{_percent(table_actual)}** | **{_percent(target_total)}** | |")
     lines.append("")
 
-    def add_asset(asset: dict[str, Any], group_name: str) -> None:
+    def add_asset(asset: dict[str, Any]) -> None:
         lines.extend([f"### {_text(asset['name'])}", ""])
-        fields = [("종목코드", asset.get("ticker")), ("자산 유형", asset.get("asset_type")), ("표시 통화", asset.get("currency"))]
+        fields = [("종목코드", asset.get("ticker")), ("표시 통화", asset.get("currency"))]
         for label, value in fields:
             if value:
                 lines.append(f"- {label}: {_text(value)}")
-        if asset.get("ticker"):
-            lines.extend([
-                f"- 보유 수량: {_decimal(asset['quantity']):,.4f}".rstrip("0").rstrip("."),
-                f"- 평균 구매가격: {_money(asset['average_price'], str(asset.get('currency') or base_currency))}",
-                f"- 현재 가격: {_money(asset['current_price'], str(asset.get('currency') or base_currency)) if asset.get('current_price') is not None else '현재 가격 미확인'}",
-            ])
+        quantity = asset.get("quantity")
+        if quantity is not None and _decimal(quantity) != 0:
+            lines.append(f"- 보유 수량: {_decimal(quantity):,.4f}".rstrip("0").rstrip("."))
+        price_currency = str(asset.get("currency") or base_currency)
+        average_price = asset.get("average_price")
+        if average_price is not None and _decimal(average_price) != 0:
+            lines.append(f"- 평균 구매가격: {_money(average_price, price_currency)}")
+        current_price = asset.get("current_price")
+        if current_price is not None and _decimal(current_price) != 0:
+            lines.append(f"- 현재 가격: {_money(current_price, price_currency)}")
         cost = asset.get("cost_basis_krw")
-        lines.extend([
-            f"- 매입금액: {_money(cost, base_currency) if cost is not None else '미확인'}",
-            f"- 평가금액: {_money(asset['market_value'], base_currency)}",
-            f"- 평가손익: {_money(asset['profit_loss'], base_currency, signed=True) if asset.get('profit_loss') is not None else '미확인'}",
-            f"- 수익률: {_percent(asset['profit_rate'], signed=True) if asset.get('profit_rate') is not None else '미확인'}",
-            f"- 전체 포트폴리오 비중: {_percent(_decimal(asset['market_value']) / total_value * 100 if total_value else 0)}",
-            f"- 소속 그룹: {_text(group_name)}", "",
-        ])
+        if cost is not None:
+            lines.append(f"- 매입금액: {_money(cost, base_currency)}")
+        market_value = asset.get("market_value")
+        if market_value is not None:
+            lines.append(f"- 평가금액: {_money(market_value, base_currency)}")
+        if asset.get("profit_loss") is not None:
+            lines.append(f"- 평가손익: {_money(asset['profit_loss'], base_currency, signed=True)}")
+        if asset.get("profit_rate") is not None:
+            lines.append(f"- 수익률: {_percent(asset['profit_rate'], signed=True)}")
+        if market_value is not None:
+            lines.append(f"- 전체 포트폴리오 비중: {_percent(_decimal(market_value) / total_value * 100 if total_value else 0)}")
+        lines.append("")
 
     lines += ["## 그룹별 상세", ""]
     for row in group_rows:
@@ -189,7 +191,7 @@ def build_snapshot_markdown(
         if not row["assets"]:
             lines += ["- 보유 자산: 없음", ""]
         for asset in row["assets"]:
-            add_asset(asset, str(row["name"]))
+            add_asset(asset)
     if allocations:
         lines += ["## 개별 목표 배분 상세", ""]
         for alloc in allocations:
@@ -197,14 +199,20 @@ def build_snapshot_markdown(
             name = alloc.get("display_name") or (matched.get("name") if matched else None) or alloc.get("ticker") or alloc.get("alias") or "미확인 자산"
             lines += [f"## {_text(name)}", "", f"- 목표 비중: {_percent(alloc.get('target_percentage', 0))}", ""]
             if matched:
-                add_asset(matched, "개별 목표 배분")
+                add_asset(matched)
             else:
                 lines += ["- 실제 보유 자산: 없음", ""]
     if unassigned:
         lines += ["## 플랜 미분류 자산", "", "아래 자산은 선택된 플랜의 그룹 또는 개별 목표에 연결되지 않았습니다.", ""]
         for asset in unassigned:
-            add_asset(asset, "플랜 미분류")
-    return "\n".join(lines).strip() + "\n"
+            add_asset(asset)
+    strategy_prompt = str(plan.get("strategy_prompt") or "")
+    if strategy_prompt.strip():
+        lines += ["## 플랜 전략 프롬프트", "", strategy_prompt, ""]
+    else:
+        lines += [PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8").strip(), ""]
+
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 class DecisionPromptService:
@@ -216,12 +224,12 @@ class DecisionPromptService:
         if not plan:
             raise DecisionPromptError("선택된 플랜을 찾을 수 없습니다.")
         portfolio_id = UUID(str(plan["portfolio_id"]))
-        asset_service = AssetService(self.rebalance.supabase)
+        asset_service = AssetService(self.rebalance.db)
         assets = await asset_service.get_assets(portfolio_id=portfolio_id)
         enriched = await self.rebalance.finance_service.enrich_assets_with_prices(assets)
         exchange_rate = await self.rebalance.finance_service.get_exchange_rate()
         summary = await asset_service.calculate_summary(enriched, portfolio_id, Decimal(str(exchange_rate)))
-        result = self.rebalance.supabase.table("portfolios").select("name,base_currency").eq("id", str(portfolio_id)).limit(1).execute()
+        result = self.rebalance.db.table("portfolios").select("name,base_currency").eq("id", str(portfolio_id)).limit(1).execute()
         portfolio = result.data[0] if result.data else {"base_currency": "KRW"}
         now = datetime.now().astimezone()
         snapshot = build_snapshot_markdown(plan, portfolio, enriched, summary, self.rebalance.match_item_to_asset, now)

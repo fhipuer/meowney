@@ -87,7 +87,7 @@ class TestCalculateSummary:
 
     @pytest.fixture
     def mock_db(self):
-        """Mock Supabase client"""
+        """Mock database client"""
         return MagicMock()
 
     @pytest.fixture
@@ -414,7 +414,7 @@ class TestEdgeCases:
 
     @pytest.fixture
     def mock_db(self):
-        """Mock Supabase client"""
+        """Mock database client"""
         return MagicMock()
 
     @pytest.fixture

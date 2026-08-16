@@ -12,6 +12,7 @@ $NasHome = "/var/services/homes/fhipuer"
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
+$deployStartedAt = Get-Date
 
 $branch = (git branch --show-current).Trim()
 if (-not $AllowNonMain -and $branch -ne "main") {
@@ -50,7 +51,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Release helper upload failed." }
 
     ssh -o BatchMode=yes -p $NasPort "$NasUser@$NasHostName" `
-        "chmod 700 '$NasHome/nas-apply-release.sh' && '$NasHome/nas-apply-release.sh' '$NasHome/meowney-source.tar.gz' '$sha'"
+        "sed -i 's/\r$//' '$NasHome/nas-apply-release.sh' && chmod 700 '$NasHome/nas-apply-release.sh' && '$NasHome/nas-apply-release.sh' '$NasHome/meowney-source.tar.gz' '$sha'"
     if ($LASTEXITCODE -ne 0) { throw "NAS release failed. Inspect NAS logs before retrying." }
 
     $health = Invoke-RestMethod -Uri "http://${NasHostName}:8000/health" -TimeoutSec 20
@@ -58,7 +59,8 @@ try {
     if ($health.status -ne "healthy" -or $proxy.StatusCode -ne 200) {
         throw "Post-deployment HTTP verification failed."
     }
-    Write-Host "Meowney NAS deployment completed: branch=$branch health=$($health.status)"
+    $elapsed = [math]::Round(((Get-Date) - $deployStartedAt).TotalSeconds)
+    Write-Host "Meowney NAS deployment completed: branch=$branch health=$($health.status) elapsed=${elapsed}s"
 }
 finally {
     if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }

@@ -8,7 +8,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Query
 from typing import Optional
 
-from app.api.deps import SupabaseDep
+from app.api.deps import DatabaseDep
 from app.models.schemas import (
     DashboardSummary,
     AssetHistoryResponse,
@@ -27,14 +27,14 @@ router = APIRouter()
 
 
 @router.get("/portfolio", response_model=PortfolioResponse)
-async def get_portfolio(db: SupabaseDep):
+async def get_portfolio(db: DatabaseDep):
     """기본 포트폴리오 정보를 조회한다."""
     return await AssetService(db).get_portfolio()
 
 
 @router.get("/summary", response_model=DashboardSummary)
 async def get_dashboard_summary(
-    db: SupabaseDep,
+    db: DatabaseDep,
     portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
 ):
     """
@@ -84,7 +84,7 @@ async def get_dashboard_summary(
 
 @router.get("/history", response_model=list[AssetHistoryResponse])
 async def get_asset_history(
-    db: SupabaseDep,
+    db: DatabaseDep,
     portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
     period: Optional[str] = Query(None, description="기간 (1W, 1M, 3M, 6M, 1Y)"),
     start_date: Optional[date] = Query(None, description="시작일"),
@@ -143,7 +143,7 @@ async def get_current_exchange_rate():
 
 @router.get("/rebalance-alerts", response_model=RebalanceAlertsResponse)
 async def get_rebalance_alerts(
-    db: SupabaseDep,
+    db: DatabaseDep,
     portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
     threshold: float = Query(5.0, ge=0, le=100, description="이탈도 임계값 (%)"),
 ):
@@ -182,7 +182,7 @@ async def _get_main_plan_alerts(
 
     # 그룹용 기본 절대 밴드 조회 냥~
     DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
-    settings_result = rebalance_service.supabase.table("user_settings").select(
+    settings_result = rebalance_service.db.table("user_settings").select(
         "default_absolute_band"
     ).eq("user_id", DEFAULT_USER_ID).execute()
     settings_row = settings_result.data[0] if settings_result.data else {}
@@ -284,7 +284,7 @@ async def _get_legacy_alerts(
 
 @router.get("/goal-progress", response_model=GoalProgressResponse)
 async def get_goal_progress(
-    db: SupabaseDep,
+    db: DatabaseDep,
     portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
 ):
     """
@@ -434,7 +434,7 @@ async def get_market_indicators():
 
 @router.post("/asset-history/manual")
 async def create_manual_history(
-    db: SupabaseDep,
+    db: DatabaseDep,
     request: ManualHistoryCreate,
     portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
 ):
@@ -486,7 +486,7 @@ async def create_manual_history(
 
 @router.get("/asset-history/manual", response_model=list[ManualHistoryResponse])
 async def get_manual_history(
-    db: SupabaseDep,
+    db: DatabaseDep,
     portfolio_id: Optional[UUID] = Query(None, description="포트폴리오 ID"),
 ):
     """
@@ -524,7 +524,7 @@ async def get_manual_history(
 
 @router.delete("/asset-history/{history_id}")
 async def delete_asset_history(
-    db: SupabaseDep,
+    db: DatabaseDep,
     history_id: UUID,
 ):
     """

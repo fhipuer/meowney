@@ -8,9 +8,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
-from app.db.supabase import get_supabase_client
+from app.db.database import get_database_client
 from app.services.asset_service import AssetService
 from app.services.finance_service import get_finance_service
+from app.services.regime_service import RegimeService
 
 
 # 벤치마크 티커 목록 냥~
@@ -38,7 +39,7 @@ async def take_daily_snapshot():
     print(f"📸 [{datetime.now()}] 일일 스냅샷 시작 냥~!")
 
     try:
-        db = get_supabase_client()
+        db = get_database_client()
         asset_service = AssetService(db)
         finance_service = get_finance_service()
 
@@ -137,7 +138,7 @@ async def take_benchmark_snapshot():
     print(f"📊 [{datetime.now()}] 벤치마크 스냅샷 시작 냥~!")
 
     try:
-        db = get_supabase_client()
+        db = get_database_client()
         finance_service = get_finance_service()
 
         today = date.today()
@@ -179,3 +180,7 @@ async def take_all_snapshots():
     """
     await take_daily_snapshot()
     await take_benchmark_snapshot()
+    try:
+        await RegimeService().refresh()
+    except Exception as exc:
+        print(f"❌ 레짐 데이터 갱신 실패, 기존 캐시 유지: {exc}")

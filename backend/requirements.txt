@@ -4,7 +4,7 @@ fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.6
 
-# Supabase
+# Supabase (기존 데이터 최초 이관 도구 전용)
 supabase>=2.3.0
 
 # Finance Data

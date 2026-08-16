@@ -45,7 +45,7 @@ def matcher(item, assets):
 
 def summary(assets):
     total_value = sum(a["market_value"] for a in assets if a["market_value"] is not None)
-    total_principal = sum(a["cost_basis_krw"] for a in assets)
+    total_principal = sum(a["cost_basis_krw"] or 0 for a in assets)
     return SimpleNamespace(
         total_value=total_value,
         total_principal=total_principal,
@@ -73,6 +73,13 @@ def test_renders_multiple_assets_and_snapshot_totals():
     assert "현재 총평가금액: 1,950,000원" in markdown
     assert "| 성장 자산 | 1,950,000원 | 100.00% | 100.00% | 0.00%p |" in markdown
     assert "### 미국 ETF" in markdown
+    assert "- 종목코드: QQQ" in markdown
+    assert "- 표시 통화: USD" in markdown
+    assert "- 보유 수량: 2" in markdown
+    assert "- 평균 구매가격: 400 USD" in markdown
+    assert "- 현재 가격: 450 USD" in markdown
+    assert "- 자산 유형:" not in markdown
+    assert "- 소속 그룹:" not in markdown
     assert f"템플릿 버전: {PROMPT_TEMPLATE_VERSION}" in markdown
 
 
@@ -85,11 +92,52 @@ def test_keeps_empty_target_group_and_zero_value_plan():
 
 def test_cash_omits_price_fields():
     cash = asset("cash", "예수금", ticker=None, asset_type="cash", quantity=0, average_price=0, current_price=None, cost_basis_krw=500000, market_value=500000, profit_loss=0, profit_rate=0, price_status="manual", price_as_of=None)
-    markdown = render([{"name": "현금", "target_percentage": 100, "items": [{"asset_id": "cash"}]}], [cash])
+    markdown = render([{"name": "현금", "target_percentage": 100, "items": [{"asset_id": "cash"}]}], [cash], strategy_prompt="분석")
     cash_section = markdown.split("### 예수금", 1)[1]
+    assert "종목코드" not in cash_section
+    assert "자산 유형" not in cash_section
+    assert "소속 그룹" not in cash_section
     assert "보유 수량" not in cash_section
+    assert "평균 구매가격" not in cash_section
     assert "현재 가격" not in cash_section
     assert "평가금액: 500,000원" in cash_section
+
+
+def test_asset_detail_omits_removed_and_missing_fields_without_placeholders():
+    incomplete = asset(
+        ticker=None,
+        asset_type="ETF",
+        currency=None,
+        current_price=None,
+        cost_basis_krw=None,
+        profit_loss=None,
+        profit_rate=None,
+        price_status="manual",
+        price_as_of=None,
+    )
+    markdown = render([{"name": "성장 자산", "target_percentage": 100, "items": [{"asset_id": "a1"}]}], [incomplete], strategy_prompt="분석")
+    asset_section = markdown.split("### 삼성전자", 1)[1]
+
+    assert "종목코드" not in asset_section
+    assert "자산 유형" not in asset_section
+    assert "소속 그룹" not in asset_section
+    assert "표시 통화" not in asset_section
+    assert "현재 가격" not in asset_section
+    assert "매입금액" not in asset_section
+    assert "평가손익" not in asset_section
+    assert "수익률" not in asset_section
+    assert "미확인" not in asset_section
+
+
+def test_tickerless_gold_keeps_meaningful_position_and_price_fields():
+    gold = asset("gold", "금현물", ticker=None, asset_type="gold", quantity=10, average_price=90000, current_price=100000)
+    markdown = render([{"name": "금", "target_percentage": 100, "items": [{"asset_id": "gold"}]}], [gold], strategy_prompt="분석")
+    gold_section = markdown.split("### 금현물", 1)[1]
+
+    assert "종목코드" not in gold_section
+    assert "- 보유 수량: 10" in gold_section
+    assert "- 평균 구매가격: 90,000원" in gold_section
+    assert "- 현재 가격: 100,000원" in gold_section
 
 
 def test_missing_price_blocks_download_instead_of_turning_it_into_zero():
@@ -150,10 +198,10 @@ def test_strategy_prompt_replaces_default_guidance_and_keeps_document_order():
     strategy_position = markdown.index("## 플랜 전략 프롬프트")
     comparison_position = markdown.index("## 현재 포트폴리오와 목표 포트폴리오 비교")
     details_position = markdown.index("## 그룹별 상세")
-    assert snapshot_position < strategy_position < comparison_position < details_position
+    assert snapshot_position < comparison_position < details_position < strategy_position
 
 
-def test_empty_strategy_prompt_uses_default_guidance_once_before_comparison():
+def test_empty_strategy_prompt_uses_default_guidance_once_after_details():
     markdown = render(
         [{"name": "성장 자산", "target_percentage": 100, "items": [{"asset_id": "a1"}]}],
         [asset()],
@@ -161,9 +209,7 @@ def test_empty_strategy_prompt_uses_default_guidance_once_before_comparison():
     )
 
     assert markdown.count("# 포트폴리오 의사결정 지침") == 1
-    assert markdown.index("# 포트폴리오 의사결정 지침") < markdown.index(
-        "## 현재 포트폴리오와 목표 포트폴리오 비교"
-    )
+    assert markdown.index("## 그룹별 상세") < markdown.index("# 포트폴리오 의사결정 지침")
 
 
 def test_individual_allocation_asset_is_included_in_detail():

@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from app.db.supabase import get_supabase_client
+from app.db.database import get_database_client
 from app.services.finance_service import get_finance_service
 
 
@@ -14,12 +14,12 @@ class RebalanceService:
     """리밸런싱 플랜 서비스 냥~"""
 
     def __init__(self):
-        self.supabase = get_supabase_client()
+        self.db = get_database_client()
         self.finance_service = get_finance_service()
 
     async def get_plans(self, portfolio_id: Optional[UUID] = None) -> list[dict]:
         """플랜 목록 조회 냥~"""
-        query = self.supabase.table("rebalance_plans").select(
+        query = self.db.table("rebalance_plans").select(
             "*, plan_allocations(*), allocation_groups(*, allocation_group_items(*))"
         ).eq("is_active", True)
 
@@ -42,7 +42,7 @@ class RebalanceService:
     async def get_plan(self, plan_id: UUID) -> Optional[dict]:
         """플랜 상세 조회 냥~"""
         response = (
-            self.supabase.table("rebalance_plans")
+            self.db.table("rebalance_plans")
             .select("*, plan_allocations(*), allocation_groups(*, allocation_group_items(*))")
             .eq("id", str(plan_id))
             .execute()
@@ -60,7 +60,7 @@ class RebalanceService:
 
     async def get_main_plan(self, portfolio_id: Optional[UUID] = None) -> Optional[dict]:
         """메인 플랜 조회 냥~"""
-        query = self.supabase.table("rebalance_plans").select(
+        query = self.db.table("rebalance_plans").select(
             "*, plan_allocations(*)"
         ).eq("is_main", True).eq("is_active", True)
 
@@ -89,7 +89,7 @@ class RebalanceService:
         portfolio_id = data.get("portfolio_id")
         if not portfolio_id:
             # 기본 포트폴리오 조회
-            portfolio_response = self.supabase.table("portfolios").select("id").limit(1).execute()
+            portfolio_response = self.db.table("portfolios").select("id").limit(1).execute()
             if portfolio_response.data:
                 portfolio_id = portfolio_response.data[0]["id"]
             else:
@@ -109,7 +109,7 @@ class RebalanceService:
             "strategy_prompt": data.get("strategy_prompt"),
         }
 
-        response = self.supabase.table("rebalance_plans").insert(plan_data).execute()
+        response = self.db.table("rebalance_plans").insert(plan_data).execute()
         plan = response.data[0]
 
         # 배분 설정이 있으면 저장
@@ -142,7 +142,7 @@ class RebalanceService:
             update_data["is_active"] = data["is_active"]
 
         if update_data:
-            self.supabase.table("rebalance_plans").update(update_data).eq(
+            self.db.table("rebalance_plans").update(update_data).eq(
                 "id", str(plan_id)
             ).execute()
 
@@ -150,7 +150,7 @@ class RebalanceService:
 
     async def delete_plan(self, plan_id: UUID) -> bool:
         """플랜 삭제 (soft delete) 냥~"""
-        self.supabase.table("rebalance_plans").update({"is_active": False}).eq(
+        self.db.table("rebalance_plans").update({"is_active": False}).eq(
             "id", str(plan_id)
         ).execute()
         return True
@@ -165,7 +165,7 @@ class RebalanceService:
         await self._unset_main_plan(plan["portfolio_id"])
 
         # 새 메인 플랜 설정
-        self.supabase.table("rebalance_plans").update({"is_main": True}).eq(
+        self.db.table("rebalance_plans").update({"is_main": True}).eq(
             "id", str(plan_id)
         ).execute()
 
@@ -173,7 +173,7 @@ class RebalanceService:
 
     async def _unset_main_plan(self, portfolio_id: str):
         """기존 메인 플랜 해제 냥~"""
-        self.supabase.table("rebalance_plans").update({"is_main": False}).eq(
+        self.db.table("rebalance_plans").update({"is_main": False}).eq(
             "portfolio_id", str(portfolio_id)
         ).eq("is_main", True).execute()
 
@@ -182,7 +182,7 @@ class RebalanceService:
     ) -> list[dict]:
         """배분 설정 저장 냥~"""
         # 기존 배분 삭제
-        self.supabase.table("plan_allocations").delete().eq(
+        self.db.table("plan_allocations").delete().eq(
             "plan_id", str(plan_id)
         ).execute()
 
@@ -210,7 +210,7 @@ class RebalanceService:
                 item["relative_band"] = alloc["relative_band"]
             allocation_data.append(item)
 
-        response = self.supabase.table("plan_allocations").insert(allocation_data).execute()
+        response = self.db.table("plan_allocations").insert(allocation_data).execute()
         return response.data or []
 
     # ============================================
@@ -220,7 +220,7 @@ class RebalanceService:
     async def get_groups(self, plan_id: UUID) -> list[dict]:
         """플랜의 배분 그룹 목록 조회 냥~"""
         response = (
-            self.supabase.table("allocation_groups")
+            self.db.table("allocation_groups")
             .select("*, allocation_group_items(*)")
             .eq("plan_id", str(plan_id))
             .order("display_order")
@@ -246,7 +246,7 @@ class RebalanceService:
             return groups
 
         # 자산 데이터 조회
-        asset_service = AssetService(self.supabase)
+        asset_service = AssetService(self.db)
         assets = await asset_service.get_assets(portfolio_id=portfolio_id)
         if not assets:
             # 자산이 없으면 모든 그룹의 current_value를 0으로 설정
@@ -285,7 +285,7 @@ class RebalanceService:
             return allocations
 
         # 자산 데이터 조회
-        asset_service = AssetService(self.supabase)
+        asset_service = AssetService(self.db)
         assets = await asset_service.get_assets(portfolio_id=portfolio_id)
         if not assets:
             for alloc in allocations:
@@ -317,7 +317,7 @@ class RebalanceService:
     async def save_groups(self, plan_id: UUID, groups: list[dict]) -> list[dict]:
         """배분 그룹 저장 냥~"""
         # 기존 그룹 삭제 (CASCADE로 아이템도 삭제됨)
-        self.supabase.table("allocation_groups").delete().eq(
+        self.db.table("allocation_groups").delete().eq(
             "plan_id", str(plan_id)
         ).execute()
 
@@ -333,7 +333,7 @@ class RebalanceService:
                 "target_percentage": group["target_percentage"],
                 "display_order": group.get("display_order", idx),
             }
-            group_response = self.supabase.table("allocation_groups").insert(group_data).execute()
+            group_response = self.db.table("allocation_groups").insert(group_data).execute()
             saved_group = group_response.data[0]
 
             # 그룹 아이템 생성 (weight 없이 단순 소속 관계만)
@@ -354,7 +354,7 @@ class RebalanceService:
                         item_data["alias"] = item["alias"]
                     items_data.append(item_data)
 
-                items_response = self.supabase.table("allocation_group_items").insert(items_data).execute()
+                items_response = self.db.table("allocation_group_items").insert(items_data).execute()
                 saved_items = items_response.data or []
 
             saved_group["items"] = saved_items
@@ -453,7 +453,7 @@ class RebalanceService:
             }
 
         # 현재 보유 자산 조회
-        asset_service = AssetService(self.supabase)
+        asset_service = AssetService(self.db)
         assets = await asset_service.get_assets(
             portfolio_id=portfolio_id or UUID(plan["portfolio_id"])
         )
@@ -496,7 +496,7 @@ class RebalanceService:
 
         # user_settings에서 기본 밴드값 조회 냥~
         DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
-        settings_result = self.supabase.table("user_settings").select(
+        settings_result = self.db.table("user_settings").select(
             "default_absolute_band,default_relative_band"
         ).eq("user_id", DEFAULT_USER_ID).execute()
         settings_row = settings_result.data[0] if settings_result.data else {}

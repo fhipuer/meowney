@@ -2,7 +2,7 @@
 API v1 라우터 통합 냥~ 🐱
 """
 from fastapi import APIRouter
-from app.api.v1 import assets, dashboard, rebalance, data_migration, settings
+from app.api.v1 import assets, dashboard, rebalance, data_migration, regime, settings
 
 api_router = APIRouter()
 
@@ -33,4 +33,10 @@ api_router.include_router(
 api_router.include_router(
     settings.router,
     tags=["Settings - 사용자 설정"]
+)
+
+api_router.include_router(
+    regime.router,
+    prefix="/regime",
+    tags=["Regime - 투자 레짐"]
 )

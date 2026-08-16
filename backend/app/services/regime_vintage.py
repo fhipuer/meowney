@@ -1,0 +1,144 @@
+"""FRED/ALFRED vintage ingestion and point-in-time series lookup.
+
+This module intentionally does not alter the current regime evaluation path.  It
+provides the append-only data foundation needed to migrate that path safely.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Any, Iterable
+from uuid import uuid4
+
+from app.db.sqlite_client import SQLiteClient
+
+
+FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
+
+
+def _iso_date(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an ISO date")
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"invalid {field}: {value}") from exc
+
+
+def initial_release_params(series_id: str, api_key: str, *, limit: int = 100_000,
+                           offset: int = 0) -> dict[str, Any]:
+    """Build an explicit FRED initial-release request.
+
+    output_type=4 asks FRED/ALFRED for the first published value of each
+    observation, rather than today's revised history.
+    """
+    return {
+        "series_id": series_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "output_type": 4,
+        # FRED defaults the real-time window to today. On a day without a
+        # release that makes output_type=4 fail with "No vintage dates".
+        "realtime_start": "1776-07-04",
+        "realtime_end": date.today().isoformat(),
+        "sort_order": "asc",
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@dataclass(frozen=True)
+class VintageObservation:
+    indicator_id: str
+    observation_date: str
+    value: float
+    available_from: str
+    available_until: str | None
+    fetched_at: str
+    source: str = "fred"
+    source_url: str = FRED_OBSERVATIONS_URL
+    quality_status: str = "official"
+    vintage_kind: str = "initial"
+    release_date: str | None = None
+
+
+def parse_initial_release_observations(indicator_id: str, payload: dict[str, Any],
+                                       fetched_at: str) -> list[VintageObservation]:
+    """Normalize a FRED ``output_type=4`` response.
+
+    Missing-value markers (``.``) are ignored.  FRED's realtime_start is the
+    availability proxy used for point-in-time evaluation; it is deliberately
+    not mislabeled as the source agency's release date.
+    """
+    datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+    result: list[VintageObservation] = []
+    for item in payload.get("observations", []):
+        try:
+            value = float(item.get("value"))
+        except (TypeError, ValueError):
+            continue
+        available_from = _iso_date(item.get("realtime_start"), "realtime_start")
+        raw_end = item.get("realtime_end")
+        available_until = _iso_date(raw_end, "realtime_end") if raw_end else None
+        result.append(VintageObservation(
+            indicator_id=indicator_id,
+            observation_date=_iso_date(item.get("date"), "observation date"),
+            value=value,
+            available_from=available_from,
+            available_until=available_until,
+            fetched_at=fetched_at,
+        ))
+    return result
+
+
+class RegimeVintageRepository:
+    def __init__(self, db: SQLiteClient):
+        self.db = db
+
+    def save(self, observations: Iterable[VintageObservation],
+             fetch_run_id: str | None = None) -> int:
+        """Idempotently persist vintage rows without overwriting prior versions."""
+        rows = list(observations)
+        if not rows:
+            return 0
+        with self.db.connect() as conn:
+            before = conn.total_changes
+            conn.executemany(
+                "INSERT INTO regime_observation_vintages("
+                "id,indicator_id,observation_date,value,available_from,available_until,release_date,"
+                "fetched_at,fetch_run_id,source,source_url,quality_status,vintage_kind) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(indicator_id,observation_date,available_from) DO NOTHING",
+                [
+                    (str(uuid4()), row.indicator_id, row.observation_date, row.value,
+                     row.available_from, row.available_until, row.release_date, row.fetched_at,
+                     fetch_run_id, row.source, row.source_url, row.quality_status, row.vintage_kind)
+                    for row in rows
+                ],
+            )
+            return conn.total_changes - before
+
+    def series_as_of(self, indicator_id: str, as_of: date | str) -> list[dict[str, Any]]:
+        """Return the value version knowable at end-of-day ``as_of``.
+
+        A row's realtime interval is inclusive.  The ROW_NUMBER guard also
+        handles imperfect or overlapping upstream intervals deterministically.
+        """
+        cutoff = _iso_date(as_of.isoformat() if isinstance(as_of, date) else as_of, "as_of")
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                "WITH candidates AS ("
+                " SELECT v.*, ROW_NUMBER() OVER ("
+                "  PARTITION BY v.indicator_id,v.observation_date"
+                "  ORDER BY v.available_from DESC,v.fetched_at DESC,v.id DESC"
+                " ) AS rn"
+                " FROM regime_observation_vintages v"
+                " WHERE v.indicator_id=? AND v.observation_date<=? AND v.available_from<=?"
+                " AND (v.available_until IS NULL OR v.available_until>=?)"
+                ") SELECT observation_date,value,available_from,available_until,release_date,"
+                "fetched_at,source,quality_status,vintage_kind FROM candidates WHERE rn=1 "
+                "ORDER BY observation_date",
+                (indicator_id, cutoff, cutoff, cutoff),
+            ).fetchall()
+        return [dict(row) for row in rows]

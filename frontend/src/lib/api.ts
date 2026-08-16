@@ -33,6 +33,9 @@ import type {
   ManualHistoryCreateResponse,
   UserSettings,
   UserSettingsUpdate,
+  RegimeCurrent,
+  RegimeLevel,
+  RegimeSnapshot,
 } from '@/types'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
@@ -226,6 +229,42 @@ export const dashboardApi = {
       `/dashboard/asset-history/${historyId}`
     )
     return data
+  },
+}
+
+export const regimeApi = {
+  getCurrent: async (): Promise<RegimeCurrent> => {
+    const { data } = await apiClient.get<RegimeCurrent>('/regime')
+    return data
+  },
+  refresh: async () => {
+    const { data } = await apiClient.post('/regime/refresh?force=true')
+    return data
+  },
+  completeReview: async (note?: string): Promise<RegimeCurrent> => {
+    const { data } = await apiClient.post<RegimeCurrent>('/regime/review-complete', { note })
+    return data
+  },
+  getHistory: async (): Promise<RegimeSnapshot[]> => {
+    const { data } = await apiClient.get<RegimeSnapshot[]>('/regime/history')
+    return data
+  },
+  createSnapshot: async (payload: { user_regime?: RegimeLevel; user_note?: string; review_completed?: boolean }): Promise<RegimeSnapshot> => {
+    const { data } = await apiClient.post<RegimeSnapshot>('/regime/snapshots', payload)
+    return data
+  },
+  updateSnapshot: async (id: string, payload: { user_regime?: RegimeLevel; user_note?: string }): Promise<RegimeSnapshot> => {
+    const { data } = await apiClient.put<RegimeSnapshot>(`/regime/snapshots/${id}`, payload)
+    return data
+  },
+  downloadMarkdown: async () => {
+    const { data } = await apiClient.get('/regime/export?format=markdown', { responseType: 'blob' })
+    const url = URL.createObjectURL(data)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'meowney-regime.md'
+    anchor.click()
+    URL.revokeObjectURL(url)
   },
 }
 
