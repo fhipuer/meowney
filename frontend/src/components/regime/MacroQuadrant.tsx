@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { InfoTip } from "@/components/ui/info-tip";
 import type { RegimeCurrent } from "@/types";
 
 type Quadrant = RegimeCurrent["macro_quadrant"];
@@ -98,10 +99,14 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
     <Card className="overflow-hidden">
       <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-2">
         <div>
-          <CardTitle>미국 거시경제 상태와 압력 방향</CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
-            점은 현재 절대수준, 화살표는 최근 지표가 가리키는 압력 방향입니다.
-          </p>
+          <div className="flex items-center gap-1">
+            <CardTitle>미국 거시경제 상태와 압력 방향</CardTitle>
+            <InfoTip label="거시경제 상태 차트 읽는 법">
+              점은 성장과 물가의 현재 절대 환경, 화살표는 최근 발표 지표가
+              가리키는 압력의 방향과 상대 강도입니다. 화살표는 실제 이동 경로나
+              예측이 아닙니다.
+            </InfoTip>
+          </div>
         </div>
         <div className="text-right">
           <Badge variant="secondary">{environment}</Badge>
@@ -289,11 +294,6 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                 </p>
               </div>
             </div>
-            <p className="mt-3 text-xs leading-5 text-muted-foreground">
-              화살표는 실제 이동 경로나 전망치가 아닙니다. 길이는 최근 압력의
-              상대 강도를 제한된 범위로만 표현합니다. 과거 이동 궤적은 시점기준
-              이력이 쌓인 뒤 제공합니다.
-            </p>
           </>
         ) : (
           <div className="flex h-80 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">

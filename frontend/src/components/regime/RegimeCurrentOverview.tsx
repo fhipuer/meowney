@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { InfoTip } from "@/components/ui/info-tip";
 import { MacroQuadrant } from "./MacroQuadrant";
 import type { RegimeCurrent, RegimeLevel } from "@/types";
 
@@ -36,8 +37,7 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
   const calm =
     !data.needs_new_review && data.review_urgency === "not_needed" && !limited;
   const pressure =
-    data.macro_quadrant.pressure_vector ??
-    data.macro_quadrant.momentum_vector;
+    data.macro_quadrant.pressure_vector ?? data.macro_quadrant.momentum_vector;
   const legacyPoint = data.macro_quadrant.points.at(-1);
   const legacyDirection =
     legacyPoint?.growth.coordinate != null &&
@@ -97,7 +97,8 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
               {data.data_quality.status}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              핵심지표 최신성 {Math.round(data.data_quality.overall_coverage * 100)}%
+              핵심지표 최신성{" "}
+              {Math.round(data.data_quality.overall_coverage * 100)}%
             </p>
           </div>
         </div>
@@ -118,16 +119,55 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
       key: trigger.rule_id,
       label: trigger.severity === "critical" ? "긴급" : "경보",
       text: trigger.summary,
-      tone: trigger.severity === "critical" ? "destructive" as const : "secondary" as const,
+      tone:
+        trigger.severity === "critical"
+          ? ("destructive" as const)
+          : ("secondary" as const),
     })),
     ...(data.changes_since_snapshot || []).map((text, index) => ({
-      key: `change-${index}`, label: "상태 변화", text, tone: "outline" as const,
+      key: `change-${index}`,
+      label: "상태 변화",
+      text,
+      tone: "outline" as const,
     })),
-    ...(data.data_quality.status !== "충분" ? data.data_quality.reasons.map((text, index) => ({
-      key: `quality-${index}`, label: "데이터", text, tone: "outline" as const,
-    })) : []),
-  ].slice(0, 3)
-  return <Card><CardHeader className="pb-2"><CardTitle>마지막 확인 이후 변화</CardTitle><p className="text-sm text-muted-foreground">새 경보, 영역 변화와 데이터 공백을 우선 표시합니다.</p></CardHeader><CardContent>{items.length ? <ul className="divide-y">{items.map(item => <li key={item.key} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"><Badge variant={item.tone}>{item.label}</Badge><p className="text-sm leading-5">{item.text}</p></li>)}</ul> : <p className="text-sm text-muted-foreground">새로운 임계선 통과나 영역 상태 변화가 없습니다.</p>}</CardContent></Card>
+    ...(data.data_quality.status !== "충분"
+      ? data.data_quality.reasons.map((text, index) => ({
+          key: `quality-${index}`,
+          label: "데이터",
+          text,
+          tone: "outline" as const,
+        }))
+      : []),
+  ].slice(0, 3);
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle>마지막 확인 이후 변화</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          새 경보, 영역 변화와 데이터 공백을 우선 표시합니다.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {items.length ? (
+          <ul className="divide-y">
+            {items.map((item) => (
+              <li
+                key={item.key}
+                className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
+              >
+                <Badge variant={item.tone}>{item.label}</Badge>
+                <p className="text-sm leading-5">{item.text}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            새로운 임계선 통과나 영역 상태 변화가 없습니다.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function DriverList({
@@ -261,11 +301,14 @@ function MonitoringTable({ data }: { data: RegimeCurrent }) {
     conditions = data.macro_quadrant.financial_conditions;
   const count = (domain: string) =>
     data.triggers.filter((item) => item.domain === domain).length;
-  const countRateRules = (includeRestrictive: boolean) => data.triggers.filter((item) =>
-    item.domain === "rates" && (includeRestrictive
-      ? item.rule_id === "tightening.restrictive_level"
-      : item.rule_id !== "tightening.restrictive_level")
-  ).length;
+  const countRateRules = (includeRestrictive: boolean) =>
+    data.triggers.filter(
+      (item) =>
+        item.domain === "rates" &&
+        (includeRestrictive
+          ? item.rule_id === "tightening.restrictive_level"
+          : item.rule_id !== "tightening.restrictive_level"),
+    ).length;
   const rows = [
     [
       "성장·고용",
@@ -308,49 +351,71 @@ function MonitoringTable({ data }: { data: RegimeCurrent }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>거시 전달경로 모니터</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          절대수준과 최근 충격을 함께 봅니다. 경보 없음은 완화적이라는 뜻이
-          아닙니다.
-        </p>
+        <div className="flex items-center gap-1">
+          <CardTitle>거시 전달경로 모니터</CardTitle>
+          <InfoTip label="거시 전달경로 모니터 설명">
+            정책금리부터 실질금리·장기금리·신용여건으로 이어지는 긴축 전달
+            상태를 절대수준과 최근 변화로 확인합니다.
+          </InfoTip>
+        </div>
       </CardHeader>
       <CardContent>
         <div className="space-y-3 md:hidden">
           {rows.map((row) => (
             <div key={row[0]} className="rounded-lg border bg-muted/20 p-4">
-              <div className="flex items-center justify-between gap-3"><p className="font-medium">{row[0]}</p><Badge variant={row[4] ? "destructive" : "outline"}>{row[4] ? `경보 ${row[4]}개` : "신규 경보 없음"}</Badge></div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-medium">{row[0]}</p>
+                <Badge variant={row[4] ? "destructive" : "outline"}>
+                  {row[4] ? `경보 ${row[4]}개` : "신규 경보 없음"}
+                </Badge>
+              </div>
               <p className="mt-3 text-sm">{row[1]}</p>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">{row[2]}</p>
-              <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">{row[3]}</p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                {row[2]}
+              </p>
+              <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                {row[3]}
+              </p>
             </div>
           ))}
         </div>
-        <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[900px] text-sm">
-          <thead>
-            <tr className="border-b text-left text-xs text-muted-foreground">
-              <th className="pb-3 font-medium">영역</th>
-              <th className="pb-3 font-medium">수준 / 방향</th>
-              <th className="pb-3 font-medium">실제값과 분해</th>
-              <th className="pb-3 font-medium">품질 / 변화</th>
-              <th className="pb-3 text-right font-medium">활성 경보</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row[0]} className="border-b last:border-0">
-                <td className="py-4 font-medium">{row[0]}</td>
-                <td className="py-4">{row[1]}</td>
-                <td className="py-4 text-muted-foreground">{row[2]}</td>
-                <td className="py-4 text-muted-foreground">{row[3]}</td>
-                <td className="py-4 text-right">
-                  <Badge variant={row[4] ? "destructive" : "outline"}>
-                    {row[4] ? `${row[4]}개` : "없음"}
-                  </Badge>
-                </td>
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[900px] text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs text-muted-foreground">
+                <th className="pb-3 font-medium">영역</th>
+                <th className="pb-3 font-medium">수준 / 방향</th>
+                <th className="pb-3 font-medium">실제값과 분해</th>
+                <th className="pb-3 font-medium">품질 / 변화</th>
+                <th className="pb-3 font-medium">
+                  <span className="flex items-center justify-end gap-1">
+                    활성 경보
+                    <InfoTip label="활성 경보 의미">
+                      사전에 정의한 점검 임계선을 현재 통과한 규칙의 수입니다.
+                      0개는 새 임계선 통과가 없다는 뜻이며 금융여건이
+                      완화적이라는 판정은 아닙니다.
+                    </InfoTip>
+                  </span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table></div>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row[0]} className="border-b last:border-0">
+                  <td className="py-4 font-medium">{row[0]}</td>
+                  <td className="py-4">{row[1]}</td>
+                  <td className="py-4 text-muted-foreground">{row[2]}</td>
+                  <td className="py-4 text-muted-foreground">{row[3]}</td>
+                  <td className="py-4 text-right">
+                    <Badge variant={row[4] ? "destructive" : "outline"}>
+                      {row[4] ? `${row[4]}개` : "없음"}
+                    </Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </CardContent>
     </Card>
   );
@@ -370,9 +435,13 @@ function ThesisPanel() {
           <div className="rounded-lg border border-dashed p-5">
             <Badge variant="outline">판정 불가</Badge>
             <p className="mt-4 text-lg font-semibold">CAPEX 데이터 미연결</p>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              시장 가격을 CAPEX 대용으로 사용하지 않습니다.
-            </p>
+            <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+              <span>SEC XBRL 연동 대기</span>
+              <InfoTip label="AI 투자 판정 데이터 기준">
+                AI 투자 사이클은 기업 공시 CAPEX로 판정합니다. 주가 흐름은
+                CAPEX의 대체 데이터로 사용하지 않습니다.
+              </InfoTip>
+            </div>
           </div>
           <div>
             <p className="text-sm font-medium">판정에 필요한 데이터</p>
@@ -400,7 +469,14 @@ function SnapshotPanel(props: CurrentOverviewProps) {
       <summary className="cursor-pointer list-none p-6">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="font-semibold">공식 Snapshot 기록</p>
+            <div className="flex items-center gap-1">
+              <p className="font-semibold">공식 Snapshot 기록</p>
+              <InfoTip label="Snapshot 기록 기준">
+                버튼을 누른 시각의 판정과 그 판정에 사용된 지표별
+                관측일·원자료를 함께 보존합니다. 기록 시각과 경제지표 관측일은
+                다를 수 있습니다.
+              </InfoTip>
+            </div>
             <p className="mt-1 text-sm text-muted-foreground">
               판정 기준시점과 원자료를 동결해 History에 보존합니다.
             </p>
@@ -438,11 +514,6 @@ function SnapshotPanel(props: CurrentOverviewProps) {
             </p>
           </div>
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          기록 시각과 경제지표 관측일은 서로 다릅니다. 초기 발표값 빈티지는 별도
-          보존하며, 완전한 시점기준 이력이 쌓이기 전까지 과거 궤적은 표시하지
-          않습니다.
-        </p>
         <div className="mt-5 grid gap-3 lg:grid-cols-[180px_1fr_auto]">
           <select
             className="h-10 rounded-md border bg-background px-3 text-sm"

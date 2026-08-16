@@ -38,11 +38,12 @@ describe('MarketIndicators cached market view', () => {
       ]}
     />)
 
-    expect(html).toContain('시장가격만으로 자동 레짐을 변경하지 않습니다')
+    expect(html).toContain('aria-label="시장 환경 지표 사용법"')
     expect(html).toContain('위험자산 상대 흐름')
     expect(html).toContain('WTI')
     expect(html).toContain('구리')
-    expect(html).toContain('표시 구간 시작값을 100으로 환산')
+    expect(html).toContain('aria-label="위험자산 상대 흐름 계산 방식"')
+    expect(html).not.toContain('지수 간 절대 수준 비교가 아닙니다')
     expect(html).toContain('경보 전용')
   })
 })

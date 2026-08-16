@@ -43,10 +43,10 @@ describe("MacroQuadrant semantics", () => {
   it("renders absolute state separately from recent pressure", () => {
     const html = renderToStaticMarkup(<MacroQuadrant data={quadrant} />);
 
-    expect(html).toContain("점은 현재 절대수준");
+    expect(html).toContain('aria-label="거시경제 상태 차트 읽는 법"');
     expect(html).toContain("성장 확장·물가 압력");
     expect(html).toContain("성장 둔화·물가 완화");
-    expect(html).toContain("실제 이동 경로나 전망치가 아닙니다");
+    expect(html).not.toContain("화살표는 실제 이동 경로나 전망치가 아닙니다");
     expect(html).not.toContain("디스인플레이션·침체 위험");
   });
 });
