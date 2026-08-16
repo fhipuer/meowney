@@ -21,6 +21,7 @@ from app.services.regime_rules import (
     evaluate_triggers,
 )
 from app.services.regime_quadrant import calculate_us_macro_quadrant
+from app.services.finance_service import get_finance_service
 from app.services.regime_vintage import (
     RegimeVintageRepository,
     initial_release_params,
@@ -88,6 +89,9 @@ class RegimeService:
             indicators = [dict(row) for row in conn.execute(
                 "SELECT * FROM regime_indicators WHERE source='fred' AND enabled=1"
             ).fetchall()]
+            market_indicators = [dict(row) for row in conn.execute(
+                "SELECT * FROM regime_indicators WHERE source='yfinance' AND enabled=1"
+            ).fetchall()]
         run_id, started_at, saved = str(uuid4()), _now(), 0
         self.db.table("regime_fetch_runs").insert({
             "id": run_id, "source": "fred", "started_at": started_at, "status": "running"
@@ -141,6 +145,21 @@ class RegimeService:
             errors.extend(str(result) for result in vintage_batches if isinstance(result, Exception))
             rows = [row for batch in batches if isinstance(batch, list) for row in batch]
             vintage_rows = [row for batch in vintage_batches if isinstance(batch, list) for row in batch]
+            if market_indicators:
+                finance = get_finance_service()
+                market_batches = await asyncio.gather(
+                    *(finance.get_ticker_history(indicator["source_key"], 550) for indicator in market_indicators),
+                    return_exceptions=True,
+                )
+                for indicator, result in zip(market_indicators, market_batches):
+                    if isinstance(result, Exception) or not result.get("data"):
+                        errors.append(f"{indicator['id']}: yfinance unavailable")
+                        continue
+                    fetched_at = _now()
+                    rows.extend(
+                        (str(uuid4()), indicator["id"], item["date"], float(item["close"]), fetched_at, "yfinance")
+                        for item in result["data"]
+                    )
             if not rows and errors:
                 raise RuntimeError("; ".join(errors[:3]))
             with self.db.connect() as conn:

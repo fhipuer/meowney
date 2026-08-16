@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from app.db.sqlite_client import SQLiteClient
 from app.services.regime_service import RegimeService
+import app.services.regime_service as regime_service_module
 
 
 def service_for(tmp_path):
@@ -99,3 +100,38 @@ def test_complete_review_records_only_ack_context_and_optional_short_note(tmp_pa
     with service.db.connect() as conn:
         row = conn.execute("SELECT * FROM regime_review_acknowledgments").fetchone()
     assert set(dict(row)) == {"id", "completed_at", "evaluation_id", "trigger_state_json", "note"}
+
+
+async def test_refresh_persists_yfinance_market_history_in_regime_cache(tmp_path, monkeypatch):
+    service = service_for(tmp_path)
+    with service.db.connect() as conn:
+        conn.execute("UPDATE regime_indicators SET enabled=0")
+        conn.execute(
+            "UPDATE regime_indicators SET enabled=1, source='yfinance', source_key='^KS11' "
+            "WHERE id='market_kospi'"
+        )
+
+    class FinanceStub:
+        async def get_ticker_history(self, ticker, days):
+            assert (ticker, days) == ("^KS11", 550)
+            return {"data": [
+                {"date": "2026-08-13", "close": 3198.11},
+                {"date": "2026-08-14", "close": 3225.66},
+            ]}
+
+    monkeypatch.setattr(regime_service_module.settings, "fred_api_key", "test-key")
+    monkeypatch.setattr(regime_service_module, "get_finance_service", lambda: FinanceStub())
+
+    result = await service.refresh(force=True)
+
+    assert result["status"] == "success"
+    assert result["saved"] == 2
+    with service.db.connect() as conn:
+        rows = conn.execute(
+            "SELECT observation_date,value,source FROM regime_observations "
+            "WHERE indicator_id='market_kospi' ORDER BY observation_date"
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ("2026-08-13", 3198.11, "yfinance"),
+        ("2026-08-14", 3225.66, "yfinance"),
+    ]

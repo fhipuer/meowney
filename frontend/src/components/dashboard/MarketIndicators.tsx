@@ -1,243 +1,79 @@
-/**
- * 시장 현황 지표 컴포넌트 냥~ 🐱
- */
-import { useQuery } from '@tanstack/react-query'
-import { TrendingUp, TrendingDown, RefreshCw, Activity, Globe, Scale, BarChart2 } from 'lucide-react'
+import { Activity, BarChart3, Coins, Gauge, Globe2, Landmark, Waves } from 'lucide-react'
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { dashboardApi } from '@/lib/api'
-import { cn } from '@/lib/utils'
-import type { GoldSilverRatio, IndexPer } from '@/types'
+import type { RegimeSignal } from '@/types'
 
-export function MarketIndicators() {
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['marketIndicators'],
-    queryFn: dashboardApi.getMarketIndicators,
-    staleTime: 5 * 60 * 1000,
-    refetchInterval: 10 * 60 * 1000,
+type Props = { signals: RegimeSignal[]; fetchedAt?: string | null }
+
+const META: Record<string, { short: string; role: string; icon: typeof Globe2; group: string }> = {
+  market_sp500: { short: 'S&P 500', role: '미국 위험자산 베타', icon: BarChart3, group: 'risk' },
+  market_nasdaq: { short: 'NASDAQ', role: '성장주·AI 민감도', icon: Activity, group: 'risk' },
+  market_kospi: { short: 'KOSPI', role: '한국 경기·반도체 베타', icon: Globe2, group: 'risk' },
+  market_vix: { short: 'VIX', role: '옵션 내재 변동성', icon: Gauge, group: 'stress' },
+  market_usdkrw: { short: 'USD/KRW', role: '원화 포트폴리오 환율', icon: Landmark, group: 'fx' },
+  market_dollar: { short: '광의 달러', role: '글로벌 달러 긴축', icon: Landmark, group: 'fx' },
+  market_wti: { short: 'WTI', role: '공급충격·에너지 물가', icon: Waves, group: 'real' },
+  market_copper: { short: '구리', role: '글로벌 제조업 수요', icon: Coins, group: 'real' },
+}
+
+const signed = (value?: number | null) => value == null ? '—' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`
+const formatValue = (signal: RegimeSignal) => {
+  if (signal.value == null) return '—'
+  if (signal.id === 'market_usdkrw') return signal.value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })
+  if (signal.id === 'market_wti') return `$${signal.value.toFixed(1)}`
+  if (signal.id === 'market_copper') return `$${signal.value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+  return signal.value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })
+}
+
+function changeTone(value?: number | null, inverse = false) {
+  if (value == null || Math.abs(value) < 0.05) return 'text-muted-foreground'
+  const favorable = inverse ? value < 0 : value > 0
+  return favorable ? 'text-sky-300' : 'text-amber-300'
+}
+
+function MarketCard({ signal }: { signal: RegimeSignal }) {
+  const meta = META[signal.id]
+  if (!meta) return null
+  const Icon = meta.icon
+  const inverse = signal.id === 'market_vix' || signal.id === 'market_usdkrw' || signal.id === 'market_dollar'
+  return <Card className="bg-card/70">
+    <CardContent className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/20 bg-primary/[0.07] text-primary"><Icon className="h-4 w-4" /></div><div><p className="font-medium">{meta.short}</p><p className="mt-0.5 text-xs text-muted-foreground">{meta.role}</p></div></div>
+        <Badge variant="outline" className="font-normal text-muted-foreground">{signal.observation_date || '미수집'}</Badge>
+      </div>
+      <div className="mt-5 flex items-end justify-between gap-3"><p className="text-2xl font-semibold tabular-nums">{formatValue(signal)}</p><p className={`text-sm font-medium ${changeTone(signal.change_1m, inverse)}`}>1M {signed(signal.change_1m)}</p></div>
+      <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border/70 pt-3 text-xs"><div><span className="text-muted-foreground">3M </span><span className={changeTone(signal.change_3m, inverse)}>{signed(signal.change_3m)}</span></div><div><span className="text-muted-foreground">12M </span><span className={changeTone(signal.change_12m, inverse)}>{signed(signal.change_12m)}</span></div></div>
+    </CardContent>
+  </Card>
+}
+
+function normalizedTrend(signals: RegimeSignal[]) {
+  const selected = signals.filter(signal => ['market_sp500', 'market_nasdaq', 'market_kospi'].includes(signal.id) && (signal.history?.length || 0) > 1)
+  const rows = new Map<string, Record<string, string | number>>()
+  selected.forEach(signal => {
+    const history = signal.history || []
+    const base = history[0]?.value
+    if (!base) return
+    history.forEach(point => rows.set(point.date, { ...(rows.get(point.date) || { date: point.date }), [signal.id]: point.value / base * 100 }))
   })
+  return [...rows.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
+}
 
-  const getIndicatorInfo = (ticker: string) => {
-    switch (ticker) {
-      case '^KS11': return { description: '한국 종합주가지수' }
-      case '^GSPC': return { description: '미국 대형주 500개' }
-      case '^IXIC': return { description: '미국 기술주 중심' }
-      case '^VIX':  return { description: '시장 변동성/공포지수' }
-      case 'USDKRW=X': return { description: '달러당 원화' }
-      default: return { description: '' }
-    }
-  }
+export function MarketIndicators({ signals, fetchedAt }: Props) {
+  const available = signals.filter(signal => META[signal.id] && signal.value != null)
+  const trend = normalizedTrend(available)
+  const group = (name: string) => available.filter(signal => META[signal.id].group === name)
 
-  const getVixLevel = (price: number) => {
-    if (price < 15) return { level: '안정', color: 'text-green-500' }
-    if (price < 25) return { level: '보통', color: 'text-yellow-500' }
-    if (price < 35) return { level: '불안', color: 'text-orange-500' }
-    return { level: '공포', color: 'text-red-500' }
-  }
+  return <div className="space-y-6">
+    <div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className="text-xl font-semibold">시장 환경</h2><p className="mt-1 text-sm text-muted-foreground">레짐 DB 캐시를 사용해 자산가격, 스트레스, 달러와 실물 수요를 한 번에 봅니다.</p></div><div className="text-right text-xs text-muted-foreground"><p>외부 실시간 호출 없음</p><p className="mt-1">마지막 수집 {fetchedAt ? new Date(fetchedAt).toLocaleString('ko-KR') : '확인 불가'}</p></div></div>
 
-  const getGoldSilverRatioLevel = (ratio: number) => {
-    if (ratio < 60) return { level: '은 고평가', color: 'text-blue-500' }
-    if (ratio < 80) return { level: '적정', color: 'text-green-500' }
-    if (ratio < 90) return { level: '금 고평가', color: 'text-yellow-500' }
-    return { level: '금 극고평가', color: 'text-red-500' }
-  }
+    <Card><CardHeader><CardTitle>위험자산 상대 흐름</CardTitle><p className="text-sm text-muted-foreground">각 지수의 표시 구간 시작값을 100으로 환산합니다. 지수 간 절대 수준 비교가 아닙니다.</p></CardHeader><CardContent>{trend.length > 1 ? <div className="h-80"><ResponsiveContainer width="100%" height="100%"><LineChart data={trend} margin={{ top: 8, right: 18, bottom: 4, left: 4 }}><CartesianGrid stroke="hsl(var(--chart-grid))" strokeDasharray="3 5" vertical={false} /><XAxis dataKey="date" tickFormatter={value => String(value).slice(5).replace('-', '.')} minTickGap={52} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis width={46} domain={[(minimum: number) => Math.floor(minimum - 5), (maximum: number) => Math.ceil(maximum + 5)]} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={label => `관측일 ${label}`} contentStyle={{ background: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 8 }} /><Legend /><Line type="monotone" dataKey="market_sp500" name="S&P 500" stroke="#60a5fa" dot={false} strokeWidth={2} connectNulls isAnimationActive={false} /><Line type="monotone" dataKey="market_nasdaq" name="NASDAQ" stroke="#a78bfa" dot={false} strokeWidth={2} connectNulls isAnimationActive={false} /><Line type="monotone" dataKey="market_kospi" name="KOSPI" stroke="#2dd4bf" dot={false} strokeWidth={2} connectNulls isAnimationActive={false} /></LineChart></ResponsiveContainer></div> : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">정규화 차트를 만들 장기 시계열이 부족합니다.</div>}</CardContent></Card>
 
-  const getPerLevel = (per: number) => {
-    if (per < 15) return { level: '저평가', color: 'text-blue-500' }
-    if (per < 20) return { level: '적정', color: 'text-green-500' }
-    if (per < 25) return { level: '고평가', color: 'text-yellow-500' }
-    return { level: '버블주의', color: 'text-red-500' }
-  }
+    {[['risk', '주요 시장'], ['stress', '스트레스'], ['fx', '달러·환율'], ['real', '실물·공급충격']].map(([id, title]) => group(id).length ? <section key={id}><div className="mb-3 flex items-center gap-3"><h3 className="text-sm font-medium">{title}</h3><div className="h-px flex-1 bg-border/70" /></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{group(id).map(signal => <MarketCard key={signal.id} signal={signal} />)}</div></section> : null)}
 
-  const formatPrice = (price: number, ticker: string) => {
-    if (ticker === 'USDKRW=X') {
-      return `₩${price.toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    }
-    if (ticker === '^VIX') return price.toFixed(2)
-    return price.toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  }
-
-  if (isLoading) {
-    return (
-      <Card className="border-0 bg-gradient-to-br from-background to-muted/30">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Globe className="h-4 w-4" />
-            시장 현황
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="p-3 rounded-lg bg-muted/50 animate-pulse">
-                <div className="h-3 w-16 bg-muted rounded mb-2" />
-                <div className="h-5 w-20 bg-muted rounded mb-1" />
-                <div className="h-3 w-12 bg-muted rounded" />
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {[...Array(2)].map((_, i) => (
-              <div key={i} className="p-3 rounded-lg bg-muted/50 animate-pulse">
-                <div className="h-3 w-20 bg-muted rounded mb-2" />
-                <div className="h-5 w-24 bg-muted rounded mb-1" />
-                <div className="h-3 w-16 bg-muted rounded" />
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  const goldSilver: GoldSilverRatio | null = data?.gold_silver_ratio ?? null
-  const indexPer: IndexPer | null = data?.index_per ?? null
-
-  return (
-    <Card className="border-0 bg-gradient-to-br from-background to-muted/30 opacity-0 animate-slide-up" style={{ animationDelay: '200ms' }}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Globe className="h-4 w-4" />
-            시장 현황
-          </CardTitle>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="h-7 px-2"
-          >
-            <RefreshCw className={cn('h-3 w-3', isFetching && 'animate-spin')} />
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-
-        {/* 기존 지수 지표 */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          {data?.indicators.map((indicator) => {
-            const info = getIndicatorInfo(indicator.ticker)
-            const isVix = indicator.ticker === '^VIX'
-            const vixInfo = isVix ? getVixLevel(indicator.price) : null
-            const isPositive = indicator.change_rate >= 0
-
-            return (
-              <div
-                key={indicator.ticker}
-                className="p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {indicator.name}
-                  </span>
-                  {isVix ? (
-                    <Activity className={cn('h-3 w-3', vixInfo?.color)} />
-                  ) : isPositive ? (
-                    <TrendingUp className="h-3 w-3 text-red-500" />
-                  ) : (
-                    <TrendingDown className="h-3 w-3 text-blue-500" />
-                  )}
-                </div>
-                <div className="font-semibold text-sm">
-                  {formatPrice(indicator.price, indicator.ticker)}
-                </div>
-                <div className="flex items-center justify-between mt-1">
-                  {isVix ? (
-                    <span className={cn('text-xs font-medium', vixInfo?.color)}>
-                      {vixInfo?.level}
-                    </span>
-                  ) : (
-                    <span className={cn('text-xs', isPositive ? 'text-red-500' : 'text-blue-500')}>
-                      {isPositive ? '+' : ''}{indicator.change_rate.toFixed(2)}%
-                    </span>
-                  )}
-                  <span className="text-[10px] text-muted-foreground truncate ml-1">
-                    {info.description}
-                  </span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* 금/은 비율 + PER 섹션 */}
-        <div className="border-t border-muted/50 pt-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-
-            {/* 금/은 비율 */}
-            <div className="p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
-              <div className="flex items-center gap-1.5 mb-2">
-                <Scale className="h-3.5 w-3.5 text-yellow-500" />
-                <span className="text-xs font-medium text-muted-foreground">금/은 비율 (Gold/Silver Ratio)</span>
-              </div>
-              {goldSilver ? (
-                <>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-xl font-bold">{goldSilver.ratio.toFixed(1)}</span>
-                    <span className={cn('text-xs font-medium', getGoldSilverRatioLevel(goldSilver.ratio).color)}>
-                      {getGoldSilverRatioLevel(goldSilver.ratio).level}
-                    </span>
-                  </div>
-                  <div className="flex gap-3 mt-1.5 text-[10px] text-muted-foreground">
-                    <span>금 ${goldSilver.gold_price.toFixed(1)}</span>
-                    <span>은 ${goldSilver.silver_price.toFixed(2)}</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    금 1oz = 은 {goldSilver.ratio.toFixed(1)}oz · 역사적 평균 ~65
-                  </p>
-                </>
-              ) : (
-                <span className="text-xs text-muted-foreground">데이터 없음</span>
-              )}
-            </div>
-
-            {/* 주요 지수 PER */}
-            <div className="p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
-              <div className="flex items-center gap-1.5 mb-2">
-                <BarChart2 className="h-3.5 w-3.5 text-blue-500" />
-                <span className="text-xs font-medium text-muted-foreground">주요 지수 PER (Trailing)</span>
-              </div>
-              {indexPer ? (
-                <div className="grid grid-cols-3 gap-2">
-                  {(
-                    [
-                      { key: 'sp500', label: 'S&P 500' },
-                      { key: 'nasdaq', label: 'NASDAQ' },
-                      { key: 'kospi', label: 'KOSPI' },
-                    ] as { key: keyof IndexPer; label: string }[]
-                  ).map(({ key, label }) => {
-                    const entry = indexPer[key]
-                    const per = entry?.per
-                    const level = per ? getPerLevel(per) : null
-                    return (
-                      <div key={key} className="text-center">
-                        <div className="text-[10px] text-muted-foreground mb-0.5">{label}</div>
-                        {per != null ? (
-                          <>
-                            <div className="font-semibold text-sm">{per.toFixed(1)}x</div>
-                            <div className={cn('text-[10px] font-medium', level?.color)}>{level?.level}</div>
-                          </>
-                        ) : (
-                          <div className="text-[10px] text-muted-foreground">-</div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <span className="text-xs text-muted-foreground">데이터 없음</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {data?.timestamp && (
-          <p className="text-[10px] text-muted-foreground text-right">
-            마지막 업데이트: {new Date(data.timestamp).toLocaleTimeString('ko-KR')}
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  )
+    <p className="text-xs leading-5 text-muted-foreground">PER은 무료 자동 소스의 결측과 정의 불일치가 커서 제거했습니다. 밸류에이션은 신뢰 가능한 공시·운용사 계열을 확보한 뒤 별도 캐시로 복원합니다.</p>
+  </div>
 }
