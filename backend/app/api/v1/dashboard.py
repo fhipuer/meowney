@@ -18,11 +18,18 @@ from app.models.schemas import (
     GoalProgressResponse,
     ManualHistoryCreate,
     ManualHistoryResponse,
+    PortfolioResponse,
 )
 from app.services.asset_service import AssetService
 from app.services.finance_service import get_finance_service
 
 router = APIRouter()
+
+
+@router.get("/portfolio", response_model=PortfolioResponse)
+async def get_portfolio(db: SupabaseDep):
+    """기본 포트폴리오 정보를 조회한다."""
+    return await AssetService(db).get_portfolio()
 
 
 @router.get("/summary", response_model=DashboardSummary)

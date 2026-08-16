@@ -14,16 +14,15 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - DATABASE_URL=sqlite:////data/meowney.db
       - DEBUG=${DEBUG:-false}
       - SNAPSHOT_HOUR=${SNAPSHOT_HOUR:-23}
       - SNAPSHOT_MINUTE=${SNAPSHOT_MINUTE:-0}
       - TIMEZONE=${TIMEZONE:-Asia/Seoul}
       - DEFAULT_USD_KRW_RATE=${DEFAULT_USD_KRW_RATE:-1350}
     volumes:
-      - ./backend:/app
+      - ./data:/data
+      - ./backups:/backups
     networks:
       - meowney-network
     healthcheck:
@@ -42,9 +41,6 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
-    environment:
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000/api/v1}
-      - VITE_APP_NAME=${VITE_APP_NAME:-Meowney}
     depends_on:
       - meowney-backend
     networks:

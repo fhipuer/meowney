@@ -6,7 +6,7 @@ from decimal import Decimal
 from uuid import UUID
 from typing import Optional, Any
 
-from supabase import Client
+from app.db.sqlite_client import SQLiteClient
 
 from app.models.schemas import (
     AssetCreate,
@@ -27,7 +27,7 @@ class AssetService:
     DB 조회 및 비즈니스 로직 담당
     """
 
-    def __init__(self, db: Client):
+    def __init__(self, db: SQLiteClient):
         self.db = db
 
     async def _get_default_portfolio_id(self) -> UUID:

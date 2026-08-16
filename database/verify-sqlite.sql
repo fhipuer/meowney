@@ -1,0 +1,11 @@
+SELECT 'portfolios', COUNT(*) FROM portfolios;
+SELECT 'asset_categories', COUNT(*) FROM asset_categories;
+SELECT 'assets', COUNT(*) FROM assets;
+SELECT 'asset_history', COUNT(*) FROM asset_history;
+SELECT 'rebalance_plans', COUNT(*) FROM rebalance_plans;
+SELECT 'plan_allocations', COUNT(*) FROM plan_allocations;
+SELECT 'allocation_groups', COUNT(*) FROM allocation_groups;
+SELECT 'allocation_group_items', COUNT(*) FROM allocation_group_items;
+SELECT 'benchmark_history', COUNT(*) FROM benchmark_history;
+SELECT 'user_settings', COUNT(*) FROM user_settings;
+PRAGMA integrity_check;

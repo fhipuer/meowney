@@ -13,7 +13,7 @@ from app.api.v1.router import api_router
 from app.services.scheduler_service import start_scheduler, shutdown_scheduler
 
 # Windows 콘솔 인코딩 문제 해결
-if sys.platform == "win32":
+if sys.platform == "win32" and sys.stdout.isatty() and hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 

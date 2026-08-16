@@ -1,173 +1,153 @@
 # Meowney (먀우니) 🐱💰
 
-> 고양이 집사의 자산 배분 관리 및 일별 자산 추이 추적 대시보드
+> 개인 자산 포트폴리오, 일별 자산 추이와 리밸런싱을 한곳에서 관리하는 대시보드
 
-**버전**: 0.9.0
-
-## 개요
-
-Meowney는 개인 자산 포트폴리오를 관리하고, 일별 자산 추이를 추적하며, 리밸런싱을 계산해주는 귀여운 자산 관리 서비스입니다.
+**버전**: 0.10.0
 
 ## 주요 기능
 
-- **대시보드**: 총 자산, 수익률, 시장 현황 (USD/KRW 환율, 코스피, S&P 500) 한눈에 확인
-- **자산 관리**: 국내/해외 주식, ETF, 현금 등 다양한 자산 등록 및 실시간 시세 조회
-- **자산 추이**: 일별 자산 변동 그래프
-- **리밸런싱 계산기**: 목표 배분 비율 설정 및 리밸런싱 제안
-  - 허용 오차 비율 설정 가능
-  - 그룹별 배분 지원
-  - 플랜 저장/불러오기
-  - 실시간 파이차트 시각화
-  - 보유 자산 선택 UI
-- **자산배분 가이드**: 초보자를 위한 인터랙티브 투자 교육 (6탭, 퀴즈, 추천 포트폴리오)
+- 총자산, 수익률, 환율과 시장 지표 대시보드
+- 국내·해외 주식, ETF, 현금 등 자산 관리와 실시간 시세 조회
+- 일별 자산 스냅샷 및 기간별 추이 차트
+- 목표 비율과 5/25 밴드 기반 리밸런싱 제안
+- 개별 자산 및 그룹 배분 플랜
+- 과거 자산 데이터 수동 입력
+- 자산배분 가이드, 추천 포트폴리오와 투자 성향 퀴즈
+- 자산·플랜 데이터 JSON 가져오기/내보내기
+
+## 아키텍처
+
+```text
+Browser
+  └─ Nginx / React
+       └─ FastAPI
+            ├─ SQLite: 포트폴리오와 히스토리
+            ├─ yfinance: 현재가와 시장 데이터
+            └─ APScheduler: 일일 스냅샷
+```
+
+운영 DB는 NAS 영구 볼륨의 `data/meowney.db`입니다. 코드와 DB 마이그레이션만 Git으로
+관리하며 `.env`, DB와 백업 파일은 커밋하지 않습니다. SQLite는 WAL 모드로 실행되고,
+배포 전 online backup과 순차 마이그레이션을 수행합니다.
 
 ## 기술 스택
 
-### Frontend
-- React + TypeScript (Vite)
-- Tailwind CSS + shadcn/ui
-- TanStack Query + Zustand
-- Recharts
+- Frontend: React, TypeScript, Vite, Tailwind CSS, shadcn/ui, TanStack Query, Zustand, Recharts
+- Backend: Python 3.11+, FastAPI, Pydantic, yfinance, APScheduler
+- Database: SQLite, SQL migration runner
+- Deployment: Docker Compose, Synology NAS
 
-### Backend
-- Python 3.11+ / FastAPI
-- yfinance (실시간 주가)
-- APScheduler (일일 스냅샷)
-- Supabase (PostgreSQL)
+## 로컬 개발
 
-### DevOps
-- Docker & Docker Compose
-- Synology NAS 배포 지원
+### 환경 설정
 
-## 시작하기
-
-### 1. 환경 변수 설정
-
-```bash
-cp .env.example .env
-# .env 파일에 Supabase 정보 입력
+```powershell
+Copy-Item .env.example .env
 ```
 
-필수 환경변수:
-- `SUPABASE_URL`: Supabase 프로젝트 URL
-- `SUPABASE_ANON_KEY`: Supabase anon 키
+일반 실행에는 Supabase 설정이 필요하지 않습니다. `SUPABASE_URL`과
+`SUPABASE_ANON_KEY`는 기존 Supabase 데이터를 최초 이관할 때만 사용합니다.
 
-### 2. 데이터베이스 초기화
+### 백엔드
 
-[Supabase SQL Editor](https://app.supabase.com)에서 `database/schema.sql` 실행
-
-### 3. 로컬 개발
-
-```bash
-# 백엔드
+```powershell
 cd backend
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
+```
 
-# 프론트엔드
+SQLite DB가 없으면 `backend/data/meowney.db`가 생성되고 기본 포트폴리오·카테고리·설정이
+자동으로 준비됩니다.
+
+### 프론트엔드
+
+```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-### 4. Docker 배포
+- Frontend: http://localhost:5173
+- Backend: http://localhost:8000
+- API 문서: `DEBUG=true`일 때 http://localhost:8000/docs
 
-#### 로컬에서 빌드 & 실행
-```bash
-docker-compose up -d --build
+## Docker 실행
+
+```powershell
+docker compose up -d --build
+docker compose ps
 ```
 
-#### NAS/서버 배포 (이미지 전송 방식)
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000
+- Health check: http://localhost:8000/health
 
-1. 로컬에서 이미지 빌드 및 저장:
-```bash
-docker-compose build
-docker save meowney-meowney-backend meowney-meowney-frontend | gzip > meowney-images.tar.gz
+컨테이너를 교체해도 루트의 `data/`와 `backups/`는 유지됩니다.
+
+## 기존 Supabase 데이터 이관
+
+저장소 루트 `.env`에 Supabase URL과 anon key를 설정한 후 실행합니다.
+
+```powershell
+python backend/scripts/migrate_supabase.py all `
+  --output backups/supabase-backup-initial.json `
+  --database-url sqlite:///./data/meowney.db
 ```
 
-2. 서버로 파일 전송 후 이미지 로드:
-```bash
-docker load < meowney-images.tar.gz
+이관 도구는 Supabase를 읽기만 하고, 전체 JSON 백업을 만든 뒤 테이블별 레코드 수를
+검증하며 SQLite에 복원합니다. 자세한 내용은 [로컬 DB 운영 가이드](docs/local-database.md)를
+참고하세요.
+
+## 테스트와 빌드
+
+```powershell
+cd backend
+python -m pytest -q
+
+cd ../frontend
+npm ci
+npm run build
 ```
 
-3. 환경변수 설정 및 실행:
-```bash
-cp .env.example .env
-# .env 파일 수정
-docker-compose up -d
+## NAS 운영 배포
+
+운영 환경은 Synology DS220+이며 소스 아카이브를 SSH로 전송한 뒤 NAS에서 이미지를
+빌드합니다. 기본 브랜치는 `main`입니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/deploy-to-nas.ps1
 ```
 
-자세한 배포 가이드는 [deploy/README.md](deploy/README.md) 참고
+배포 스크립트는 `main` 및 clean worktree 확인, DB·코드 백업, SHA-256 검증, 이미지 빌드,
+DB 마이그레이션, 컨테이너 교체와 health check를 수행합니다. 운영 배포 전에는 반드시
+[NAS 운영 배포 런북](deploy/NAS_RUNBOOK.md)을 확인하세요.
 
-## 접속 주소
+## 데이터 백업
 
-### 로컬 개발
-- 프론트엔드: http://localhost:5173
-- 백엔드 API: http://localhost:8000
-- API 문서 (Swagger): http://localhost:8000/docs
+```powershell
+docker compose run --rm meowney-backend python scripts/backup_sqlite.py `
+  --source /data/meowney.db `
+  --destination /backups/meowney-manual.db
+```
 
-### Docker 배포 (로컬)
-- 프론트엔드: http://localhost:3000
-- 백엔드 API: http://localhost:8000
+NAS 내부 백업만으로는 장치 고장에 대비할 수 없으므로 `backups/`를 다른 장치나
+클라우드에도 주기적으로 복제하는 것을 권장합니다.
 
-### NAS 배포 (외부 접속)
-- 포트포워딩 설정 후 외부 도메인으로 접속 가능
-- 예: http://your-domain.synology.me:3000
+## 프로젝트 문서
 
-## 스크린샷
+- [NAS 운영 배포 런북](deploy/NAS_RUNBOOK.md)
+- [SQLite 운영 및 Supabase 이관](docs/local-database.md)
+- [기능 명세](docs/FEATURE_SPEC.md)
+- [디자인 가이드](DESIGN.md)
 
-| 대시보드 | 리밸런싱 |
-|---------|---------|
-| 자산 현황, 시장 지표, 추이 차트 | 목표 배분 설정 및 리밸런싱 제안 |
+## v0.10.0 주요 변경
 
-## 버전 히스토리
-
-### v0.8.0 (2026-02-01)
-- 자산배분 가이드 페이지 풀 인터랙티브 리디자인
-  - 6탭 확장 (기초이론, 자산군, 리밸런싱, 활용법, 추천 포트폴리오, 투자 성향 퀴즈)
-  - Recharts 기반 시각화 (도넛, 레이더, 바, 복리 성장 차트)
-  - 투자 성향 퀴즈 및 추천 포트폴리오
-  - 비상자금 경고, ETF 설명, 수익률 면책 문구
-  - 모바일 대응 개선
-
-### v0.7.2 (2026-01-19)
-- 리밸런싱 그룹 계산 버그 수정 (name 폴백 매칭, UUID 키 통일)
-
-### v0.7.1 (2026-01-18)
-- 분석 탭 제거
-- USD 자산 달러 표시 수정
-
-### v0.7.0 (2026-01-18)
-- 계산 로직 일원화 (USD 환율 통일, 레거시 리밸런싱 API 제거)
-
-### v0.6.1 (2026-01-18)
-- 벤치마크 제거
-- 투자원금 표시 개선
-
-### v0.6.0 (2026-01-18)
-- 자산 추이 차트 개선
-- 기간 선택 기능
-- 과거 데이터 입력
-
-### v0.5.1
-- 버그 수정
-
-### v0.5.0 (2026-01-18)
-- Docker 배포 지원 (Synology NAS)
-- 외부 접속 설정 (포트포워딩, DDNS)
-- UI 개선: 환율 표시 정리, 차트 Y축 수정, 허용 오차 입력
-- 배포 스크립트 (start.sh, stop.sh, update.sh, logs.sh)
-
-### v0.4.0 (2026-01-17)
-- 리밸런싱 플랜 시스템 (그룹/개별 배분)
-- 실시간 파이차트 시각화
-- 보유 자산 선택 모달
-- localStorage 자동 저장/복구
-
-### v0.3.0 (2026-01-16)
-- 대시보드 시장 현황 (KOSPI, S&P500, VIX, USD/KRW)
-- 자산 추이 차트
-- 리밸런싱 계산기
+- 운영 DB를 Supabase에서 NAS 내장 SQLite로 전환
+- Supabase 전체 데이터 읽기 전용 백업 및 검증 이관 도구 추가
+- SQLite WAL, 인덱스, 순차 DB 마이그레이션 적용
+- 배포 전 SQLite online backup과 코드 snapshot 적용
+- NAS 소스 전송·빌드·health check 자동화
+- Docker build context 최적화
 
 ## 라이선스
 

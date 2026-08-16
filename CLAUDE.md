@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Backend (Python)
 - **FastAPI** + **Pydantic v2** + **uvicorn**
-- **Supabase** Python client (PostgreSQL)
+- **SQLite** 로컬 영구 DB (Supabase SDK는 최초 이관 도구 전용)
 - **yfinance** - 실시간 주가 조회
 - **APScheduler** - 매일 23:00 자산 스냅샷
 
@@ -34,8 +34,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Recharts** - 차트 시각화
 
 ### Database
-- **Supabase** (PostgreSQL)
-- 스키마: `database/schema.sql`
+- **SQLite** (`data/meowney.db`, Git 제외)
+- 마이그레이션: `backend/app/db/migrations/`
 
 ## 주요 명령어
 
@@ -80,14 +80,15 @@ services/
   asset_service.py     # 자산 CRUD, 요약 계산, 리밸런싱
   scheduler_service.py # APScheduler 일일 스냅샷
 db/
-  supabase.py    # Supabase 클라이언트 싱글톤
+  supabase.py    # 하위 호환 DB 클라이언트 진입점
+  sqlite_client.py # SQLite 쿼리/마이그레이션 클라이언트
 models/
   schemas.py     # Pydantic 스키마 (Request/Response)
 ```
 
 ### 데이터 흐름
 1. API 요청 → `assets.py` / `dashboard.py`
-2. `AssetService` → Supabase 조회
+2. `AssetService` → SQLite 조회
 3. `FinanceService` → yfinance로 현재가 조회 (ThreadPoolExecutor)
 4. 응답에 `market_value`, `profit_rate` 등 계산 필드 포함
 
@@ -98,9 +99,11 @@ models/
 
 ## 환경 변수
 
-필수:
-- `SUPABASE_URL`, `SUPABASE_ANON_KEY` - Supabase 연결
-- `VITE_API_URL` - 프론트엔드 API 주소
+운영 기본값:
+- `DATABASE_URL` - 기본값 `sqlite:///./data/meowney.db`
+
+최초 이관 시에만:
+- `SUPABASE_URL`, `SUPABASE_ANON_KEY`
 
 선택:
 - `SNAPSHOT_HOUR`, `SNAPSHOT_MINUTE` - 스냅샷 시간 (기본 23:00)
@@ -189,22 +192,22 @@ types/
 ## 커스텀 스킬
 
 ### /deploy - NAS 배포
-NAS에 Docker 이미지를 빌드하고 배포합니다.
+사용자가 운영 배포를 명시적으로 요청한 경우 `deploy/NAS_RUNBOOK.md`를 완전히 읽고 따른다.
+기본 브랜치는 `main`이며 NAS에는 Git이 없으므로 로컬 소스를 전송해 NAS에서 이미지를 빌드한다.
 
-```bash
-# Git Bash에서 실행
-./deploy/deploy-to-nas.sh
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/deploy-to-nas.ps1
 ```
 
 **배포 단계:**
-1. Docker 이미지 빌드 (`docker-compose build`)
-2. 이미지 압축 (`meowney-images.tar.gz`)
-3. SCP로 NAS 업로드
-4. SSH로 NAS에서 `update.sh` 실행
+1. 로컬 `main`, clean worktree, 테스트 확인
+2. SQLite 및 코드 백업
+3. 검증된 소스 아카이브 전송
+4. NAS에서 Docker 이미지 빌드, 마이그레이션, 재시작, health check
 
 **NAS 정보:**
 - Host: 192.168.0.9:1024
-- Path: `/volume1/homes/fhipuer/meowney/`
+- Path: `/var/services/homes/fhipuer/meowney/`
 
 ## 개발 규칙
 

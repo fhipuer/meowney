@@ -10,8 +10,9 @@ class Settings(BaseSettings):
     """앱 설정 - 환경변수에서 자동으로 읽어옴"""
 
     # Supabase 설정
-    supabase_url: str
-    supabase_anon_key: str
+    database_url: str = "sqlite:///./data/meowney.db"
+    supabase_url: str | None = None
+    supabase_anon_key: str | None = None
     supabase_service_role_key: str | None = None
 
     # 앱 설정

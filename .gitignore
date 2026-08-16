@@ -54,3 +54,9 @@ Thumbs.db
 # Local development
 *.local
 .runtime/
+data/
+backups/
+*.db
+*.db-shm
+*.db-wal
+supabase-backup-*.json
