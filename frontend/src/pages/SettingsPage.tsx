@@ -2,7 +2,7 @@
  * 설정 페이지 냥~ 🐱
  */
 import { useState, useRef, useEffect } from 'react'
-import { Moon, Sun, Eye, EyeOff, Download, Upload, FileJson, Loader2, Plus, Trash2, History, Calendar, Scale } from 'lucide-react'
+import { Eye, EyeOff, Download, Upload, FileJson, Loader2, Plus, Trash2, History, Calendar, Scale } from 'lucide-react'
 import { APP_VERSION } from '@/lib/version'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,7 @@ import { formatKRW, formatDate } from '@/lib/utils'
 import type { ManualHistoryEntry } from '@/types'
 
 export function SettingsPage() {
-  const { isDarkMode, toggleDarkMode, isPrivacyMode, togglePrivacyMode } = useStore()
+  const { isPrivacyMode, togglePrivacyMode } = useStore()
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [importMessage, setImportMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -202,33 +202,6 @@ export function SettingsPage() {
           화면, 개인정보 보호와 데이터 관리 방식을 설정합니다.
         </p>
       </div>
-
-      {/* 테마 설정 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>테마</CardTitle>
-          <CardDescription>
-            화면 테마를 설정하세요
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {isDarkMode ? (
-                <Moon className="h-5 w-5" />
-              ) : (
-                <Sun className="h-5 w-5" />
-              )}
-              <Label>
-                {isDarkMode ? '다크 모드' : '라이트 모드'}
-              </Label>
-            </div>
-            <Button variant="outline" onClick={toggleDarkMode}>
-              {isDarkMode ? '라이트 모드로 전환' : '다크 모드로 전환'}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* 프라이버시 설정 냥~ */}
       <Card>
@@ -563,7 +536,7 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded bg-[#171a20] text-xl font-medium text-white dark:bg-white dark:text-[#171a20]">
+            <div className="flex h-16 w-16 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-xl font-semibold text-primary">
               M
             </div>
             <div>

@@ -1,7 +1,6 @@
 import { NavLink } from 'react-router-dom'
-import { Activity, BarChart3, Briefcase, Moon, Scale, Settings, Sun, Target } from 'lucide-react'
+import { Activity, BarChart3, Briefcase, Scale, Settings, Target } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
 import { APP_VERSION } from '@/lib/version'
 
@@ -14,13 +13,12 @@ const navigation = [
 ]
 
 export function Header() {
-  const { isDarkMode, toggleDarkMode } = useStore()
   return (
     <>
-      <header className="sticky top-0 z-50 border-b border-border/70 bg-background/92 backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-border/80 bg-background/88 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-[1440px] items-center px-5 md:px-8">
           <NavLink to="/" className="flex items-center gap-3" aria-label="Meowney 홈">
-            <div className="flex h-8 w-8 items-center justify-center rounded bg-[#171a20] text-[13px] font-medium text-white dark:bg-white dark:text-[#171a20]">M</div>
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-[13px] font-semibold text-primary">M</div>
             <span className="text-[17px] font-medium tracking-[-0.01em]">Meowney</span>
             <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground" aria-label={`버전 ${APP_VERSION}`}>
               v{APP_VERSION}
@@ -44,9 +42,6 @@ export function Header() {
           </nav>
 
           <div className="ml-auto flex items-center gap-1">
-            <Button variant="ghost" size="icon" onClick={toggleDarkMode} title={isDarkMode ? '라이트 모드' : '다크 모드'}>
-              {isDarkMode ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
-            </Button>
             <Button variant="ghost" size="icon" asChild>
               <NavLink to="/settings" aria-label="설정"><Settings className="h-[18px] w-[18px]" /></NavLink>
             </Button>

@@ -6,7 +6,7 @@ import { Header } from './Header'
 
 export function Layout() {
   return (
-    <div className="min-h-screen bg-[#f7f7f7] dark:bg-background">
+    <div className="min-h-screen bg-background">
       <Header />
       <main className="min-h-[calc(100vh-4rem)] pb-20 md:pb-0">
         <div className="container max-w-[1280px] px-4 py-7 sm:px-6 md:px-8 md:py-10">

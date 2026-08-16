@@ -46,15 +46,15 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
       : "판정 불가";
   const environment = `${data.macro_quadrant.growth_level?.label || "성장 판정 불가"} · 물가 ${data.macro_quadrant.inflation_level?.label || "판정 불가"} / 최근 압력 ${pressure?.direction || legacyDirection}`;
   return (
-    <Card className={data.needs_new_review ? "border-red-300" : ""}>
+    <Card className={data.needs_new_review ? "border-red-400/50" : ""}>
       <CardContent className="p-7">
         <div className="grid gap-6 lg:grid-cols-[minmax(280px,1.5fr)_repeat(3,minmax(150px,1fr))]">
           <div className="flex gap-4">
             {calm ? (
-              <CheckCircle2 className="mt-1 h-7 w-7 shrink-0 text-emerald-600" />
+              <CheckCircle2 className="mt-1 h-7 w-7 shrink-0 text-emerald-400" />
             ) : (
               <AlertTriangle
-                className={`mt-1 h-7 w-7 shrink-0 ${data.needs_new_review ? "text-red-600" : "text-amber-500"}`}
+                className={`mt-1 h-7 w-7 shrink-0 ${data.needs_new_review ? "text-red-400" : "text-amber-400"}`}
               />
             )}
             <div>
@@ -137,7 +137,7 @@ function DriverList({
               <span>{item.name}</span>
               <span
                 className={
-                  item.weighted_z > 0 ? "text-orange-600" : "text-blue-600"
+                  item.weighted_z > 0 ? "text-amber-300" : "text-sky-300"
                 }
               >
                 {item.weighted_z > 0 ? positive : negative} ·{" "}
@@ -193,9 +193,9 @@ function EvidencePanel({ data }: { data: RegimeCurrent }) {
             </p>
           )}
           {data.data_quality.status !== "충분" && (
-            <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:bg-amber-950/10">
+            <div className="mt-5 rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-4">
               <div className="flex gap-2">
-                <Database className="mt-0.5 h-4 w-4 text-amber-600" />
+                <Database className="mt-0.5 h-4 w-4 text-amber-300" />
                 <div>
                   <p className="text-sm font-medium">판단 범위 제한</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">

@@ -20,10 +20,10 @@ const DOMAIN_TABS = [
   { id: 'liquidity', label: '유동성·신용' },
 ]
 const levelClass: Record<string, string> = {
-  유지: 'bg-emerald-100 text-emerald-800', 경계: 'bg-amber-100 text-amber-800',
-  약화: 'bg-orange-100 text-orange-800', 전환: 'bg-red-100 text-red-800',
-  강함: 'bg-emerald-100 text-emerald-800', 중립: 'bg-slate-100 text-slate-700',
-  둔화: 'bg-amber-100 text-amber-800', '데이터 없음': 'bg-slate-100 text-slate-700',
+  유지: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300', 경계: 'border-amber-400/25 bg-amber-400/10 text-amber-300',
+  약화: 'border-orange-400/25 bg-orange-400/10 text-orange-300', 전환: 'border-red-400/25 bg-red-400/10 text-red-300',
+  강함: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300', 중립: 'border-slate-400/20 bg-slate-400/10 text-slate-300',
+  둔화: 'border-amber-400/25 bg-amber-400/10 text-amber-300', '데이터 없음': 'border-slate-400/20 bg-slate-400/10 text-slate-400',
 }
 const urgencyLabel: Record<ReviewUrgency, string> = {
   required: '지금 상세 점검 필요', watch: '관찰 필요', not_needed: '상세 점검 불필요',

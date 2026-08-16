@@ -113,12 +113,12 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
       <CardContent className="pt-3">
         {available ? (
           <>
-            <div className="mx-auto w-full max-w-[620px] overflow-hidden rounded-lg border bg-muted/10">
+            <div className="mx-auto w-full max-w-[620px] overflow-hidden rounded-lg border border-border/80 bg-[#0b111b]">
               <svg
                 viewBox={`0 0 ${SIZE} ${SIZE}`}
                 role="img"
                 aria-label={`현재 환경 ${environment}. 최근 압력 ${vector?.direction || "판정 불가"}`}
-                className="h-auto w-full text-foreground"
+                className="h-auto w-full text-foreground [&_text]:fill-current"
               >
                 <defs>
                   <marker
@@ -129,7 +129,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                     refY="4"
                     orient="auto"
                   >
-                    <path d="M0,0 L8,4 L0,8 Z" fill="#2563eb" />
+                    <path d="M0,0 L8,4 L0,8 Z" fill="hsl(var(--info))" />
                   </marker>
                 </defs>
                 <rect
@@ -137,35 +137,35 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   y={PAD}
                   width={PLOT / 2}
                   height={PLOT / 2}
-                  fill="#fef2f2"
-                  opacity="0.55"
+                  fill="hsl(0 62% 42%)"
+                  opacity="0.13"
                 />
                 <rect
                   x={SIZE / 2}
                   y={PAD}
                   width={PLOT / 2}
                   height={PLOT / 2}
-                  fill="#fff7ed"
-                  opacity="0.55"
+                  fill="hsl(35 72% 42%)"
+                  opacity="0.12"
                 />
                 <rect
                   x={PAD}
                   y={SIZE / 2}
                   width={PLOT / 2}
                   height={PLOT / 2}
-                  fill="#eff6ff"
-                  opacity="0.55"
+                  fill="hsl(214 62% 40%)"
+                  opacity="0.11"
                 />
                 <rect
                   x={SIZE / 2}
                   y={SIZE / 2}
                   width={PLOT / 2}
                   height={PLOT / 2}
-                  fill="#ecfdf5"
-                  opacity="0.55"
+                  fill="hsl(166 62% 34%)"
+                  opacity="0.11"
                 />
                 {[-50, 0, 50].map((value) => (
-                  <g key={value} opacity="0.22">
+                  <g key={value} opacity="0.32">
                     <line
                       x1={x(value)}
                       x2={x(value)}
@@ -236,7 +236,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                     y1={startY}
                     x2={endpoint.x}
                     y2={endpoint.y}
-                    stroke="#2563eb"
+                    stroke="hsl(var(--info))"
                     strokeWidth="5"
                     strokeDasharray="7 5"
                     opacity="0.72"
@@ -247,8 +247,8 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   cx={startX}
                   cy={startY}
                   r="10"
-                  fill="#111827"
-                  stroke="white"
+                  fill="hsl(var(--foreground))"
+                  stroke="hsl(var(--background))"
                   strokeWidth="3"
                 />
                 <text
