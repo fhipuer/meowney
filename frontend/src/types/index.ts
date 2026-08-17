@@ -488,6 +488,7 @@ export interface RegimeSignal {
   unit?: string;
   source: string;
   frequency?: string;
+  direction?: "up_good" | "up_bad" | "neutral";
   observation_date?: string;
   fetched_at?: string;
   value?: number;
@@ -500,11 +501,23 @@ export interface RegimeSignal {
   history?: { date: string; value: number }[];
   display_period?: string;
   display_metrics?: { label: string; value: number; unit: string; kind: string }[];
+  decision_chart?: {
+    title: string;
+    unit: string;
+    series: Array<{ key: string; label: string }>;
+    points: Array<Record<string, string | number>>;
+    reference_lines: Array<{ value: number; label: string }>;
+  } | null;
   decision_role?: "core" | "corroborative" | "context";
   usage?: "regime" | "trigger" | "display";
   available_from?: string | null;
   release_date?: string | null;
   vintage_kind?: string;
+  vintage_history_available?: boolean;
+  is_stale?: boolean;
+  age_days?: number | null;
+  max_age_days?: number;
+  usable_for_decision?: boolean;
 }
 
 export type ReviewUrgency = "required" | "watch" | "not_needed";
@@ -551,6 +564,7 @@ export interface RegimeCurrent {
   } | null;
   changes_since_snapshot: string[];
   cache_age_hours: number | null;
+  newest_cache_age_hours?: number | null;
   is_stale: boolean;
   upcoming_events: Array<{
     id: string;
@@ -567,6 +581,8 @@ export interface RegimeCurrent {
     reason: string;
     coverage: number;
     methodology: string;
+    as_of_range?: { from: string | null; to: string | null };
+    period_alignment?: "company_fiscal_quarter";
     companies: Array<{
       id: string;
       name: string;
@@ -574,7 +590,14 @@ export interface RegimeCurrent {
       latest_capex: number | null;
       yoy: number | null;
       ttm: number | null;
-      history: Array<{ period: string; value: number }>;
+      age_days?: number | null;
+      is_stale?: boolean;
+      history: Array<{
+        period: string;
+        value: number;
+        derivation?: string;
+        source_accessions?: string[];
+      }>;
       fetch_status: { status: string; last_success_at?: string } | null;
     }>;
   };
@@ -598,6 +621,11 @@ export interface RegimeCurrent {
       price_low: number | null;
       price_average: number;
       change_percent: number | null;
+      currency?: string;
+      price_basis?: string;
+      age_days?: number;
+      max_age_days?: number;
+      is_stale?: boolean;
       history: Array<{ observation_date: string; price_average: number; change_percent: number | null }>;
     }>;
   };
@@ -623,7 +651,11 @@ export interface RegimeCurrent {
     completed_at: string;
     note: string | null;
     trigger_state: Record<string, string>;
+    assessment_fingerprint?: string | null;
+    candidate_regime?: RegimeLevel | null;
+    urgency?: ReviewUrgency | null;
   } | null;
+  assessment_fingerprint?: string;
   rule_version: string;
   macro_quadrant: {
     version: string;
@@ -689,10 +721,27 @@ export interface RegimeCurrent {
     overall_coverage: number;
     reasons: string[];
     stale: Array<{ id: string; name: string; observation_date?: string }>;
+    auxiliary_stale: Array<{
+      id: string;
+      name: string;
+      observation_date?: string;
+    }>;
     unavailable: string[];
+    scope: "us_macro_decision_inputs";
     observation_range: { from: string | null; to: string | null };
     last_fetched_at: string | null;
   };
+  feed_health: Record<
+    "macro" | "events" | "ai_capex" | "memory",
+    {
+      source: string;
+      status: string;
+      last_attempted_at?: string | null;
+      last_success_at?: string | null;
+      item_count?: number;
+      error?: string | null;
+    } | null
+  >;
 }
 
 export interface MacroMomentumAxis {
@@ -754,6 +803,11 @@ export interface RegimeSnapshot {
   macro_quadrant?: RegimeCurrent["macro_quadrant"];
   ai_capex?: RegimeCurrent["ai_capex"];
   memory_cycle?: RegimeCurrent["memory_cycle"];
+  input_fingerprint?: string | null;
+  assessment_fingerprint?: string | null;
+  snapshot_schema_version?: string;
+  raw_data_available?: boolean;
+  feed_health?: RegimeCurrent["feed_health"];
 }
 
 // ============================================

@@ -4,6 +4,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { InfoTip } from "@/components/ui/info-tip";
+import {
+  TONE_STYLES,
+  aiCapexDeltaTone,
+  aiCapexTone,
+  availabilityTone,
+  dataQualityTone,
+  financialConditionTone,
+  memoryPriceTone,
+  regimeLevelTone,
+  type SemanticTone,
+} from "@/lib/regime-tone";
 import { MacroQuadrant } from "./MacroQuadrant";
 import type { RegimeCurrent, RegimeLevel } from "@/types";
 
@@ -22,10 +33,13 @@ const signed = (value: number | null | undefined, digits = 1) =>
 
 function DecisionHeader({ data }: { data: RegimeCurrent }) {
   const limited = data.data_quality.status !== "충분";
+  const eventFeedAvailable = data.feed_health?.events?.status === "success";
   const title = data.needs_new_review
     ? "지금 다시 상세점검하세요"
     : data.review_urgency === "watch"
-      ? "다음 발표까지 관찰하세요"
+      ? eventFeedAvailable
+        ? "다음 발표까지 관찰하세요"
+        : "관찰을 유지하세요"
       : "새 상세점검 사유 없음";
   const detail = data.needs_new_review
     ? data.review_reasons[0] || "중요 임계조건이 충족됐습니다."
@@ -43,6 +57,16 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
       ? `${legacyPoint.growth.coordinate <= -15 ? "성장 둔화" : legacyPoint.growth.coordinate >= 15 ? "성장 개선" : "성장 변화 미미"}·${legacyPoint.inflation.coordinate <= -15 ? "물가 완화" : legacyPoint.inflation.coordinate >= 15 ? "물가 재가속" : "물가 변화 미미"}`
       : "판정 불가";
   const environment = `${data.macro_quadrant.growth_level?.label || "성장 판정 불가"} · 물가 ${data.macro_quadrant.inflation_level?.label || "판정 불가"} / 최근 압력 ${pressure?.direction || legacyDirection}`;
+  const macroCoverage = Object.values(data.coverage.domains).reduce(
+    (result, item) => ({
+      usable: result.usable + item.usable,
+      total: result.total + item.total,
+    }),
+    { usable: 0, total: 0 },
+  );
+  const automaticTone = regimeLevelTone(data.automatic_regime);
+  const candidateTone = regimeLevelTone(data.candidate_regime);
+  const qualityTone = dataQualityTone(data.data_quality.status);
   return (
     <Card className={data.needs_new_review ? "border-red-400/50" : ""}>
       <CardContent className="p-7">
@@ -71,12 +95,16 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
             </div>
           </div>
           <div className="rounded-lg bg-muted/25 p-4">
-            <p className="text-xs text-muted-foreground">확정 거시 상태</p>
-            <p className="mt-2 text-xl font-semibold">
+            <p className="text-xs text-muted-foreground">확정 점검 레짐</p>
+            <p className={`mt-2 text-xl font-semibold ${TONE_STYLES[automaticTone].text}`}>
               {data.automatic_regime}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              현재 후보 {data.candidate_regime} · 미국 거시 전용
+              현재 후보{" "}
+              <span className={TONE_STYLES[candidateTone].text}>
+                {data.candidate_regime}
+              </span>{" "}
+              · 자동 매매 아님
             </p>
           </div>
           <div className="rounded-lg bg-muted/25 p-4">
@@ -101,11 +129,11 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
                 범위 안에 있는 비율입니다. 예측 정확도나 빈티지 완결도는 아닙니다.
               </InfoTip>
             </div>
-            <p className="mt-2 text-xl font-semibold">
+            <p className={`mt-2 text-xl font-semibold ${TONE_STYLES[qualityTone].text}`}>
               {data.data_quality.status}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              핵심지표 사용 가능 {data.signals.filter((item) => item.status !== "unavailable").length}/{data.signals.length}
+              미국 판정입력 {macroCoverage.usable}/{macroCoverage.total}
             </p>
           </div>
         </div>
@@ -129,22 +157,28 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
       tone:
         trigger.severity === "critical"
           ? ("destructive" as const)
-          : ("secondary" as const),
+          : ("warning" as const),
     })),
     ...(data.changes_since_snapshot || []).map((text, index) => ({
       key: `change-${index}`,
       label: "상태 변화",
       text,
-      tone: "outline" as const,
+      tone: "info" as const,
     })),
     ...(data.data_quality.status !== "충분"
       ? data.data_quality.reasons.map((text, index) => ({
           key: `quality-${index}`,
           label: "데이터",
           text,
-          tone: "outline" as const,
+          tone: "warning" as const,
         }))
       : []),
+    ...(data.data_quality.auxiliary_stale || []).map((item) => ({
+      key: `aux-stale-${item.id}`,
+      label: "보조자료 오래됨",
+      text: `${item.name}: 최신 관측 ${item.observation_date || "미확인"}`,
+      tone: "warning" as const,
+    })),
   ].slice(0, 3);
   return (
     <Card>
@@ -190,6 +224,7 @@ function UpcomingEvents({ data }: { data: RegimeCurrent }) {
     inflation: "물가",
     rates: "금리",
   };
+  const feed = data.feed_health?.events;
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -203,7 +238,14 @@ function UpcomingEvents({ data }: { data: RegimeCurrent }) {
         </div>
       </CardHeader>
       <CardContent>
-        {data.upcoming_events.length ? (
+        {feed?.status === "failed" ? (
+          <div className="rounded-lg border border-amber-400/25 bg-amber-400/[0.06] p-4">
+            <p className="text-sm font-medium text-amber-200">발표 일정 동기화 실패</p>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              기존 일정만 표시할 수 있습니다. {feed.error || "BLS 원본 응답을 확인하지 못했습니다."}
+            </p>
+          </div>
+        ) : data.upcoming_events.length ? (
           <div className="grid gap-3 md:grid-cols-2">
             {data.upcoming_events.slice(0, 2).map((event) => (
               <a
@@ -230,7 +272,9 @@ function UpcomingEvents({ data }: { data: RegimeCurrent }) {
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            발표 일정을 아직 동기화하지 않았습니다. 데이터 새로고침으로 불러올 수 있습니다.
+            {feed?.status === "success"
+              ? "현재 동기화된 향후 주요 발표 일정이 없습니다."
+              : "발표 일정을 아직 동기화하지 않았습니다. 데이터 새로고침으로 불러올 수 있습니다."}
           </p>
         )}
       </CardContent>
@@ -243,11 +287,15 @@ function DriverList({
   contributors,
   positive,
   negative,
+  positiveClass,
+  negativeClass,
 }: {
   title: string;
   contributors: Array<{ id: string; name: string; weighted_z: number }>;
   positive: string;
   negative: string;
+  positiveClass: string;
+  negativeClass: string;
 }) {
   return (
     <div>
@@ -262,7 +310,7 @@ function DriverList({
               <span>{item.name}</span>
               <span
                 className={
-                  item.weighted_z > 0 ? "text-amber-300" : "text-sky-300"
+                  item.weighted_z > 0 ? positiveClass : negativeClass
                 }
               >
                 {item.weighted_z > 0 ? positive : negative} ·{" "}
@@ -302,12 +350,16 @@ function EvidencePanel({ data }: { data: RegimeCurrent }) {
             contributors={current?.growth.contributors || []}
             positive="강세 기여"
             negative="약세 기여"
+            positiveClass="text-emerald-300"
+            negativeClass="text-amber-300"
           />
           <DriverList
             title="인플레이션 모멘텀"
             contributors={current?.inflation.contributors || []}
             positive="상승압력 기여"
             negative="완화압력 기여"
+            positiveClass="text-amber-300"
+            negativeClass="text-sky-300"
           />
         </CardContent>
       </Card>
@@ -345,6 +397,7 @@ function FinancialTransmission({ data }: { data: RegimeCurrent }) {
       `Fed ${conditions?.policy.fed_funds?.toFixed(2) ?? "-"}% / Core PCE YoY ${conditions?.policy.core_pce_yoy?.toFixed(2) ?? "-"}% / 실질 정책금리 ${signed(conditions?.policy.real_policy_rate, 2)}%p`,
       `${data.coverage.domains.rates.status} ${Math.round(data.coverage.domains.rates.coverage * 100)}%`,
       countRateRules(true),
+      financialConditionTone(conditions?.policy.label),
     ],
     [
       "장기금리 전달",
@@ -354,6 +407,7 @@ function FinancialTransmission({ data }: { data: RegimeCurrent }) {
         ? `20일 ${data.rate_decomposition.driver} · 명목 ${signed(data.rate_decomposition.nominal_change, 2)}%p`
         : "변화 분해 자료 부족",
       countRateRules(false),
+      financialConditionTone(conditions?.long_rates.label),
     ],
     [
       "신용·금융여건",
@@ -361,8 +415,9 @@ function FinancialTransmission({ data }: { data: RegimeCurrent }) {
       `HY ${conditions?.credit.hy_oas?.toFixed(2) ?? "-"}%p / IG ${conditions?.credit.ig_oas?.toFixed(2) ?? "-"}%p / NFCI ${conditions?.credit.nfci?.toFixed(2) ?? "-"}`,
       `${data.coverage.domains.liquidity.status} ${Math.round(data.coverage.domains.liquidity.coverage * 100)}%`,
       count("liquidity"),
+      financialConditionTone(conditions?.credit.label),
     ],
-  ] as Array<[string, string, string, string, number]>;
+  ] as Array<[string, string, string, string, number, SemanticTone]>;
   return (
     <Card>
       <CardHeader>
@@ -377,13 +432,13 @@ function FinancialTransmission({ data }: { data: RegimeCurrent }) {
       <CardContent>
         <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))]">
           {cards.map((card) => (
-            <div key={card[0]} className="rounded-lg border bg-muted/15 p-5">
+            <div key={card[0]} className={`rounded-lg border bg-muted/15 p-5 ${TONE_STYLES[card[5]].panel}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium text-muted-foreground">{card[0]}</p>
-                  <p className="mt-2 text-lg font-semibold">{card[1]}</p>
+                  <p className={`mt-2 text-lg font-semibold ${TONE_STYLES[card[5]].text}`}>{card[1]}</p>
                 </div>
-                {card[4] > 0 && <Badge variant="destructive">활성 {card[4]}</Badge>}
+                {card[4] > 0 && <Badge variant="danger">활성 {card[4]}</Badge>}
               </div>
               <p className="mt-4 text-sm leading-6">{card[2]}</p>
               <p className="mt-4 border-t pt-3 text-xs leading-5 text-muted-foreground">{card[3]}</p>
@@ -398,12 +453,22 @@ function FinancialTransmission({ data }: { data: RegimeCurrent }) {
 function ThesisPanel({ data }: { data: RegimeCurrent }) {
   const ai = data.ai_capex;
   const memory = data.memory_cycle;
+  const aiTone = aiCapexTone(ai.state);
+  const dramTone = memoryPriceTone(memory.state);
+  const nandTone = memoryPriceTone(memory.nand_state);
+  const observationScopes = [
+    { name: "하이퍼스케일러 총 CAPEX", status: "연결", role: "AI 투자강도 보조" },
+    { name: "공개 DRAM 가격 표본", status: memory.state === "판정 불가" ? "제한" : "연결", role: "가격 방향 보조" },
+    { name: "공개 NAND 가격 표본", status: memory.nand_state === "판정 불가" ? "제한" : "연결", role: "가격 방향 보조" },
+    { name: "Server DRAM", status: "미연결", role: "종합판정 미사용" },
+    { name: "HBM", status: "미연결", role: "종합판정 미사용" },
+  ];
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle>AI 인프라 관측범위</CardTitle>
-          <Badge variant="outline">부분 관측</Badge>
+          <Badge variant={TONE_STYLES[availabilityTone("부분 관측")].badge}>부분 관측</Badge>
           <InfoTip label="AI 인프라 관측범위 설명">
             연결된 자동 데이터와 아직 연결되지 않은 핵심 병목을 함께 표시합니다.
             공시 CAPEX는 기업 전체 투자액이므로 AI 전용 금액과 동일하지 않습니다.
@@ -415,55 +480,52 @@ function ThesisPanel({ data }: { data: RegimeCurrent }) {
       </CardHeader>
       <CardContent>
         <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr))]">
-          {[
-            ["하이퍼스케일러 총 CAPEX", "연결", "AI 투자강도 보조"],
-            ["공개 DRAM 가격 표본", memory.state === "판정 불가" ? "제한" : "연결", "가격 방향 보조"],
-            ["공개 NAND 가격 표본", memory.nand_state === "판정 불가" ? "제한" : "연결", "가격 방향 보조"],
-            ["Server DRAM", "미연결", "종합판정 미사용"],
-            ["HBM", "미연결", "종합판정 미사용"],
-          ].map((item) => (
-            <div key={item[0]} className="rounded-lg bg-muted/25 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <p className="min-w-0 text-sm font-medium leading-5">{item[0]}</p>
-                <Badge className="shrink-0 whitespace-nowrap" variant={item[1] === "연결" ? "secondary" : "outline"}>{item[1]}</Badge>
+          {observationScopes.map((item) => {
+            const tone = availabilityTone(item.status);
+            return (
+              <div key={item.name} className="rounded-lg bg-muted/25 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="min-w-0 text-sm font-medium leading-5">{item.name}</p>
+                  <Badge className="shrink-0 whitespace-nowrap" variant={TONE_STYLES[tone].badge}>{item.status}</Badge>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">{item.role}</p>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">{item[2]}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div className="mt-5 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr))]">
-          <div className="rounded-lg border bg-muted/10 p-5">
+          <div className={`rounded-lg border bg-muted/10 p-5 ${TONE_STYLES[aiTone].panel}`}>
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">공시 총 CAPEX</p>
-              <Badge variant={ai.coverage >= 0.75 ? "secondary" : "outline"}>{ai.state}</Badge>
+              <Badge variant={TONE_STYLES[aiTone].badge}>{ai.state}</Badge>
             </div>
-            <p className="mt-3 text-xl font-semibold">{ai.coverage ? `증가 기업 ${ai.companies.filter((item) => (item.yoy || 0) > 0).length}/${ai.companies.length}` : "데이터 미연결"}</p>
+            <p className={`mt-3 text-xl font-semibold ${TONE_STYLES[aiTone].text}`}>{ai.coverage ? `증가 기업 ${ai.companies.filter((item) => (item.yoy || 0) > 0).length}/${ai.companies.length}` : "데이터 미연결"}</p>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">{ai.reason}</p>
             <div className="mt-4 grid gap-2 text-xs [grid-template-columns:repeat(auto-fit,minmax(125px,1fr))]">
               {ai.companies.map((company) => (
                 <div key={company.id} className="rounded-md bg-muted/30 px-3 py-2">
                   <span className="block text-muted-foreground">{company.name}</span>
-                  <span className="mt-1 block font-medium text-foreground">
+                  <span className={`mt-1 block font-medium ${TONE_STYLES[aiCapexDeltaTone(company.yoy, !company.is_stale)].text}`}>
                     {company.yoy == null ? "-" : `${company.yoy > 0 ? "+" : ""}${company.yoy.toFixed(0)}% YoY`}
                   </span>
                 </div>
               ))}
             </div>
           </div>
-          <div className="rounded-lg border bg-muted/10 p-5">
+          <div className={`rounded-lg border bg-muted/10 p-5 ${TONE_STYLES[dramTone].panel}`}>
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">공개 DRAM 가격 표본</p>
-              <Badge variant={memory.state === "판정 불가" ? "outline" : "secondary"}>{memory.state === "가격 상승" ? "상승" : memory.state}</Badge>
+              <Badge variant={TONE_STYLES[dramTone].badge}>{memory.state === "가격 상승" ? "상승" : memory.state}</Badge>
             </div>
             <p className="mt-3 text-sm font-medium leading-5">{memory.reason}</p>
             <a href={memory.source_url} target="_blank" rel="noreferrer" className="mt-3 block text-xs text-primary hover:underline">
               TrendForce 공개 DRAM 가격표
             </a>
           </div>
-          <div className="rounded-lg border bg-muted/10 p-5">
+          <div className={`rounded-lg border bg-muted/10 p-5 ${TONE_STYLES[nandTone].panel}`}>
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">공개 NAND 가격 표본</p>
-              <Badge variant={memory.nand_state === "판정 불가" ? "outline" : "secondary"}>{memory.nand_state}</Badge>
+              <Badge variant={TONE_STYLES[nandTone].badge}>{memory.nand_state}</Badge>
             </div>
             <p className="mt-3 text-sm font-medium leading-5">{memory.nand_reason}</p>
             <a href={memory.nand_source_url || memory.source_url} target="_blank" rel="noreferrer" className="mt-3 block text-xs text-primary hover:underline">
@@ -493,9 +555,10 @@ function SnapshotPanel(props: CurrentOverviewProps) {
             <div className="flex items-center gap-1">
               <p className="font-semibold">현재 상태 기록</p>
               <InfoTip label="상태 기록 기준">
-                버튼을 누른 시각의 판정, 지표별 표시값과 관측일, 규칙 버전 및
-                점검 신호를 저장합니다. 저장하면 당시 활성 경보도 확인한 것으로
-                처리되며, 같은 경보는 새 변화가 생길 때 다시 알립니다.
+                버튼을 누른 시각의 판정, 전체 계산 입력 이력과 관측일, 규칙
+                버전, 수집원 상태 및 점검 신호를 함께 저장합니다. 저장하면 당시
+                활성 경보도 확인한 것으로 처리되며, 같은 경보는 새 변화가 생길
+                때 다시 알립니다.
               </InfoTip>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">

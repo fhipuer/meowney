@@ -19,7 +19,7 @@ def test_initial_release_request_is_explicit():
     assert params["sort_order"] == "asc"
     assert params["file_type"] == "json"
     assert params["realtime_start"] == "1776-07-04"
-    assert params["realtime_end"] == date.today().isoformat()
+    assert params["realtime_end"] == "9999-12-31"
 
 
 def test_parser_keeps_availability_separate_from_observation_date():

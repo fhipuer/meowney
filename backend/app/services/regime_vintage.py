@@ -38,10 +38,11 @@ def initial_release_params(series_id: str, api_key: str, *, limit: int = 100_000
         "api_key": api_key,
         "file_type": "json",
         "output_type": 4,
-        # FRED defaults the real-time window to today. On a day without a
-        # release that makes output_type=4 fail with "No vintage dates".
+        # Use FRED's documented open-ended maximum. A local calendar date can
+        # already be tomorrow in Asia while FRED is still on the prior US day,
+        # which otherwise makes the whole vintage request fail with HTTP 400.
         "realtime_start": "1776-07-04",
-        "realtime_end": date.today().isoformat(),
+        "realtime_end": "9999-12-31",
         "sort_order": "asc",
         "limit": limit,
         "offset": offset,

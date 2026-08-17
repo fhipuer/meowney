@@ -2,6 +2,7 @@
 Scheduler Service - 백그라운드 작업 스케줄러 냥~ 🐱
 매일 밤 11시에 자산 스냅샷 및 벤치마크 데이터 저장
 """
+import asyncio
 import pytz
 from datetime import datetime, date
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -177,19 +178,27 @@ async def take_benchmark_snapshot():
         print(f"🙀 벤치마크 스냅샷 전체 실패 냥: {e}")
 
 
+async def refresh_regime_sources():
+    """Refresh each regime feed independently and return every outcome."""
+    jobs = {
+        "거시": RegimeService().refresh(),
+        "일정": RegimeEventService().refresh(),
+        "SEC CAPEX": SecCapexService().refresh(),
+        "메모리": MemoryPriceService().refresh(),
+    }
+    results = await asyncio.gather(*jobs.values(), return_exceptions=True)
+    for name, result in zip(jobs, results):
+        if isinstance(result, Exception):
+            print(f"❌ {name} 데이터 갱신 실패, 기존 캐시 유지: {result}")
+        elif result.get("status") in {"failed", "partial", "configuration_required"}:
+            print(f"⚠️ {name} 데이터 갱신 상태: {result.get('status')} · {result.get('error') or result.get('errors') or ''}")
+    return dict(zip(jobs, results))
+
+
 async def take_all_snapshots():
     """
     자산 스냅샷 + 벤치마크 스냅샷 모두 실행 냥~
     """
     await take_daily_snapshot()
     await take_benchmark_snapshot()
-    try:
-        await RegimeService().refresh()
-    except Exception as exc:
-        print(f"❌ 레짐 데이터 갱신 실패, 기존 캐시 유지: {exc}")
-    try:
-        await RegimeEventService().refresh()
-        await SecCapexService().refresh()
-        await MemoryPriceService().refresh()
-    except Exception as exc:
-        print(f"❌ 일정/SEC 데이터 갱신 실패, 기존 캐시 유지: {exc}")
+    await refresh_regime_sources()

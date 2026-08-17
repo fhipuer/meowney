@@ -41,6 +41,19 @@ def test_parser_rejects_unknown_products_and_changed_columns():
     assert parse_memory_price_page(unknown) == []
 
 
+def test_parser_accepts_module_spot_average_change_column():
+    html = section(
+        "Module Spot Price", "2026-08-14",
+        ["Item", "Session High", "Session Low", "Session Average", "Average Change"],
+        ["DDR5 RDIMM 32GB 4800/5600", "130", "120", "125", "▲ 1.25 %"],
+    )
+
+    result = parse_memory_price_page(html)
+
+    assert result[0]["series_id"] == "dram_module_spot_ddr5_rdimm_32gb"
+    assert result[0]["change_percent"] == 1.25
+
+
 def test_memory_cycle_uses_contract_as_primary_signal():
     state, reason = classify_memory_cycle([
         {"series_id": "dram_contract_ddr5_sodimm_8gb", "change_percent": 6.2},
@@ -54,6 +67,18 @@ def test_memory_cycle_requires_contract_data():
     state, _ = classify_memory_cycle([
         {"series_id": "dram_spot_ddr5_16gb", "change_percent": 3.0}
     ])
+    assert state == "판정 불가"
+
+
+def test_memory_cycle_excludes_stale_contract_data():
+    state, _ = classify_memory_cycle([
+        {
+            "series_id": "dram_contract_ddr5_sodimm_8gb",
+            "change_percent": 6.2,
+            "is_stale": True,
+        }
+    ])
+
     assert state == "판정 불가"
 
 

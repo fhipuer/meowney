@@ -8,6 +8,7 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -23,6 +24,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { InfoTip } from "@/components/ui/info-tip";
 import { regimeApi } from "@/lib/api";
+import {
+  TONE_STYLES,
+  aiCapexDeltaTone,
+  aiCapexTone,
+  memoryPriceTone,
+  memorySupplierPriceDeltaTone,
+  regimeLevelTone,
+  signalStatusTone,
+} from "@/lib/regime-tone";
 import type {
   RegimeCurrent,
   RegimeLevel,
@@ -40,16 +50,6 @@ const DOMAIN_TABS = [
   { id: "liquidity", label: "유동성·신용" },
   { id: "ai", label: "AI CAPEX·메모리" },
 ];
-const levelClass: Record<string, string> = {
-  유지: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
-  경계: "border-amber-400/25 bg-amber-400/10 text-amber-300",
-  약화: "border-orange-400/25 bg-orange-400/10 text-orange-300",
-  전환: "border-red-400/25 bg-red-400/10 text-red-300",
-  강함: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
-  중립: "border-slate-400/20 bg-slate-400/10 text-slate-300",
-  둔화: "border-amber-400/25 bg-amber-400/10 text-amber-300",
-  "데이터 없음": "border-slate-400/20 bg-slate-400/10 text-slate-400",
-};
 const urgencyLabel: Record<ReviewUrgency, string> = {
   required: "지금 다시 상세점검",
   watch: "다음 발표까지 관찰",
@@ -77,7 +77,7 @@ export function signalRuleHelp(signal: RegimeSignal) {
   )
     return "최근 3개월 연율을 사용합니다. 물가·임금 상승세 재가속은 악화 방향, 목표 수준을 향한 둔화는 개선 방향입니다.";
   if (
-    ["us10y", "tips10y", "bei10y", "term_premium", "fedfunds"].includes(
+    ["us3m", "us10y", "tips10y", "bei10y", "term_premium", "fedfunds"].includes(
       signal.id,
     )
   )
@@ -115,12 +115,10 @@ function ChangeMetric({
   return (
     <div className="rounded-md bg-muted/50 px-3 py-2">
       <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p
-        className={`mt-0.5 text-sm font-medium ${value != null && value < 0 ? "text-red-500" : ""}`}
-      >
+      <p className="mt-0.5 text-sm font-medium tabular-nums text-foreground">
         {value == null
           ? "-"
-          : `${value > 0 ? "+" : ""}${value.toFixed(1)}${unit}`}
+          : `${value > 0 ? "↑ " : value < 0 ? "↓ " : ""}${value > 0 ? "+" : ""}${value.toFixed(1)}${unit}`}
       </p>
     </div>
   );
@@ -129,6 +127,12 @@ function ChangeMetric({
 function SignalCard({ signal }: { signal: RegimeSignal }) {
   const history = signal.history || [];
   const metrics = signal.display_metrics || [];
+  const decisionChart = signal.decision_chart;
+  const chartData = decisionChart?.points || history;
+  const chartSeries = decisionChart?.series || [
+    { key: "value", label: signal.name },
+  ];
+  const chartColors = ["#60a5fa", "#f59e0b", "#34d399"];
   const role =
     signal.usage === "regime"
       ? "레짐 산출"
@@ -136,9 +140,15 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
         ? "경보 전용"
         : "맥락 지표";
   const status =
-    signal.usage === "display" && signal.status !== "unavailable"
+    signal.is_stale
+      ? `오래됨 · ${signal.age_days ?? "-"}일`
+      : signal.usage === "display" && signal.status !== "unavailable"
       ? "판정 미적용"
       : signalStatusLabel[signal.status] || signal.status;
+  const tone = signalStatusTone(
+    signal.status,
+    signal.is_stale || signal.usage === "display",
+  );
   return (
     <Card className="overflow-hidden">
       <CardHeader className="space-y-3 pb-2">
@@ -154,24 +164,22 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
               {signal.source.toUpperCase()} · 관측{" "}
               {signal.observation_date || "미수집"} · {signal.display_period}
             </p>
-            {signal.available_from && (
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                이용 가능 {signal.available_from}
-                {signal.vintage_kind === "initial" ? " · 초도 발표일 기록 보유" : ""}
-              </p>
-            )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <Badge
-              className={`${signal.usage === "display" ? levelClass["데이터 없음"] : levelClass[signal.status] || ""} whitespace-nowrap`}
+              className="whitespace-nowrap"
+              variant={TONE_STYLES[tone].badge}
             >
               {status}
             </Badge>
-            {signal.usage !== "display" && (
-              <InfoTip label={`${signal.name} 판정 기준`}>
-                {signalRuleHelp(signal)} 현재 판정 근거: {signal.reason}.
-              </InfoTip>
-            )}
+            <InfoTip label={`${signal.name} ${signal.usage === "display" ? "사용 범위" : "판정 기준"}`}>
+              {signal.usage === "display"
+                ? "현재 환경을 해석하는 보조자료이며 자동 레짐과 임계경보 계산에는 사용하지 않습니다. 현재 카드는 최신 저장값을 표시합니다."
+                : `${signalRuleHelp(signal)} 현재 판정 근거: ${signal.reason}. 현재 카드는 최신 저장값을 표시하며 초기 발표값과 수정 이력은 시점기준 이력으로 별도 보관합니다.`}
+              {signal.is_stale
+                ? ` 최신 관측이 허용기간 ${signal.max_age_days ?? "-"}일을 넘어 판정에서 제외됐습니다.`
+                : ""}
+            </InfoTip>
           </div>
         </div>
         <div className="flex items-baseline gap-2">
@@ -193,61 +201,95 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
           ))}
         </div>
       </CardHeader>
-      <CardContent className="pt-3">
-        {history.length > 1 ? (
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={history}
-                margin={{ top: 8, right: 12, bottom: 8, left: 4 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  opacity={0.2}
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={formatDate}
-                  minTickGap={34}
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  domain={["auto", "auto"]}
-                  width={58}
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={formatNumber}
-                />
-                <Tooltip
-                  labelFormatter={(label) => `관측일 ${label}`}
-                  contentStyle={{
-                    background: "hsl(var(--card))",
-                    borderColor: "hsl(var(--border))",
-                    borderRadius: 8,
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  name={signal.name}
-                  stroke="hsl(var(--primary))"
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                  strokeWidth={2}
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+      <CardContent className="pt-2">
+        <details className="group rounded-lg border bg-muted/10">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm [&::-webkit-details-marker]:hidden">
+            <span className="font-medium">
+              {decisionChart ? "판정에 사용한 차트" : "원자료 추이"}
+            </span>
+            <span className="text-xs text-muted-foreground group-open:hidden">
+              {decisionChart?.title || signal.display_period} · 펼쳐보기
+            </span>
+            <span className="hidden text-xs text-muted-foreground group-open:inline">
+              접기
+            </span>
+          </summary>
+          <div className="border-t p-3">
+            {decisionChart?.title && (
+              <p className="mb-3 text-xs font-medium text-muted-foreground">
+                {decisionChart.title} · 단위 {decisionChart.unit}
+              </p>
+            )}
+            {chartData.length > 1 ? (
+              <div className="h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={chartData}
+                    margin={{ top: 8, right: 12, bottom: 8, left: 4 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      opacity={0.2}
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={formatDate}
+                      minTickGap={34}
+                      tick={{ fontSize: 11 }}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      domain={["auto", "auto"]}
+                      width={58}
+                      tick={{ fontSize: 11 }}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={formatNumber}
+                    />
+                    <Tooltip
+                      labelFormatter={(label) => `관측일 ${label}`}
+                      contentStyle={{
+                        background: "hsl(var(--card))",
+                        borderColor: "hsl(var(--border))",
+                        borderRadius: 8,
+                      }}
+                    />
+                    {decisionChart?.reference_lines.map((reference) => (
+                      <ReferenceLine
+                        key={`${reference.label}-${reference.value}`}
+                        y={reference.value}
+                        stroke="hsl(var(--muted-foreground))"
+                        strokeDasharray="4 4"
+                        label={{ value: reference.label, fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
+                      />
+                    ))}
+                    {chartSeries.map((series, index) => (
+                      <Line
+                        key={series.key}
+                        type="monotone"
+                        dataKey={series.key}
+                        name={series.label}
+                        stroke={chartColors[index % chartColors.length]}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                        strokeWidth={2}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
+                    ))}
+                    {chartSeries.length > 1 && <Legend />}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="flex h-32 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
+                차트를 그릴 관측값이 부족합니다.
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="flex h-40 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
-            차트를 그릴 관측값이 부족합니다.
-          </div>
-        )}
+        </details>
         <div className="mt-3 flex items-start gap-2 border-t pt-3 text-xs text-muted-foreground">
           <HelpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <p>
@@ -260,8 +302,9 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
 }
 
 function RateComparison({ signals }: { signals: RegimeSignal[] }) {
+  const requiredIds = ["us10y", "tips10y", "bei10y"];
   const selected = signals.filter((signal) =>
-    ["us10y", "tips10y", "bei10y"].includes(signal.id),
+    requiredIds.includes(signal.id),
   );
   const byDate = new Map<string, Record<string, string | number>>();
   selected.forEach((signal) =>
@@ -272,9 +315,9 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
       });
     }),
   );
-  const chartData = [...byDate.values()].sort((a, b) =>
-    String(a.date).localeCompare(String(b.date)),
-  );
+  const chartData = [...byDate.values()]
+    .filter((point) => requiredIds.every((id) => typeof point[id] === "number"))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   if (!chartData.length) return null;
   return (
     <Card className="mb-6">
@@ -288,7 +331,7 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
           </InfoTip>
         </div>
         <p className="text-sm text-muted-foreground">
-          명목 10Y ≈ 실질 10Y(TIPS) + 기대인플레이션(BEI)
+          명목 10Y ≈ 실질 10Y(TIPS) + 기대인플레이션(BEI) · 동일 관측일만 비교
         </p>
       </CardHeader>
       <CardContent className="pt-3">
@@ -379,12 +422,13 @@ function AiCapexDashboard({
     meta: "#a78bfa",
     amazon: "#34d399",
   };
+  const stateTone = aiCapexTone(data.state);
   return (
     <div className="space-y-6">
       <div className="px-1">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-semibold">하이퍼스케일러 설비투자 프록시</h2>
-          <Badge variant={data.coverage >= 0.75 ? "secondary" : "outline"}>{data.state}</Badge>
+          <Badge variant={TONE_STYLES[stateTone].badge}>{data.state}</Badge>
           <InfoTip label="설비투자 프록시의 범위">
             SEC 공시의 기업 전체 현금 CAPEX입니다. AI 인프라 투자도 포함하지만
             AI 전용 금액은 분리되지 않으므로 투자 강도의 보조지표로 사용합니다.
@@ -403,7 +447,12 @@ function AiCapexDashboard({
           {chartData.length ? (
             <div className="h-96">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 12, right: 12, bottom: 8, left: 4 }}>
+                <BarChart
+                  data={chartData}
+                  barCategoryGap="18%"
+                  barGap={2}
+                  margin={{ top: 12, right: 12, bottom: 8, left: 4 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
                   <XAxis dataKey="period" tickFormatter={formatDate} tick={{ fontSize: 11 }} />
                   <YAxis width={48} tick={{ fontSize: 11 }} unit="B" />
@@ -414,7 +463,7 @@ function AiCapexDashboard({
                   />
                   <Legend formatter={(value) => data.companies.find((item) => item.id === value)?.name || value} />
                   {data.companies.map((company) => (
-                    <Bar key={company.id} dataKey={company.id} stackId="capex" fill={colors[company.id]} isAnimationActive={false} />
+                    <Bar key={company.id} dataKey={company.id} fill={colors[company.id]} maxBarSize={24} isAnimationActive={false} />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
@@ -434,15 +483,27 @@ function AiCapexDashboard({
             <CardContent>
               <p className="text-2xl font-semibold">{company.latest_capex == null ? "-" : `$${(company.latest_capex / 1e9).toFixed(1)}B`}</p>
               <p className="mt-2 text-sm text-muted-foreground">
-                YoY {company.yoy == null ? "-" : `${company.yoy > 0 ? "+" : ""}${company.yoy.toFixed(1)}%`} · TTM {company.ttm == null ? "-" : `$${(company.ttm / 1e9).toFixed(1)}B`}
+                YoY{" "}
+                <span className={TONE_STYLES[aiCapexDeltaTone(company.yoy, !company.is_stale)].text}>
+                  {company.yoy == null ? "-" : `${company.yoy > 0 ? "+" : ""}${company.yoy.toFixed(1)}%`}
+                </span>{" "}
+                · TTM {company.ttm == null ? "-" : `$${(company.ttm / 1e9).toFixed(1)}B`}
               </p>
-              <p className="mt-3 text-xs text-muted-foreground">기준 {company.latest_period || "미수집"}</p>
+              <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                기준 {company.latest_period || "미수집"}
+                {company.is_stale && <Badge variant="outline" className="text-[10px]">오래됨</Badge>}
+              </p>
             </CardContent>
           </Card>
         ))}
       </div>
       <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
-        <span>산출 방식</span>
+        <span>
+          산출 방식 · 회사별 회계분기 기준
+          {data.as_of_range?.from && data.as_of_range?.to
+            ? ` · 최신 분기 범위 ${data.as_of_range.from}~${data.as_of_range.to}`
+            : ""}
+        </span>
         <InfoTip label="CAPEX 산출 방식">{data.methodology}</InfoTip>
       </div>
     </div>
@@ -467,30 +528,62 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
   });
   const dramSeries = ordered.filter((item) => !item.market_type.startsWith("nand_"));
   const nandSeries = ordered.filter((item) => item.market_type.startsWith("nand_"));
-  const priceCard = (item: (typeof ordered)[number]) => (
-    <div key={item.series_id} className="rounded-lg border bg-muted/20 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-medium leading-5">{item.product_name}</p>
-        <Badge variant="outline" className="shrink-0 text-[10px]">
-          {item.market_type === "contract" ? "월간 Contract"
-            : item.market_type === "module_spot" ? "Module Spot"
-              : item.market_type === "nand_wafer_spot" ? "TLC Wafer Spot"
-                : item.market_type === "nand_client_ssd_contract" ? "Client SSD Contract" : "Spot"}
-        </Badge>
-      </div>
-      <p className="mt-4 text-2xl font-semibold">{item.price_average.toLocaleString("en-US", { maximumFractionDigits: 3 })}</p>
-      <p className={`mt-1 text-sm ${(item.change_percent || 0) > 0 ? "text-amber-300" : (item.change_percent || 0) < 0 ? "text-sky-300" : "text-muted-foreground"}`}>
-        {item.change_percent == null ? "변화율 미제공" : `${item.change_percent > 0 ? "+" : ""}${item.change_percent.toFixed(2)}%`}
-      </p>
-      <p className="mt-3 text-xs text-muted-foreground">기준 {item.observation_date}{item.period_label ? ` · ${item.period_label}` : ""}</p>
-    </div>
+  const historySeries = ordered.filter((item) => item.history.length > 1).slice(0, 6);
+  const historyByDate = new Map<string, Record<string, string | number>>();
+  historySeries.forEach((item) => {
+    const base = item.history[0]?.price_average;
+    if (!base) return;
+    item.history.forEach((point) => {
+      historyByDate.set(point.observation_date, {
+        ...(historyByDate.get(point.observation_date) || { date: point.observation_date }),
+        [item.series_id]: Number(((point.price_average / base) * 100).toFixed(2)),
+      });
+    });
+  });
+  const memoryHistory = [...historyByDate.values()].sort((a, b) =>
+    String(a.date).localeCompare(String(b.date)),
   );
+  const memoryColors = ["#60a5fa", "#a78bfa", "#34d399", "#f59e0b", "#f472b6", "#22d3ee"];
+  const priceCard = (item: (typeof ordered)[number]) => {
+    const tone = memorySupplierPriceDeltaTone(
+      item.change_percent,
+      !item.is_stale,
+    );
+    return (
+      <div key={item.series_id} className="rounded-lg border bg-muted/20 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm font-medium leading-5">{item.product_name}</p>
+          <Badge variant="outline" className="shrink-0 text-[10px]">
+            {item.is_stale ? "오래됨" : item.market_type === "contract" ? "월간 Contract"
+              : item.market_type === "module_spot" ? "Module Spot"
+                : item.market_type === "nand_wafer_spot" ? "TLC Wafer Spot"
+                  : item.market_type === "nand_client_ssd_contract" ? "Client SSD Contract" : "Spot"}
+          </Badge>
+        </div>
+        <p className="mt-4 text-2xl font-semibold">
+          {item.currency === "USD" ? "$" : ""}
+          {item.price_average.toLocaleString("en-US", { maximumFractionDigits: 3 })}
+        </p>
+        <p className={`mt-1 text-sm tabular-nums ${TONE_STYLES[tone].text}`}>
+          {item.change_percent == null
+            ? "변화율 미제공"
+            : `${item.change_percent > 0 ? "↑ +" : item.change_percent < 0 ? "↓ " : ""}${item.change_percent.toFixed(2)}%`}
+        </p>
+        <p className="mt-3 text-xs text-muted-foreground">
+          기준 {item.observation_date}{item.period_label ? ` · ${item.period_label}` : ""}
+          {item.price_basis ? ` · ${item.price_basis}` : ""}
+        </p>
+      </div>
+    );
+  };
+  const dramTone = memoryPriceTone(data.state);
+  const nandTone = memoryPriceTone(data.nand_state);
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-wrap items-center gap-3">
           <CardTitle>공개 DRAM 가격 표본</CardTitle>
-          <Badge variant={data.state === "판정 불가" ? "outline" : "secondary"}>{memoryStateLabel[data.state] || data.state}</Badge>
+          <Badge variant={TONE_STYLES[dramTone].badge}>{memoryStateLabel[data.state] || data.state}</Badge>
           <InfoTip label="공개 DRAM 표본의 범위">
             공개된 DDR5 SO-DIMM Contract와 일부 Spot 가격을 봅니다. Server
             DRAM·HBM·NAND 전체를 대표하지 않으며 AI 수요의 직접 판정에는
@@ -500,6 +593,44 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
         <p className="text-sm text-muted-foreground">{data.reason}</p>
       </CardHeader>
       <CardContent>
+        {memoryHistory.length > 1 && (
+          <div className="mb-6 rounded-lg border bg-muted/10 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium">수집 이후 가격 방향 비교</p>
+              <p className="text-xs text-muted-foreground">각 표본의 첫 관측값=100</p>
+            </div>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={memoryHistory} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                  <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={36} tick={{ fontSize: 11 }} />
+                  <YAxis width={48} tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
+                  <Tooltip
+                    labelFormatter={(label) => `관측일 ${label}`}
+                    formatter={(value: number, name: string) => [
+                      Number(value).toFixed(1),
+                      historySeries.find((item) => item.series_id === name)?.product_name || name,
+                    ]}
+                    contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }}
+                  />
+                  <Legend formatter={(value) => historySeries.find((item) => item.series_id === value)?.product_name || value} />
+                  {historySeries.map((item, index) => (
+                    <Line
+                      key={item.series_id}
+                      type="monotone"
+                      dataKey={item.series_id}
+                      stroke={memoryColors[index % memoryColors.length]}
+                      dot={false}
+                      connectNulls
+                      strokeWidth={2}
+                      isAnimationActive={false}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
         {dramSeries.length ? (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {dramSeries.map(priceCard)}
@@ -510,7 +641,7 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
         <div className="mt-7 border-t pt-6">
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <h3 className="font-semibold">공개 NAND 가격 표본</h3>
-            <Badge variant={data.nand_state === "판정 불가" ? "outline" : "secondary"}>{data.nand_state}</Badge>
+            <Badge variant={TONE_STYLES[nandTone].badge}>{data.nand_state}</Badge>
             <InfoTip label="공개 NAND 표본의 범위">
               512Gb TLC wafer spot을 주 방향 신호로 사용하고 PC Client SSD
               계약가격을 함께 표시합니다. Enterprise SSD 계약가격·재고·출하량을
@@ -608,6 +739,11 @@ export function RegimePage() {
     },
   });
   const data = current.data;
+  const unhealthyFeeds = data
+    ? Object.entries(data.feed_health || {}).filter(([, feed]) =>
+        feed && ["failed", "partial", "configuration_required"].includes(feed.status),
+      )
+    : [];
 
   return (
     <div className="space-y-8 pb-14 pt-3">
@@ -616,9 +752,11 @@ export function RegimePage() {
           <div className="mb-2 flex items-center gap-1 text-xs font-medium text-primary">
             <span>포트폴리오 조기점검</span>
             <InfoTip label="투자 레짐 판정 체계">
-              확정 레짐은 독립된 핵심 발표에서 재확인된 상태, 후보 레짐은 최신
-              자료의 즉시 계산입니다. 데이터 품질은 수집 완전성을 뜻하며 예측
-              적중률이 아닙니다.
+              확정 점검 레짐은 미국 거시 수준·최근 모멘텀·금융여건을 동일한
+              판정 경로로 계산한 뒤 독립 발표에서 재확인한 상태입니다. 후보는
+              최신 자료의 즉시 계산이며, 경제환경 4분면 자체와는 용도가
+              다릅니다. 데이터 품질은 수집 완전성을 뜻하며 예측 적중률이
+              아닙니다.
             </InfoTip>
           </div>
           <h1 className="text-3xl font-bold">투자 레짐</h1>
@@ -654,12 +792,24 @@ export function RegimePage() {
           </AlertDescription>
         </Alert>
       )}
+      {unhealthyFeeds.length > 0 && (
+        <Alert>
+          <Database className="h-4 w-4" />
+          <AlertTitle>일부 외부 데이터 연결 제한</AlertTitle>
+          <AlertDescription>
+            {unhealthyFeeds
+              .map(([name, feed]) => `${name}: ${feed?.status}`)
+              .join(" · ")}
+            . 정상 캐시는 유지되며 각 영역의 최신성을 별도로 표시합니다.
+          </AlertDescription>
+        </Alert>
+      )}
       {data?.is_stale && (
         <Alert>
           <Database className="h-4 w-4" />
           <AlertTitle>오래된 캐시 사용 중</AlertTitle>
           <AlertDescription>
-            마지막 정상 수집 후 {data.cache_age_hours}시간이 지났습니다.
+            하나 이상의 미국 판정입력이 허용 최신성 범위를 벗어났습니다.
           </AlertDescription>
         </Alert>
       )}
@@ -748,24 +898,29 @@ export function RegimePage() {
         </TabsContent>
         <TabsContent value="history" className="mt-0 space-y-4">
           {history.data?.length ? (
-            history.data.map((item) => (
+            history.data.map((item) => {
+              const recordedDirection =
+                item.macro_quadrant?.pressure_vector?.direction ||
+                item.macro_quadrant?.momentum_vector?.direction ||
+                "미확인";
+              return (
               <Card key={item.id}>
                 <CardContent className="p-6">
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="font-medium">기록 {new Date(item.created_at).toLocaleString("ko-KR")}</span>
                     <span className="text-xs text-muted-foreground">거시 기준 {item.as_of_date || "-"}</span>
-                    <Badge className={levelClass[item.automatic_regime]}>
+                    <Badge variant={TONE_STYLES[regimeLevelTone(item.automatic_regime)].badge}>
                       확정 {item.automatic_regime}
                     </Badge>
                     {item.review_urgency && (
-                      <Badge variant="secondary">
+                      <Badge variant={item.review_urgency === "required" ? "danger" : item.review_urgency === "watch" ? "warning" : "neutral"}>
                         {urgencyLabel[item.review_urgency]}
                       </Badge>
                     )}
                   </div>
                   <div className="mt-4 grid gap-3 rounded-lg bg-muted/20 p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
                     <p><span className="text-muted-foreground">사용자 판정</span><span className="mt-1 block font-medium">{item.user_regime || "미입력"}</span></p>
-                    <p><span className="text-muted-foreground">경제환경</span><span className="mt-1 block font-medium">{item.macro_quadrant?.environment_point?.label || "미확인"}</span></p>
+                    <p><span className="text-muted-foreground">경제환경·최근 방향</span><span className="mt-1 block font-medium">{item.macro_quadrant?.environment_point?.label || "미확인"} / {recordedDirection}</span></p>
                     <p><span className="text-muted-foreground">활성 임계신호</span><span className="mt-1 block font-medium">{item.triggers?.length || 0}개</span></p>
                     <p><span className="text-muted-foreground">AI·메모리 보조지표</span><span className="mt-1 block font-medium">CAPEX {item.ai_capex?.state || "미확인"} · DRAM {item.memory_cycle?.state ? memoryStateLabel[item.memory_cycle.state] || item.memory_cycle.state : "미확인"} · NAND {item.memory_cycle?.nand_state || "미확인"}</span></p>
                   </div>
@@ -773,10 +928,40 @@ export function RegimePage() {
                     {item.reasons?.slice(0, 3).join(" · ") ||
                       "저장된 주요 판정 사유 없음"}
                   </p>
+                  {item.triggers?.length ? (
+                    <ul className="mt-4 space-y-2 text-sm">
+                      {item.triggers.slice(0, 3).map((trigger) => (
+                        <li key={trigger.rule_id} className="rounded-md border bg-muted/10 px-3 py-2">
+                          <span className="mr-2 text-xs text-muted-foreground">당시 활성 임계</span>
+                          {trigger.summary}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <details className="mt-4 rounded-lg border bg-muted/10">
+                    <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">
+                      기록 세부정보
+                    </summary>
+                    <div className="grid gap-4 border-t px-4 py-4 text-xs md:grid-cols-2">
+                      <div>
+                        <p className="text-muted-foreground">영역별 당시 상태</p>
+                        <p className="mt-2 leading-6">
+                          {item.domains?.map((domain) => `${domain.name} ${domain.state}`).join(" · ") || "미확인"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">재현 정보</p>
+                        <p className="mt-2 leading-6">
+                          규칙 {item.rule_version || "미확인"} · 저장 형식 {item.snapshot_schema_version || "1"}
+                          {item.input_fingerprint ? ` · 입력 ${item.input_fingerprint.slice(0, 10)}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  </details>
                   <JudgmentEditor snapshot={item} />
                 </CardContent>
               </Card>
-            ))
+            )})
           ) : (
             <Card>
               <CardContent className="p-8 text-center text-muted-foreground">

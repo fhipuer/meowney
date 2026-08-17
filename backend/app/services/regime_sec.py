@@ -69,7 +69,7 @@ def normalize_quarters(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 continue
             if duration <= 125:
                 value, derivation, sources = float(item["val"]), "reported_quarter", [item["accn"]]
-            elif previous is not None:
+            elif previous is not None and _days(previous) is not None and 45 <= duration - _days(previous) <= 125:
                 value = float(item["val"]) - float(previous["val"])
                 derivation = "ytd_difference"
                 sources = [item["accn"], previous["accn"]]
@@ -90,7 +90,10 @@ def normalize_quarters(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def classify_ai_capex(companies: list[dict[str, Any]], expected: int = 4) -> tuple[str, str, float]:
-    available = [item for item in companies if item.get("latest_capex") is not None]
+    available = [
+        item for item in companies
+        if item.get("latest_capex") is not None and not item.get("is_stale", False)
+    ]
     coverage = len(available) / expected
     yoy_values = [float(item["yoy"]) for item in available if item.get("yoy") is not None]
     positive = sum(value > 0 for value in yoy_values)
@@ -100,7 +103,7 @@ def classify_ai_capex(companies: list[dict[str, Any]], expected: int = 4) -> tup
     if negative >= 2:
         return "감속 관찰", f"전년 대비 CAPEX 감소 기업이 {negative}개입니다.", coverage
     if positive >= 3 and sum(yoy_values) / len(yoy_values) >= 25:
-        return "확대 가속", f"전년 대비 CAPEX 증가 기업이 {positive}개이고 평균 증가율이 25% 이상입니다.", coverage
+        return "확대 강함", f"전년 대비 CAPEX 증가 기업이 {positive}개이고 평균 증가율이 25% 이상입니다.", coverage
     if positive >= 3:
         return "높은 투자 지속", f"전년 대비 CAPEX 증가 기업이 {positive}개입니다.", coverage
     return "혼조", "기업별 증가·감속 신호가 혼재해 다음 공시 확인이 필요합니다.", coverage
@@ -135,6 +138,8 @@ class SecCapexService:
             row = conn.execute("SELECT * FROM company_fetch_status WHERE company_id=?", (company_id,)).fetchone()
         if not row or not row["last_success_at"]:
             return True
+        if row["status"] == "failed" and row["retry_after"]:
+            return datetime.fromisoformat(row["retry_after"]) <= datetime.now(timezone.utc)
         return datetime.now(timezone.utc) - datetime.fromisoformat(row["last_success_at"]) >= timedelta(hours=20)
 
     async def _fetch_company(self, client: httpx.AsyncClient, cik: str) -> tuple[dict, dict]:
@@ -221,10 +226,18 @@ class SecCapexService:
                 prior = next((row for row in rows if row["period_end"] == prior_period), None)
                 yoy = ((latest["value"] / prior["value"] - 1) * 100) if latest and prior and prior["value"] else None
                 ttm = sum(row["value"] for row in rows[-4:]) if len(rows) >= 4 else None
+                age_days = (date.today() - date.fromisoformat(latest["period_end"])).days if latest else None
+                is_stale = age_days is None or age_days > 200
                 companies.append({"id": company_id, "name": name, "latest_period": latest["period_end"] if latest else None,
                                   "latest_capex": latest["value"] if latest else None, "yoy": yoy, "ttm": ttm,
-                                  "history": [{"period": row["period_end"], "value": row["value"]} for row in rows],
+                                  "age_days": age_days, "is_stale": is_stale,
+                                  "history": [{"period": row["period_end"], "value": row["value"],
+                                               "derivation": row["derivation"],
+                                               "source_accessions": json.loads(row["source_accessions_json"])} for row in rows],
                                   "fetch_status": dict(status) if status else None})
         state, reason, coverage = classify_ai_capex(companies, len(COMPANIES))
+        periods = [item["latest_period"] for item in companies if item.get("latest_period")]
         return {"state": state, "reason": reason, "coverage": coverage, "companies": companies,
-                "methodology": "SEC 공시 현금 CAPEX · 누적 공시는 직전 누적값 차감 · 증가율 둔화만으로 종료 판정하지 않음"}
+                "as_of_range": {"from": min(periods) if periods else None, "to": max(periods) if periods else None},
+                "period_alignment": "company_fiscal_quarter",
+                "methodology": "SEC 공시 기업 전체 현금 CAPEX · 기업별 회계분기 YoY·TTM · 누적 공시는 직전 누적값 차감 · 증가율 둔화만으로 종료 판정하지 않음"}

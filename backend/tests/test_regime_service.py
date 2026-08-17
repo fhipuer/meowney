@@ -1,4 +1,7 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+import sqlite3
+
+import pytest
 from uuid import uuid4
 
 from app.db.sqlite_client import SQLiteClient
@@ -12,8 +15,47 @@ def service_for(tmp_path):
     return service
 
 
+def test_decision_data_migration_uses_real_retail_and_adds_short_rate_proxy(tmp_path):
+    service = service_for(tmp_path)
+    with service.db.connect() as conn:
+        retail = conn.execute(
+            "SELECT source_key,name,unit FROM regime_indicators WHERE id='us_retail'"
+        ).fetchone()
+        short_rate = conn.execute(
+            "SELECT source_key,domain FROM regime_indicators WHERE id='us3m'"
+        ).fetchone()
+
+    assert tuple(retail) == ("RRSFS", "미국 실질 소매판매", "백만 1982-84 달러")
+    assert tuple(short_rate) == ("DGS3MO", "rates")
+
+
+def test_latest_projection_never_borrows_initial_vintage_provenance(tmp_path):
+    service = service_for(tmp_path)
+    service.db.table("regime_observations").insert({
+        "id": str(uuid4()), "indicator_id": "core_cpi",
+        "observation_date": date.today().isoformat(), "value": 330.0,
+        "fetched_at": datetime.now().astimezone().isoformat(), "source": "fred",
+    }).execute()
+    with service.db.connect() as conn:
+        conn.execute(
+            "INSERT INTO regime_observation_vintages("
+            "id,indicator_id,observation_date,value,available_from,fetched_at,source,vintage_kind"
+            ") VALUES(?,?,?,?,?,?,?,'initial')",
+            (str(uuid4()), "core_cpi", date.today().isoformat(), 329.0,
+             date.today().isoformat(), datetime.now().astimezone().isoformat(), "fred"),
+        )
+
+    definition = next(item for item in service._indicator_rows() if item["id"] == "core_cpi")
+    signal = service._signal(definition)
+
+    assert signal["value"] == 330.0
+    assert signal["vintage_kind"] == "latest_revised"
+    assert signal["available_from"] is None
+    assert signal["vintage_history_available"] is True
+
+
 def add_series(service, indicator_id, values):
-    start = date(2025, 1, 1)
+    start = date.today() - timedelta(days=len(values) * 31)
     for index, value in enumerate(values):
         service.db.table("regime_observations").insert({
             "id": str(uuid4()),
@@ -50,13 +92,44 @@ def test_same_data_produces_same_evaluation(tmp_path):
     assert first["automatic_regime"] == "유지"
 
 
+def test_crossing_freshness_boundary_creates_new_evaluation_without_using_stale_signal(
+    tmp_path, monkeypatch,
+):
+    service = service_for(tmp_path)
+    for days_ago, value in ((183, 4.0), (152, 4.0), (121, 4.0), (90, 4.5)):
+        service.db.table("regime_observations").insert({
+            "id": str(uuid4()),
+            "indicator_id": "us_unemployment",
+            "observation_date": (date.today() - timedelta(days=days_ago)).isoformat(),
+            "value": value,
+            "fetched_at": datetime.now().astimezone().isoformat(),
+            "source": "fred",
+        }).execute()
+    fresh = service.evaluate()
+    real_datetime = datetime
+
+    class FutureDateTime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime.now(tz) + timedelta(days=10)
+
+    monkeypatch.setattr(regime_service_module, "datetime", FutureDateTime)
+    stale = service.evaluate()
+
+    assert fresh["candidate_regime"] == "경계"
+    assert stale["candidate_regime"] == "유지"
+    assert stale["id"] != fresh["id"]
+    signal = next(item for item in stale["signals"] if item["id"] == "us_unemployment")
+    assert signal["is_stale"] is True
+
+
 def test_hysteresis_requires_second_distinct_confirmation(tmp_path):
     service = service_for(tmp_path)
     add_series(service, "us_unemployment", [4.0, 4.0, 4.1, 4.5])
     first = service.evaluate()
     service.db.table("regime_observations").insert({
         "id": str(uuid4()), "indicator_id": "us_unemployment",
-        "observation_date": "2025-06-01", "value": 4.6,
+        "observation_date": date.today().isoformat(), "value": 4.6,
         "fetched_at": "2026-08-16T00:00:00+00:00", "source": "fred",
     }).execute()
     second = service.evaluate()
@@ -64,6 +137,28 @@ def test_hysteresis_requires_second_distinct_confirmation(tmp_path):
     assert first["candidate_regime"] == "경계"
     assert second["candidate_regime"] == "경계"
     assert second["automatic_regime"] == "경계"
+
+
+def test_model_version_change_is_not_counted_as_second_data_confirmation(
+    tmp_path, monkeypatch,
+):
+    service = service_for(tmp_path)
+    add_series(service, "us_unemployment", [4.0, 4.0, 4.1, 4.5])
+    first = service.evaluate()
+    original = regime_service_module.calculate_us_macro_quadrant
+
+    def changed_model(signals):
+        result = original(signals)
+        result["version"] = f"{result['version']}-changed"
+        return result
+
+    monkeypatch.setattr(regime_service_module, "calculate_us_macro_quadrant", changed_model)
+    second = service.evaluate()
+
+    assert first["candidate_regime"] == "경계"
+    assert second["candidate_regime"] == "경계"
+    assert first["automatic_regime"] == "유지"
+    assert second["automatic_regime"] == "유지"
 
 
 def test_unrelated_market_update_does_not_confirm_macro_candidate(tmp_path):
@@ -99,10 +194,41 @@ def test_snapshot_keeps_auto_and_user_judgment_separate(tmp_path):
     assert snapshot["review_urgency"] in {"required", "watch", "not_needed"}
     assert snapshot["coverage"] is not None
     assert snapshot["rule_version"]
+    assert snapshot["snapshot_schema_version"] == "2"
+    assert snapshot["input_fingerprint"]
+    assert snapshot["raw_data"]["schema_version"] == "2"
+    assert any(item["id"] == "us_unemployment" for item in snapshot["raw_data"]["indicators"])
     with service.db.connect() as conn:
         acknowledgment = conn.execute("SELECT * FROM regime_review_acknowledgments").fetchone()
     assert acknowledgment is not None
     assert acknowledgment["evaluation_id"] == snapshot["evaluation_id"]
+
+
+def test_history_omits_large_raw_payload_but_snapshot_detail_keeps_it(tmp_path):
+    service = service_for(tmp_path)
+    add_series(service, "us_unemployment", [4.0, 4.1, 4.2, 4.3])
+    snapshot = service.create_snapshot(None, None)
+
+    history_item = service.history()[0]
+
+    assert "raw_data" not in history_item
+    assert history_item["raw_data_available"] is True
+    assert service.get_snapshot(snapshot["id"])["raw_data"]["indicators"]
+
+
+def test_snapshot_and_review_acknowledgment_are_atomic(tmp_path, monkeypatch):
+    service = service_for(tmp_path)
+    monkeypatch.setattr(
+        service,
+        "_acknowledgment_payload",
+        lambda current, note=None: {"unknown_column": "force rollback"},
+    )
+
+    with pytest.raises(sqlite3.OperationalError):
+        service.create_snapshot(None, None)
+
+    with service.db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM regime_snapshots").fetchone()[0] == 0
 
 
 def test_snapshot_acknowledges_current_alerts_without_separate_choice(tmp_path):
@@ -137,7 +263,69 @@ def test_complete_review_records_only_ack_context_and_optional_short_note(tmp_pa
     assert result["latest_acknowledgment"]["note"] == "외부 점검 완료"
     with service.db.connect() as conn:
         row = conn.execute("SELECT * FROM regime_review_acknowledgments").fetchone()
-    assert set(dict(row)) == {"id", "completed_at", "evaluation_id", "trigger_state_json", "note"}
+    assert set(dict(row)) == {
+        "id", "completed_at", "evaluation_id", "trigger_state_json", "note",
+        "assessment_fingerprint", "candidate_regime", "urgency",
+    }
+    assert row["assessment_fingerprint"]
+
+
+def test_display_only_liquidity_series_cannot_change_domain_or_candidate(tmp_path):
+    service = service_for(tmp_path)
+    add_series(service, "fed_assets", [100, 80, 60, 40])
+
+    result = service.evaluate()
+    liquidity = next(item for item in result["domains"] if item["id"] == "liquidity")
+
+    assert liquidity["state"] == "데이터 없음"
+    assert result["candidate_regime"] == "유지"
+
+
+def test_historical_revision_changes_evaluation_fingerprint(tmp_path):
+    service = service_for(tmp_path)
+    add_series(service, "us_unemployment", [4.0, 4.0, 4.1, 4.5])
+    first = service.evaluate()
+    with service.db.connect() as conn:
+        first_date = conn.execute(
+            "SELECT MIN(observation_date) FROM regime_observations WHERE indicator_id='us_unemployment'"
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE regime_observations SET value=3.9 WHERE indicator_id='us_unemployment' AND observation_date=?",
+            (first_date,),
+        )
+
+    second = service.evaluate()
+
+    assert second["id"] != first["id"]
+
+
+def test_current_read_does_not_mutate_trigger_or_assessment_state(tmp_path):
+    service = service_for(tmp_path)
+    values = [3.5] * 12 + [4.1, 4.1, 4.1]
+    add_series(service, "us_unemployment", values)
+    service.evaluate(persist=True)
+    service.current(persist_state=True)
+    with service.db.connect() as conn:
+        before_trigger = conn.execute(
+            "SELECT rule_id,last_fired_at FROM regime_triggers ORDER BY rule_id"
+        ).fetchall()
+        before_assessments = conn.execute("SELECT COUNT(*) FROM review_assessments").fetchone()[0]
+
+    service.current()
+
+    with service.db.connect() as conn:
+        after_trigger = conn.execute(
+            "SELECT rule_id,last_fired_at FROM regime_triggers ORDER BY rule_id"
+        ).fetchall()
+        after_assessments = conn.execute("SELECT COUNT(*) FROM review_assessments").fetchone()[0]
+    assert [tuple(row) for row in after_trigger] == [tuple(row) for row in before_trigger]
+    assert after_assessments == before_assessments
+
+
+def test_required_assessment_without_trigger_is_not_acknowledged_by_old_empty_ack():
+    ack = {"trigger_state": {}, "assessment_fingerprint": None}
+
+    assert not RegimeService._acknowledges(ack, [], "new-state", "required")
 
 
 async def test_refresh_persists_yfinance_market_history_in_regime_cache(tmp_path, monkeypatch):

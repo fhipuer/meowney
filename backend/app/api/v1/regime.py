@@ -43,8 +43,15 @@ async def refresh_regime_data(force: bool = False):
             return {"status": "failed", "error": str(value)} if isinstance(value, Exception) else value
         macro, events, ai_capex, memory_prices = map(outcome, (macro, events, ai_capex, memory_prices))
         outcomes = (macro, events, ai_capex, memory_prices)
+        statuses = [item.get("status", "failed") for item in outcomes]
+        healthy = {"success", "cached"}
+        overall = (
+            "success" if all(status in healthy for status in statuses)
+            else "failed" if all(status not in healthy and status != "partial" for status in statuses)
+            else "partial"
+        )
         return {"macro": macro, "events": events, "ai_capex": ai_capex, "memory_prices": memory_prices,
-                "status": "partial" if any(item["status"] == "failed" for item in outcomes) else "success"}
+                "status": overall}
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"외부 데이터 갱신 실패: {exc}") from exc
 
@@ -76,7 +83,7 @@ async def update_regime_snapshot(snapshot_id: str, request: SnapshotRequest):
 async def export_regime_data(format: Literal["markdown", "json"] = "markdown"):
     service = RegimeService()
     if format == "json":
-        return {"current": service.current(), "history": service.history()}
+        return {"current": service.current(), "history": service.history(include_raw=True)}
     return Response(
         content=service.export_markdown(),
         media_type="text/markdown; charset=utf-8",

@@ -2,6 +2,7 @@
 Meowney API 메인 엔트리포인트 냥~
 고양이 집사의 자산 관리 서버
 """
+import asyncio
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -9,7 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.api.v1.router import api_router
-from app.services.scheduler_service import start_scheduler, shutdown_scheduler
+from app.services.scheduler_service import (
+    refresh_regime_sources,
+    shutdown_scheduler,
+    start_scheduler,
+)
 
 # Windows 콘솔 인코딩 문제 해결
 if sys.platform == "win32":
@@ -28,11 +33,21 @@ async def lifespan(app: FastAPI):
     # 시작 시
     print("[Meowney] 서버가 기지개를 켜는 중이다옹...")
     start_scheduler()
+    # Do not make HTTP readiness depend on external providers. Missing or due
+    # regime feeds warm in the background; fresh feeds use their own cache
+    # policy and return without a network request.
+    startup_refresh = asyncio.create_task(refresh_regime_sources())
     print("[Meowney] 스케줄러가 깨어났다옹! 매일 밤 자산 스냅샷을 찍을 거야~")
 
     yield
 
     # 종료 시
+    if not startup_refresh.done():
+        startup_refresh.cancel()
+        try:
+            await startup_refresh
+        except asyncio.CancelledError:
+            pass
     print("[Meowney] 서버가 잠들 준비를 하는 중이다옹...")
     shutdown_scheduler()
     print("[Meowney] 안녕히 주무세요 냥~")
@@ -42,7 +57,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Meowney API",
     description="🐱 고양이 집사의 자산 관리 API - 냥이와 함께하는 포트폴리오 관리",
-    version="1.5.5",
+    version="1.6.1",
     lifespan=lifespan,
     docs_url="/docs" if settings.debug else None,
     redoc_url="/redoc" if settings.debug else None,

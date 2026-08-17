@@ -43,12 +43,12 @@ def test_ai_capex_requires_three_comparable_companies():
     assert coverage == .5
 
 
-def test_ai_capex_detects_broad_acceleration_deterministically():
+def test_ai_capex_detects_broad_strong_expansion_deterministically():
     state, _, coverage = classify_ai_capex([
         {"latest_capex": 1, "yoy": 40}, {"latest_capex": 1, "yoy": 30},
         {"latest_capex": 1, "yoy": 20}, {"latest_capex": 1, "yoy": 15},
     ])
-    assert state == "확대 가속"
+    assert state == "확대 강함"
     assert coverage == 1
 
 
@@ -59,3 +59,26 @@ def test_ai_capex_flags_broad_contraction_for_review():
     ])
     assert state == "감속 관찰"
     assert "2개" in reason
+
+
+def test_normalize_quarters_does_not_treat_two_missing_quarters_as_one():
+    result = normalize_quarters([
+        fact("2026-01-01", "2026-03-31", 10, "q1"),
+        fact("2026-01-01", "2026-09-30", 39, "q3-ytd"),
+        fact("2026-01-01", "2026-12-31", 58, "fy", form="10-K", filed="2027-02-01"),
+    ])
+
+    assert [row["value"] for row in result] == [10, 19]
+    assert result[-1]["source_accessions"] == ["fy", "q3-ytd"]
+
+
+def test_ai_capex_excludes_stale_company_from_coverage():
+    state, _, coverage = classify_ai_capex([
+        {"latest_capex": 1, "yoy": 40, "is_stale": True},
+        {"latest_capex": 1, "yoy": 30},
+        {"latest_capex": 1, "yoy": 20},
+        {"latest_capex": 1, "yoy": 15},
+    ])
+
+    assert state != "확대 강함"
+    assert coverage == .75

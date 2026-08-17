@@ -10,10 +10,10 @@ test.describe('Calm Wealth Workspace', () => {
     await expect(page.getByRole('navigation', { name: '주요 메뉴' })).toBeVisible()
     await expect(page.getByRole('link', { name: '자산', exact: true })).toBeVisible()
     await expect(page.getByRole('link', { name: '자산배분이란?' })).toHaveCount(0)
-    await expect(page.getByText('총 자산', { exact: true })).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByText('시장 현황', { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('heading', { name: /포트폴리오 배분/ })).toBeVisible({ timeout: 30_000 })
     const summaryCards = page.getByTestId('summary-card-content')
     await expect(summaryCards).toHaveCount(4, { timeout: 30_000 })
+    await expect(summaryCards.first()).toContainText('총 자산')
     for (const card of await summaryCards.all()) {
       const hasOverflow = await card.evaluate((element) =>
         element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight

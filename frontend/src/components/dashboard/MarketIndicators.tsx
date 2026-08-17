@@ -98,35 +98,33 @@ const META: Record<
 };
 
 const signed = (value?: number | null) =>
-  value == null ? "—" : `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+  value == null
+    ? "—"
+    : `${value > 0 ? "↑ " : value < 0 ? "↓ " : ""}${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 const formatValue = (signal: RegimeSignal) => {
   if (signal.value == null) return "—";
   if (signal.id === "market_usdkrw")
     return signal.value.toLocaleString("ko-KR", { maximumFractionDigits: 1 });
-  if (signal.id === "market_wti") return `$${signal.value.toFixed(1)}`;
+  if (signal.id === "market_wti") return `$${signal.value.toFixed(1)} /배럴`;
   if (signal.id === "market_copper")
-    return `$${signal.value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+    return `$${signal.value.toLocaleString("en-US", { maximumFractionDigits: 0 })} /톤`;
   if (signal.id === "market_gold" || signal.id === "market_silver")
-    return `$${signal.value.toLocaleString("en-US", { maximumFractionDigits: 1 })}`;
+    return `$${signal.value.toLocaleString("en-US", { maximumFractionDigits: 1 })} /온스`;
   if (signal.id === "market_gold_silver_ratio")
     return `${signal.value.toFixed(1)}배`;
   return signal.value.toLocaleString("ko-KR", { maximumFractionDigits: 1 });
 };
 
-function changeTone(value?: number | null, inverse = false) {
-  if (value == null || Math.abs(value) < 0.05) return "text-muted-foreground";
-  const favorable = inverse ? value < 0 : value > 0;
-  return favorable ? "text-sky-300" : "text-amber-300";
+function changeTone(value?: number | null) {
+  return value == null || Math.abs(value) < 0.05
+    ? "text-muted-foreground"
+    : "text-foreground";
 }
 
 function MarketCard({ signal }: { signal: RegimeSignal }) {
   const meta = META[signal.id];
   if (!meta) return null;
   const Icon = meta.icon;
-  const inverse =
-    signal.id === "market_vix" ||
-    signal.id === "market_usdkrw" ||
-    signal.id === "market_dollar";
   return (
     <Card className="bg-card/70">
       <CardContent className="p-4">
@@ -151,7 +149,7 @@ function MarketCard({ signal }: { signal: RegimeSignal }) {
             variant="outline"
             className="font-normal text-muted-foreground"
           >
-            {signal.observation_date || "미수집"}
+            {signal.is_stale ? "오래됨 · " : ""}{signal.observation_date || "미수집"}
           </Badge>
         </div>
         <div className="mt-5 flex items-end justify-between gap-3">
@@ -159,7 +157,7 @@ function MarketCard({ signal }: { signal: RegimeSignal }) {
             {formatValue(signal)}
           </p>
           <p
-            className={`text-sm font-medium ${changeTone(signal.change_1m, inverse)}`}
+            className={`text-sm font-medium ${changeTone(signal.change_1m)}`}
           >
             1M {signed(signal.change_1m)}
           </p>
@@ -167,13 +165,13 @@ function MarketCard({ signal }: { signal: RegimeSignal }) {
         <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border/70 pt-3 text-xs">
           <div>
             <span className="text-muted-foreground">3M </span>
-            <span className={changeTone(signal.change_3m, inverse)}>
+            <span className={changeTone(signal.change_3m)}>
               {signed(signal.change_3m)}
             </span>
           </div>
           <div>
             <span className="text-muted-foreground">12M </span>
-            <span className={changeTone(signal.change_12m, inverse)}>
+            <span className={changeTone(signal.change_12m)}>
               {signed(signal.change_12m)}
             </span>
           </div>
@@ -250,7 +248,7 @@ export function MarketIndicators({ signals, fetchedAt }: Props) {
             </InfoTip>
           </div>
           <p className="text-sm text-muted-foreground">
-            주요 주가지수의 같은 기간 상대 흐름
+            최근 1년 · 표시 시작점=100
           </p>
         </CardHeader>
         <CardContent>

@@ -6,10 +6,35 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-RULE_VERSION = "2026-08-p1.7.0"
+RULE_VERSION = "2026-08-p1.9.0"
 SEVERITY_RANK = {"medium": 1, "high": 2, "critical": 3}
 REGIME_RANK = {"유지": 0, "경계": 1, "약화": 2, "전환": 3}
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
+
+
+def signal_freshness(signal: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
+    """Return the freshness verdict shared by every decision path."""
+    now = now or datetime.now(timezone.utc)
+    observed_at = signal.get("observation_date")
+    max_age = FRESHNESS_DAYS.get(signal.get("frequency", "monthly"), 95)
+    if not observed_at:
+        return {"fresh": False, "age_days": None, "max_age_days": max_age}
+    observed = datetime.fromisoformat(observed_at)
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    age_days = max(0, (now - observed).days)
+    return {"fresh": age_days <= max_age, "age_days": age_days, "max_age_days": max_age}
+
+
+def decision_usable(signal: dict[str, Any], now: datetime | None = None) -> bool:
+    """Display-only, unavailable, and stale series cannot affect a decision."""
+    if signal.get("status") == "unavailable":
+        return False
+    if signal.get("usage") not in {None, "regime", "trigger"}:
+        return False
+    if "is_stale" in signal:
+        return not bool(signal["is_stale"])
+    return signal_freshness(signal, now)["fresh"]
 
 
 def _values(signal: dict[str, Any]) -> list[float]:
@@ -62,8 +87,8 @@ def decompose_ten_year(signals: dict[str, dict[str, Any]], periods: int = 20) ->
     }
 
 
-def evaluate_triggers(signal_list: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    signals = {item["id"]: item for item in signal_list if item.get("status") != "unavailable"}
+def evaluate_triggers(signal_list: list[dict[str, Any]], now: datetime | None = None) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    signals = {item["id"]: item for item in signal_list if decision_usable(item, now)}
     triggers: list[dict[str, Any]] = []
 
     for key, label in (("core_cpi", "Core CPI"), ("core_pce", "Core PCE")):
@@ -179,15 +204,19 @@ def calculate_coverage(signals: list[dict[str, Any]], now: datetime | None = Non
     core = {"growth", "inflation", "rates", "liquidity"}
     summary: dict[str, Any] = {}
     for domain in core:
-        items = [item for item in signals if item.get("domain") == domain and not item.get("id", "").startswith("kr_")]
+        items = [
+            item for item in signals
+            if item.get("domain") == domain
+            and not item.get("id", "").startswith("kr_")
+            and item.get("usage") in {None, "regime"}
+        ]
         usable = []
         stale = []
         for item in items:
             if item.get("status") == "unavailable" or not item.get("observation_date"):
                 continue
-            observed = datetime.fromisoformat(item["observation_date"]).replace(tzinfo=timezone.utc)
-            max_age = FRESHNESS_DAYS.get(item.get("frequency", "monthly"), 75)
-            (stale if (now - observed).days > max_age else usable).append(item["id"])
+            freshness = signal_freshness(item, now)
+            (usable if freshness["fresh"] else stale).append(item["id"])
         ratio = len(usable) / len(items) if items else 0
         summary[domain] = {"total": len(items), "usable": len(usable), "stale": stale,
                            "coverage": round(ratio, 3), "status": "충분" if ratio >= .7 else "부분" if ratio >= .4 else "판정 불가"}

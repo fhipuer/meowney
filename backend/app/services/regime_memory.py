@@ -30,6 +30,13 @@ NAND_SERIES = {
     ("nand_client_ssd_contract", "1TB-mSATA/M.2 TLC PCIe-Value Grade"): "nand_client_ssd_contract_1tb",
     ("nand_client_ssd_contract", "512GB-mSATA/M.2 TLC PCIe-Value Grade"): "nand_client_ssd_contract_512gb",
 }
+MEMORY_MAX_AGE_DAYS = {
+    "spot": 14,
+    "module_spot": 14,
+    "contract": 75,
+    "nand_wafer_spot": 14,
+    "nand_client_ssd_contract": 150,
+}
 
 
 def _now() -> str:
@@ -72,8 +79,15 @@ def parse_memory_price_page(html: str) -> list[dict[str, Any]]:
             continue
         headers = [cell.get_text(" ", strip=True) for cell in table.select("thead th")]
         required = {"Item", "Session High", "Session Low", "Session Average"}
-        change_header = "Average Change" if market_type == "contract" else "Session Change"
-        if not required.issubset(headers) or change_header not in headers:
+        change_header = next(
+            (candidate for candidate in (
+                "Average Change" if market_type in {"contract", "module_spot"} else "Session Change",
+                "Session Change",
+                "Average Change",
+            ) if candidate in headers),
+            None,
+        )
+        if not required.issubset(headers) or not change_header:
             continue
         indices = {name: headers.index(name) for name in (*required, change_header)}
         period = None
@@ -160,7 +174,7 @@ def parse_nand_price_page(html: str) -> list[dict[str, Any]]:
 
 
 def classify_memory_cycle(latest: list[dict[str, Any]]) -> tuple[str, str]:
-    by_id = {item["series_id"]: item for item in latest}
+    by_id = {item["series_id"]: item for item in latest if not item.get("is_stale", False)}
     contract = by_id.get("dram_contract_ddr5_sodimm_8gb")
     spot = by_id.get("dram_spot_ddr5_16gb")
     if not contract:
@@ -181,7 +195,7 @@ def classify_memory_cycle(latest: list[dict[str, Any]]) -> tuple[str, str]:
 
 
 def classify_nand_prices(latest: list[dict[str, Any]]) -> tuple[str, str]:
-    primary = next((item for item in latest if item["series_id"] == "nand_wafer_spot_512gb_tlc"), None)
+    primary = next((item for item in latest if item["series_id"] == "nand_wafer_spot_512gb_tlc" and not item.get("is_stale", False)), None)
     if not primary:
         return "판정 불가", "512Gb TLC wafer spot 가격이 없습니다."
     change = primary.get("change_percent")
@@ -203,9 +217,11 @@ class MemoryPriceService:
     def _is_due(self) -> bool:
         with self.db.connect() as conn:
             row = conn.execute("SELECT * FROM memory_price_fetch_status WHERE source='trendforce_public'").fetchone()
-        return not row or not row["last_success_at"] or (
-            datetime.now(timezone.utc) - datetime.fromisoformat(row["last_success_at"])
-        ) >= timedelta(hours=20)
+        if not row or not row["last_success_at"]:
+            return True
+        if row["status"] == "failed":
+            return datetime.now(timezone.utc) - datetime.fromisoformat(row["last_attempted_at"]) >= timedelta(hours=1)
+        return datetime.now(timezone.utc) - datetime.fromisoformat(row["last_success_at"]) >= timedelta(hours=20)
 
     async def refresh(self, force: bool = False) -> dict[str, Any]:
         if not force and not self._is_due():
@@ -265,10 +281,16 @@ class MemoryPriceService:
                     "SELECT observation_date,price_average,change_percent FROM memory_price_observations "
                     "WHERE series_id=? ORDER BY observation_date DESC LIMIT 24", (item["series_id"],)
                 ).fetchall()][::-1]
+        for item in latest:
+            age_days = max(0, (datetime.now(timezone.utc).date() - datetime.fromisoformat(item["observation_date"]).date()).days)
+            item["age_days"] = age_days
+            item["max_age_days"] = MEMORY_MAX_AGE_DAYS.get(item["market_type"], 75)
+            item["is_stale"] = age_days > item["max_age_days"]
+            item["currency"] = "USD"
+            item["price_basis"] = "TrendForce 공개 표기 평균"
+            item["history"] = histories[item["series_id"]]
         state, reason = classify_memory_cycle(latest)
         nand_state, nand_reason = classify_nand_prices(latest)
-        for item in latest:
-            item["history"] = histories[item["series_id"]]
         return {"state": state, "reason": reason, "nand_state": nand_state, "nand_reason": nand_reason,
                 "source": "TrendForce 공개 가격표",
                 "source_url": SOURCE_URL, "series": latest, "fetch_status": dict(status) if status else None,

@@ -18,11 +18,14 @@ from app.services.regime_rules import (
     SEVERITY_RANK,
     calculate_coverage,
     calculate_review_urgency,
+    decision_usable,
     evaluate_triggers,
+    signal_freshness,
 )
 from app.services.regime_quadrant import calculate_us_macro_quadrant
 from app.services.finance_service import get_finance_service
 from app.services.regime_catalog import (
+    decision_chart,
     display_history,
     display_metrics,
     display_period,
@@ -76,9 +79,27 @@ class RegimeService:
     def __init__(self) -> None:
         self.db = get_database_client()
 
+    def _record_feed_status(
+        self, source: str, status: str, item_count: int = 0,
+        error: str | None = None, *, successful: bool = False,
+    ) -> None:
+        attempted = _now()
+        with self.db.connect() as conn:
+            conn.execute(
+                "INSERT INTO regime_feed_status(source,last_attempted_at,last_success_at,status,item_count,error) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(source) DO UPDATE SET "
+                "last_attempted_at=excluded.last_attempted_at,"
+                "last_success_at=COALESCE(excluded.last_success_at,regime_feed_status.last_success_at),"
+                "status=excluded.status,item_count=excluded.item_count,error=excluded.error",
+                (source, attempted, attempted if successful else None, status, item_count, error),
+            )
+
     async def refresh(self, force: bool = False) -> dict[str, Any]:
         """FRED 관측값을 SQLite에 저장한다. 키가 없으면 기존 캐시를 유지한다."""
         if not settings.fred_api_key:
+            self._record_feed_status(
+                "macro", "configuration_required", error="FRED API key is not configured"
+            )
             return {"status": "configuration_required", "source": "fred", "saved": 0}
 
         with self.db.connect() as conn:
@@ -108,7 +129,11 @@ class RegimeService:
         indicators = [item for item in indicators if due(item)]
         market_indicators = [item for item in market_indicators if due(item)]
         if not indicators and not market_indicators:
-            return {"status": "cached", "source": "mixed", "saved": 0, "evaluation": self.evaluate()}
+            self.evaluate(persist=True)
+            return {
+                "status": "cached", "source": "mixed", "saved": 0,
+                "evaluation": self.current(persist_state=True),
+            }
         run_id, started_at, saved = str(uuid4()), _now(), 0
         self.db.table("regime_fetch_runs").insert({
             "id": run_id, "source": "fred", "started_at": started_at, "status": "running"
@@ -230,12 +255,18 @@ class RegimeService:
                 "finished_at": _now(), "status": run_status,
                 "observations_saved": saved, "error": "; ".join(errors[:3]) if errors else None,
             }).eq("id", run_id).execute()
+            self._record_feed_status(
+                "macro", run_status, saved, "; ".join(errors[:3]) if errors else None,
+                successful=bool(rows),
+            )
         except Exception as exc:
             self.db.table("regime_fetch_runs").update({
                 "finished_at": _now(), "status": "failed", "error": str(exc)[:1000]
             }).eq("id", run_id).execute()
+            self._record_feed_status("macro", "failed", saved, str(exc)[:800])
             raise
-        evaluation = self.evaluate()
+        self.evaluate(persist=True)
+        evaluation = self.current(persist_state=True)
         return {"status": run_status, "source": "mixed", "saved": saved,
                 "errors": errors[:3], "evaluation": evaluation}
 
@@ -244,37 +275,58 @@ class RegimeService:
             definitions = [dict(row) for row in conn.execute(
                 "SELECT * FROM regime_indicators WHERE enabled=1 ORDER BY domain,id"
             ).fetchall()]
+            observations: dict[str, list[dict[str, Any]]] = {
+                definition["id"]: [] for definition in definitions
+            }
+            for row in conn.execute(
+                "SELECT o.indicator_id,o.observation_date,o.value,o.fetched_at,o.source "
+                "FROM regime_observations o JOIN regime_indicators i ON i.id=o.indicator_id "
+                "WHERE i.enabled=1 ORDER BY o.indicator_id,o.observation_date"
+            ).fetchall():
+                item = dict(row)
+                observations[item.pop("indicator_id")].append(item)
+            timing = {
+                row["indicator_id"]: {
+                    key: row[key]
+                    for key in ("observation_date", "available_from", "release_date", "vintage_kind")
+                }
+                for row in conn.execute(
+                    "SELECT indicator_id,observation_date,available_from,release_date,vintage_kind FROM ("
+                    "SELECT indicator_id,observation_date,available_from,release_date,vintage_kind,"
+                    "ROW_NUMBER() OVER(PARTITION BY indicator_id "
+                    "ORDER BY observation_date DESC,available_from DESC) AS rank "
+                    "FROM regime_observation_vintages) WHERE rank=1"
+                ).fetchall()
+            }
             for definition in definitions:
-                definition["observations"] = [dict(row) for row in conn.execute(
-                    "SELECT observation_date,value,fetched_at,source FROM regime_observations "
-                    "WHERE indicator_id=? ORDER BY observation_date",
-                    (definition["id"],),
-                ).fetchall()]
-                timing = conn.execute(
-                    "SELECT observation_date,available_from,release_date,vintage_kind "
-                    "FROM regime_observation_vintages WHERE indicator_id=? "
-                    "ORDER BY observation_date DESC,available_from DESC LIMIT 1",
-                    (definition["id"],),
-                ).fetchone()
-                definition["timing"] = dict(timing) if timing else None
+                definition["observations"] = observations[definition["id"]]
+                definition["timing"] = timing.get(definition["id"])
         return definitions
 
-    def _signal(self, indicator: dict[str, Any]) -> dict[str, Any]:
+    def _signal(self, indicator: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
         observations = indicator["observations"]
         values = [float(row["value"]) for row in observations]
+        role = indicator_role(indicator["id"])
         if not values:
             return {
-                **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "frequency")},
+                **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "frequency", "direction")},
                 "status": "unavailable", "score": 0, "reason": "수집된 데이터 없음",
                 "history": [], "display_period": display_period(indicator["frequency"]),
-                "display_metrics": [], **indicator_role(indicator["id"]),
+                "display_metrics": [], "decision_chart": None,
+                "is_stale": False, "age_days": None,
+                "max_age_days": signal_freshness(indicator, now)["max_age_days"],
+                "usable_for_decision": False, **role,
             }
         p1, p3, p12 = FREQUENCY_PERIODS[indicator["frequency"]]
         latest, change1, change3, change12 = values[-1], _change(values, p1), _change(values, p3), _change(values, p12)
         score, reason = self._score(indicator["id"], latest, change3, change12, values, p3, p12)
         status = "강함" if score >= 0.75 else "중립" if score > -0.5 else "둔화" if score > -1.5 else "약화"
-        return {
-            **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "frequency")},
+        freshness = signal_freshness(
+            {"observation_date": observations[-1]["observation_date"], "frequency": indicator["frequency"]},
+            now,
+        )
+        signal = {
+            **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "frequency", "direction")},
             "observation_date": observations[-1]["observation_date"],
             "fetched_at": observations[-1]["fetched_at"],
             "value": latest,
@@ -287,11 +339,21 @@ class RegimeService:
             "history": display_history(observations, indicator["frequency"]),
             "display_period": display_period(indicator["frequency"]),
             "display_metrics": display_metrics(indicator["id"], indicator["frequency"], values),
-            "available_from": indicator["timing"].get("available_from") if indicator.get("timing") else None,
-            "release_date": indicator["timing"].get("release_date") if indicator.get("timing") else None,
-            "vintage_kind": indicator["timing"].get("vintage_kind") if indicator.get("timing") else "latest_revised",
-            **indicator_role(indicator["id"]),
+            "decision_chart": decision_chart(indicator["id"], observations),
+            # regime_observations is the latest-value projection. A separately
+            # stored initial vintage must never be presented as provenance for
+            # this displayed value unless both rows are explicitly linked.
+            "available_from": None,
+            "release_date": None,
+            "vintage_kind": "latest_revised",
+            "vintage_history_available": bool(indicator.get("timing")),
+            "is_stale": not freshness["fresh"],
+            "age_days": freshness["age_days"],
+            "max_age_days": freshness["max_age_days"],
+            **role,
         }
+        signal["usable_for_decision"] = decision_usable(signal, now)
+        return signal
 
     @staticmethod
     def _score(key: str, latest: float, c3: float | None, c12: float | None,
@@ -325,31 +387,162 @@ class RegimeService:
             return (-1.5 if yoy < -2 else -.75 if yoy < 0 else .75, f"12개월 {yoy:+.1f}%")
         return (0, "중립 규칙")
 
-    def evaluate(self) -> dict[str, Any]:
+    @staticmethod
+    def _fingerprint_payload(
+        definitions: list[dict[str, Any]],
+        signals: list[dict[str, Any]],
+        macro_quadrant: dict[str, Any],
+        *,
+        include_triggers: bool = True,
+    ) -> dict[str, Any]:
+        signal_map = {item["id"]: item for item in signals}
+        inputs = []
+        for definition in definitions:
+            signal = signal_map[definition["id"]]
+            if signal.get("usage") == "display":
+                continue
+            if not include_triggers and signal.get("usage") != "regime":
+                continue
+            inputs.append({
+                "id": definition["id"],
+                "domain": definition["domain"],
+                "source_key": definition["source_key"],
+                "frequency": definition["frequency"],
+                "direction": definition["direction"],
+                "weight": float(definition["weight"]),
+                "usage": signal.get("usage"),
+                "usable_for_decision": bool(signal.get("usable_for_decision")),
+                "observations": [
+                    (row["observation_date"], float(row["value"]))
+                    for row in definition["observations"]
+                ],
+            })
+        return {
+            "model_version": macro_quadrant.get("version"),
+            "rule_version": RULE_VERSION,
+            "inputs": inputs,
+        }
+
+    @staticmethod
+    def _canonical_domains(
+        signals: list[dict[str, Any]],
+        weights: dict[str, float],
+        macro_quadrant: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Build the four official domain states from one documented path.
+
+        Signal scores remain visible for drill-down. When the level/momentum
+        model has adequate coverage, its outputs become the canonical domain
+        state; sparse fixtures and startup data fall back to the same filtered
+        signal aggregate instead of inventing a neutral state.
+        """
+        domains: list[dict[str, Any]] = []
+        for key, label in DOMAIN_LABELS.items():
+            items = [
+                item for item in signals
+                if item["domain"] == key
+                and not item["id"].startswith("kr_")
+                and item.get("usage") == "regime"
+                and item.get("usable_for_decision")
+            ]
+            weighted = sum(item["score"] * weights[item["id"]] for item in items)
+            total_weight = sum(weights[item["id"]] for item in items)
+            score = weighted / total_weight if total_weight else 0
+            state = "강함" if score >= .5 else "중립" if score > -.5 else "둔화" if score > -1.2 else "약화"
+            reasons = [
+                item["reason"] for item in sorted(items, key=lambda row: row["score"])[:2]
+                if item["score"] < 0
+            ]
+            method = "filtered_signal_aggregate"
+
+            if key in {"growth", "inflation"}:
+                level = macro_quadrant.get(f"{key}_level", {})
+                point = macro_quadrant.get("points", [{}])[-1] if macro_quadrant.get("points") else {}
+                momentum = point.get(key, {})
+                level_score, momentum_score = level.get("score"), momentum.get("coordinate")
+                if level.get("coverage", 0) >= .6 and momentum.get("coverage", 0) >= .5:
+                    if key == "growth":
+                        state = (
+                            "약화" if level_score is not None and level_score <= -35
+                            else "둔화" if (
+                                level_score is not None and level_score < 0
+                            ) or (
+                                momentum_score is not None and momentum_score <= -35
+                            )
+                            else "강함" if (
+                                level_score is not None and level_score >= 20
+                                and momentum_score is not None and momentum_score >= -20
+                            )
+                            else "중립"
+                        )
+                    else:
+                        state = (
+                            "약화" if (
+                                level_score is not None and level_score >= 60
+                            ) or (
+                                level_score is not None and level_score >= 25
+                                and momentum_score is not None and momentum_score >= 35
+                            )
+                            else "둔화" if momentum_score is not None and momentum_score >= 35
+                            else "강함" if (
+                                level_score is not None and level_score < 0
+                                and momentum_score is not None and momentum_score <= 0
+                            )
+                            else "중립"
+                        )
+                    score = {"강함": .75, "중립": 0.0, "둔화": -.75, "약화": -1.5}[state]
+                    method = "macro_level_momentum"
+                    reasons = [
+                        f"현재 {level.get('label', '판정 불가')} · 최근 모멘텀 {momentum_score:+.1f}"
+                        if momentum_score is not None else f"현재 {level.get('label', '판정 불가')}"
+                    ] if state in {"둔화", "약화"} else []
+
+            conditions = macro_quadrant.get("financial_conditions", {})
+            if key == "rates":
+                scores = [
+                    item.get("score") for item in (
+                        conditions.get("policy", {}), conditions.get("long_rates", {})
+                    ) if item.get("score") is not None
+                ]
+                if len(scores) == 2:
+                    pressure = max(scores)
+                    state = "약화" if pressure >= 65 else "둔화" if pressure >= 25 else "중립" if pressure >= -20 else "강함"
+                    score = {"강함": .75, "중립": 0.0, "둔화": -.75, "약화": -1.5}[state]
+                    method = "financial_conditions"
+                    reasons = [f"정책·장기금리 제한 강도 {pressure:.1f}"] if state in {"둔화", "약화"} else []
+            elif key == "liquidity":
+                pressure = conditions.get("credit", {}).get("score")
+                if pressure is not None:
+                    state = "약화" if pressure >= 65 else "둔화" if pressure >= 25 else "중립" if pressure >= -20 else "강함"
+                    score = {"강함": .75, "중립": 0.0, "둔화": -.75, "약화": -1.5}[state]
+                    method = "financial_conditions"
+                    reasons = [f"신용·금융여건 제한 강도 {pressure:.1f}"] if state in {"둔화", "약화"} else []
+
+            domains.append({
+                "id": key, "name": label,
+                "state": state if items else "데이터 없음",
+                "score": round(score, 3), "reasons": reasons,
+                "method": method if items else "unavailable",
+            })
+        return domains
+
+    def evaluate(self, persist: bool = True) -> dict[str, Any]:
+        now = datetime.now(timezone.utc)
         definitions = self._indicator_rows()
         weights = {item["id"]: float(item["weight"]) for item in definitions}
-        signals = [self._signal(item) for item in definitions]
+        signals = [self._signal(item, now) for item in definitions]
+        signal_map = {item["id"]: item for item in signals}
         macro_quadrant = calculate_us_macro_quadrant([
             {"id": item["id"], "name": item["name"], "frequency": item["frequency"],
              "history": [{"date": row["observation_date"], "value": float(row["value"])}
                          for row in item["observations"]]}
             for item in definitions
+            if signal_map[item["id"]].get("usable_for_decision")
         ])
         available = [item for item in signals if item["status"] != "unavailable"]
-        fingerprint_source = {
-            "model_version": macro_quadrant.get("version"), "rule_version": RULE_VERSION,
-            "observations": [(item["id"], item.get("observation_date"), item.get("value")) for item in available],
-        }
+        fingerprint_source = self._fingerprint_payload(definitions, signals, macro_quadrant)
         fingerprint = hashlib.sha256(json.dumps(fingerprint_source, sort_keys=True).encode()).hexdigest()
-        domains: list[dict[str, Any]] = []
-        for key, label in DOMAIN_LABELS.items():
-            items = [item for item in available if item["domain"] == key and not item["id"].startswith("kr_")]
-            weighted = sum(item["score"] * weights[item["id"]] for item in items)
-            total_weight = sum(weights[item["id"]] for item in items)
-            score = weighted / total_weight if total_weight else 0
-            state = "강함" if score >= .5 else "중립" if score > -.5 else "둔화" if score > -1.2 else "약화"
-            reasons = [item["reason"] for item in sorted(items, key=lambda row: row["score"])[:2] if item["score"] < 0]
-            domains.append({"id": key, "name": label, "state": state if items else "데이터 없음", "score": round(score, 3), "reasons": reasons})
+        domains = self._canonical_domains(signals, weights, macro_quadrant)
         adverse = sum(item["state"] in {"둔화", "약화"} for item in domains)
         weak = sum(item["state"] == "약화" for item in domains)
         candidate = "전환" if weak >= 3 else "약화" if weak >= 2 or adverse >= 3 else "경계" if adverse >= 1 else "유지"
@@ -364,38 +557,49 @@ class RegimeService:
             candidate = max((candidate, "경계"), key=REGIME_ORDER.index)
         if macro_quadrant.get("scope_status") == "macro_only" and candidate == "전환":
             candidate = "약화"
+        regime_basis = self._fingerprint_payload(
+            definitions, signals, macro_quadrant, include_triggers=False
+        )
         regime_inputs = [
             (item["id"], item.get("observation_date"), item.get("value"))
             for item in available
-            if item.get("usage") == "regime"
-            and (item.get("score", 0) < 0 or item["id"] in {"core_cpi", "core_pce", "tips10y", "term_premium"})
+            if item.get("usage") == "regime" and item.get("usable_for_decision")
         ]
         basis_fingerprint = hashlib.sha256(
-            json.dumps({"rule_version": RULE_VERSION, "inputs": regime_inputs}, sort_keys=True).encode()
+            json.dumps(regime_basis, sort_keys=True).encode()
         ).hexdigest()
+        confirmation_version = f"{RULE_VERSION}:{macro_quadrant.get('version', 'unknown')}"
         with self.db.connect() as conn:
             existing = conn.execute("SELECT * FROM regime_evaluations WHERE data_fingerprint=?", (fingerprint,)).fetchone()
             previous = conn.execute("SELECT * FROM regime_evaluations ORDER BY evaluated_at DESC LIMIT 1").fetchone()
         if existing:
             return self._evaluation_dict(dict(existing), signals, domains, macro_quadrant)
         current = previous["automatic_regime"] if previous else "유지"
+        reasons = [f"{item['name']}: {reason}" for item in domains for reason in item["reasons"]]
+        if not persist:
+            return {
+                "id": f"preview-{fingerprint[:16]}", "evaluated_at": _now(),
+                "data_fingerprint": fingerprint,
+                "candidate_regime": candidate, "automatic_regime": current,
+                "signals": signals, "domains": domains, "reasons": reasons,
+                "macro_quadrant": macro_quadrant,
+            }
         with self.db.connect() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO regime_candidate_confirmations("
                 "id,candidate_regime,basis_fingerprint,observed_at,evidence_json,rule_version) VALUES(?,?,?,?,?,?)",
-                (str(uuid4()), candidate, basis_fingerprint, _now(), json.dumps(regime_inputs, ensure_ascii=False), RULE_VERSION),
+                (str(uuid4()), candidate, basis_fingerprint, _now(), json.dumps(regime_inputs, ensure_ascii=False), confirmation_version),
             )
             recent_confirmations = conn.execute(
                 "SELECT candidate_regime FROM regime_candidate_confirmations WHERE rule_version=? "
                 "ORDER BY observed_at DESC LIMIT 2",
-                (RULE_VERSION,),
+                (confirmation_version,),
             ).fetchall()
         confirmed = (
             len(recent_confirmations) >= 2
             and all(row["candidate_regime"] == candidate for row in recent_confirmations)
         )
         automatic = candidate if candidate == current or confirmed else current
-        reasons = [f"{item['name']}: {reason}" for item in domains for reason in item["reasons"]]
         evaluation_id = str(uuid4())
         self.db.table("regime_evaluations").insert({
             "id": evaluation_id, "evaluated_at": _now(), "data_fingerprint": fingerprint,
@@ -403,6 +607,7 @@ class RegimeService:
             "signals_json": signals, "domains_json": domains, "reasons_json": reasons,
         }).execute()
         return {"id": evaluation_id, "evaluated_at": _now(), "candidate_regime": candidate,
+                "data_fingerprint": fingerprint,
                 "automatic_regime": automatic, "signals": signals, "domains": domains, "reasons": reasons,
                 "macro_quadrant": macro_quadrant}
 
@@ -410,16 +615,17 @@ class RegimeService:
     def _evaluation_dict(row: dict[str, Any], signals: list[dict], domains: list[dict],
                          macro_quadrant: dict[str, Any]) -> dict[str, Any]:
         return {"id": row["id"], "evaluated_at": row["evaluated_at"],
+                "data_fingerprint": row["data_fingerprint"],
                 "candidate_regime": row["candidate_regime"], "automatic_regime": row["automatic_regime"],
                 "signals": signals, "domains": domains, "reasons": json.loads(row["reasons_json"]),
                 "macro_quadrant": macro_quadrant}
 
-    def current(self) -> dict[str, Any]:
+    def current(self, persist_state: bool = False) -> dict[str, Any]:
         from app.services.regime_events import RegimeEventService
         from app.services.regime_sec import SecCapexService
         from app.services.regime_memory import MemoryPriceService
 
-        evaluation = self.evaluate()
+        evaluation = self.evaluate(persist=False)
         with self.db.connect() as conn:
             latest_fetch = conn.execute("SELECT * FROM regime_fetch_runs ORDER BY started_at DESC LIMIT 1").fetchone()
             latest_snapshot = conn.execute("SELECT created_at,automatic_regime,domains_json FROM regime_snapshots ORDER BY created_at DESC LIMIT 1").fetchone()
@@ -450,10 +656,16 @@ class RegimeService:
             evaluation["automatic_regime"], evaluation["candidate_regime"], triggers, coverage, worsened_domains,
             bool(prior_evaluation and prior_evaluation["automatic_regime"] != evaluation["automatic_regime"]),
         )
-        self._sync_triggers(triggers)
-        self._save_assessment(evaluation["id"], urgency, review_reasons, coverage)
+        if persist_state and not evaluation["id"].startswith("preview-"):
+            self._sync_triggers(triggers)
+            self._save_assessment(evaluation["id"], urgency, review_reasons, coverage)
+        assessment_fingerprint = self._assessment_fingerprint(
+            evaluation["candidate_regime"], urgency, triggers, coverage
+        )
         latest_ack = self._latest_acknowledgment()
-        acknowledged = self._acknowledges(latest_ack, triggers)
+        acknowledged = self._acknowledges(
+            latest_ack, triggers, assessment_fingerprint, urgency
+        )
         evaluation.update({
             "rule_version": RULE_VERSION,
             "review_urgency": urgency,
@@ -462,6 +674,7 @@ class RegimeService:
             "rate_decomposition": rate_decomposition,
             "coverage": coverage,
             "latest_acknowledgment": latest_ack,
+            "assessment_fingerprint": assessment_fingerprint,
             "review_acknowledged": acknowledged,
             "needs_new_review": urgency == "required" and not acknowledged,
         })
@@ -469,25 +682,43 @@ class RegimeService:
         portfolio, target = self._portfolio_context()
         evaluation["portfolio"] = portfolio
         evaluation["target_plan"] = target
-        fetched_times = [datetime.fromisoformat(item["fetched_at"]) for item in evaluation["signals"] if item.get("fetched_at")]
-        evaluation["cache_age_hours"] = round((datetime.now(timezone.utc) - max(fetched_times)).total_seconds() / 3600, 1) if fetched_times else None
-        evaluation["is_stale"] = evaluation["cache_age_hours"] is not None and evaluation["cache_age_hours"] > 48
+        fetched_times = [
+            datetime.fromisoformat(item["fetched_at"])
+            for item in evaluation["signals"]
+            if item.get("fetched_at") and item.get("usage") == "regime"
+        ]
+        evaluation["cache_age_hours"] = round(
+            (datetime.now(timezone.utc) - min(fetched_times)).total_seconds() / 3600, 1
+        ) if fetched_times else None
+        evaluation["newest_cache_age_hours"] = round(
+            (datetime.now(timezone.utc) - max(fetched_times)).total_seconds() / 3600, 1
+        ) if fetched_times else None
+        evaluation["is_stale"] = any(
+            domain["stale"] for domain in coverage["domains"].values()
+        )
         evaluation["data_quality"] = self._data_quality(evaluation["signals"], coverage)
-        evaluation["upcoming_events"] = RegimeEventService().upcoming()
+        event_service = RegimeEventService()
+        evaluation["upcoming_events"] = event_service.upcoming()
         evaluation["ai_capex"] = SecCapexService().summary()
         evaluation["memory_cycle"] = MemoryPriceService().summary()
+        evaluation["feed_health"] = self._feed_health()
         return evaluation
 
     @staticmethod
     def _data_quality(signals: list[dict[str, Any]], coverage: dict[str, Any]) -> dict[str, Any]:
         scoped = [item for item in signals if item.get("domain") in {"growth", "inflation", "rates", "liquidity"}
-                  and not item["id"].startswith("kr_")]
+                  and not item["id"].startswith("kr_") and item.get("usage") == "regime"]
         available = [item for item in scoped if item.get("observation_date")]
         unavailable = [item["name"] for item in scoped if item.get("status") == "unavailable"]
         stale_ids = {key for domain in coverage["domains"].values() for key in domain["stale"]}
         stale = [
             {"id": item["id"], "name": item["name"], "observation_date": item.get("observation_date")}
             for item in signals if item["id"] in stale_ids
+        ]
+        auxiliary_stale = [
+            {"id": item["id"], "name": item["name"], "observation_date": item.get("observation_date")}
+            for item in signals
+            if item.get("usage") == "display" and item.get("is_stale")
         ]
         observation_dates = [item["observation_date"] for item in available]
         fetched_at = [item["fetched_at"] for item in available if item.get("fetched_at")]
@@ -502,9 +733,59 @@ class RegimeService:
         return {
             "status": status, "overall_coverage": coverage["overall"], "reasons": reasons,
             "stale": stale, "unavailable": unavailable,
+            "scope": "us_macro_decision_inputs",
+            "auxiliary_stale": auxiliary_stale,
             "observation_range": {"from": min(observation_dates) if observation_dates else None,
                                   "to": max(observation_dates) if observation_dates else None},
             "last_fetched_at": max(fetched_at) if fetched_at else None,
+        }
+
+    def _feed_health(self) -> dict[str, Any]:
+        with self.db.connect() as conn:
+            macro = conn.execute(
+                "SELECT source,last_attempted_at,last_success_at,status,item_count,error FROM regime_feed_status "
+                "WHERE source='macro'"
+            ).fetchone()
+            if not macro:
+                run = conn.execute(
+                    "SELECT source,started_at,finished_at,status,observations_saved,error "
+                    "FROM regime_fetch_runs ORDER BY started_at DESC LIMIT 1"
+                ).fetchone()
+                macro = ({
+                    "source": "macro", "last_attempted_at": run["started_at"],
+                    "last_success_at": run["finished_at"] if run["status"] in {"success", "partial"} else None,
+                    "status": run["status"], "item_count": run["observations_saved"], "error": run["error"],
+                } if run else None)
+            events = conn.execute(
+                "SELECT * FROM regime_feed_status WHERE source='bls_events'"
+            ).fetchone()
+            memory = conn.execute(
+                "SELECT source,last_attempted_at,last_success_at,status,observation_count AS item_count,error "
+                "FROM memory_price_fetch_status WHERE source='trendforce_public'"
+            ).fetchone()
+            companies = [dict(row) for row in conn.execute(
+                "SELECT * FROM company_fetch_status ORDER BY company_id"
+            ).fetchall()]
+        company_statuses = [row["status"] for row in companies]
+        ai_status = (
+            "unavailable" if not companies
+            else "success" if all(value == "success" for value in company_statuses)
+            else "failed" if all(value == "failed" for value in company_statuses)
+            else "partial"
+        )
+        ai_successes = [row["last_success_at"] for row in companies if row.get("last_success_at")]
+        ai_attempts = [row["last_attempted_at"] for row in companies if row.get("last_attempted_at")]
+        return {
+            "macro": dict(macro) if macro else None,
+            "events": dict(events) if events else None,
+            "ai_capex": {
+                "source": "sec_capex", "status": ai_status,
+                "last_attempted_at": max(ai_attempts) if ai_attempts else None,
+                "last_success_at": min(ai_successes) if ai_successes else None,
+                "item_count": len(ai_successes),
+                "error": " · ".join(row["error"] for row in companies if row.get("error")) or None,
+            },
+            "memory": dict(memory) if memory else None,
         }
 
     def _sync_triggers(self, triggers: list[dict[str, Any]]) -> None:
@@ -522,8 +803,18 @@ class RegimeService:
                     "last_fired_at": fired_at, "active": 1, "resolved_at": None,
                 }
                 if old:
-                    assignments = ",".join(f"{key}=?" for key in payload)
-                    conn.execute(f"UPDATE regime_triggers SET {assignments} WHERE rule_id=?", (*payload.values(), item["rule_id"]))
+                    unchanged = (
+                        bool(old["active"])
+                        and old["rule_version"] == item["rule_version"]
+                        and old["severity"] == item["severity"]
+                        and old["evidence_json"] == payload["evidence_json"]
+                    )
+                    if not unchanged:
+                        assignments = ",".join(f"{key}=?" for key in payload)
+                        conn.execute(
+                            f"UPDATE regime_triggers SET {assignments} WHERE rule_id=?",
+                            (*payload.values(), item["rule_id"]),
+                        )
                 else:
                     conn.execute(
                         "INSERT INTO regime_triggers(id,rule_id,rule_version,domain,severity,direction,evidence_cluster,"
@@ -557,8 +848,44 @@ class RegimeService:
         return result
 
     @staticmethod
-    def _acknowledges(ack: dict[str, Any] | None, triggers: list[dict[str, Any]]) -> bool:
+    def _assessment_fingerprint(
+        candidate: str,
+        urgency: str,
+        triggers: list[dict[str, Any]],
+        coverage: dict[str, Any],
+    ) -> str:
+        payload = {
+            "candidate": candidate,
+            "urgency": urgency,
+            "triggers": sorted(
+                (item["rule_id"], item["severity"]) for item in triggers
+            ),
+            "coverage": {
+                key: {
+                    "status": value["status"],
+                    "stale": sorted(value["stale"]),
+                    "usable": value["usable"],
+                    "total": value["total"],
+                }
+                for key, value in sorted(coverage["domains"].items())
+            },
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
+
+    @staticmethod
+    def _acknowledges(
+        ack: dict[str, Any] | None,
+        triggers: list[dict[str, Any]],
+        assessment_fingerprint: str | None = None,
+        urgency: str | None = None,
+    ) -> bool:
         if not ack:
+            return False
+        if assessment_fingerprint and ack.get("assessment_fingerprint"):
+            return ack["assessment_fingerprint"] == assessment_fingerprint
+        if urgency == "required" and not triggers:
             return False
         prior = ack["trigger_state"]
         return all(
@@ -568,17 +895,26 @@ class RegimeService:
         )
 
     def complete_review(self, note: str | None = None) -> dict[str, Any]:
-        current = self.current()
+        self.evaluate(persist=True)
+        current = self.current(persist_state=True)
         self._insert_acknowledgment(current, note)
         return self.current()
 
     def _insert_acknowledgment(self, current: dict[str, Any], note: str | None = None) -> None:
-        acknowledgment = {
+        self.db.table("regime_review_acknowledgments").insert(
+            self._acknowledgment_payload(current, note)
+        ).execute()
+
+    @staticmethod
+    def _acknowledgment_payload(current: dict[str, Any], note: str | None = None) -> dict[str, Any]:
+        return {
             "id": str(uuid4()), "completed_at": _now(), "evaluation_id": current["id"],
             "trigger_state_json": {item["rule_id"]: item["severity"] for item in current["triggers"]},
+            "assessment_fingerprint": current.get("assessment_fingerprint"),
+            "candidate_regime": current.get("candidate_regime"),
+            "urgency": current.get("review_urgency"),
             "note": note.strip()[:300] if note and note.strip() else None,
         }
-        self.db.table("regime_review_acknowledgments").insert(acknowledgment).execute()
 
     @staticmethod
     def _portfolio_signals(domains: list[dict]) -> list[str]:
@@ -590,14 +926,16 @@ class RegimeService:
         return signals
 
     def create_snapshot(self, user_regime: str | None, user_note: str | None) -> dict[str, Any]:
-        current = self.current()
+        self.evaluate(persist=True)
+        current = self.current(persist_state=True)
         if user_regime and user_regime not in REGIME_ORDER:
             raise ValueError("지원하지 않는 사용자 레짐")
         snapshot_id, created_at = str(uuid4()), _now()
+        raw_inputs = self._snapshot_inputs(current["evaluated_at"])
         payload = {
             "id": snapshot_id, "created_at": created_at, "evaluation_id": current["id"],
             "automatic_regime": current["automatic_regime"], "user_regime": user_regime,
-            "user_note": user_note, "raw_data_json": current["signals"], "signals_json": current["signals"],
+            "user_note": user_note, "raw_data_json": raw_inputs, "signals_json": current["signals"],
             "domains_json": current["domains"], "reasons_json": current["reasons"],
             "portfolio_json": current["portfolio"], "target_plan_json": current["target_plan"],
             "review_urgency": current["review_urgency"], "triggers_json": current["triggers"],
@@ -610,10 +948,57 @@ class RegimeService:
             "ai_capex_json": current["ai_capex"],
             "upcoming_events_json": current["upcoming_events"],
             "memory_cycle_json": current["memory_cycle"],
+            "input_fingerprint": current.get("data_fingerprint"),
+            "assessment_fingerprint": current.get("assessment_fingerprint"),
+            "feed_health_json": current.get("feed_health"),
+            "snapshot_schema_version": "2",
         }
-        self.db.table("regime_snapshots").insert(payload).execute()
-        self._insert_acknowledgment(current, user_note)
+        acknowledgment = self._acknowledgment_payload(current, user_note)
+        # Snapshot and its implicit review acknowledgment describe one user
+        # action, so either both rows are committed or neither is.
+        with self.db.connect() as conn:
+            encoded = {
+                key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value
+                for key, value in payload.items()
+            }
+            columns = ",".join(encoded)
+            conn.execute(
+                f"INSERT INTO regime_snapshots({columns}) VALUES({','.join('?' for _ in encoded)})",
+                tuple(encoded.values()),
+            )
+            ack_encoded = {
+                key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value
+                for key, value in acknowledgment.items()
+            }
+            ack_columns = ",".join(ack_encoded)
+            conn.execute(
+                f"INSERT INTO regime_review_acknowledgments({ack_columns}) "
+                f"VALUES({','.join('?' for _ in ack_encoded)})",
+                tuple(ack_encoded.values()),
+            )
         return self.get_snapshot(snapshot_id)
+
+    def _snapshot_inputs(self, captured_at: str) -> dict[str, Any]:
+        """Capture every enabled source row used to reproduce this evaluation."""
+        definitions = self._indicator_rows()
+        indicators = []
+        for definition in definitions:
+            role = indicator_role(definition["id"])
+            indicators.append({
+                **{key: definition[key] for key in (
+                    "id", "domain", "name", "source", "source_key", "unit",
+                    "frequency", "direction", "weight", "enabled",
+                )},
+                **role,
+                "timing": definition.get("timing"),
+                "observations": definition["observations"],
+            })
+        return {
+            "schema_version": "2",
+            "captured_at": captured_at,
+            "rule_version": RULE_VERSION,
+            "indicators": indicators,
+        }
 
     def _portfolio_context(self) -> tuple[dict[str, Any], dict[str, Any] | None]:
         with self.db.connect() as conn:
@@ -639,10 +1024,10 @@ class RegimeService:
             raise KeyError(snapshot_id)
         return self._snapshot_dict(dict(row))
 
-    def history(self) -> list[dict[str, Any]]:
+    def history(self, include_raw: bool = False) -> list[dict[str, Any]]:
         with self.db.connect() as conn:
             rows = conn.execute("SELECT * FROM regime_snapshots ORDER BY created_at DESC").fetchall()
-        return [self._snapshot_dict(dict(row)) for row in rows]
+        return [self._snapshot_dict(dict(row), include_raw=include_raw) for row in rows]
 
     def update_judgment(self, snapshot_id: str, user_regime: str | None, user_note: str | None) -> dict[str, Any]:
         if user_regime and user_regime not in REGIME_ORDER:
@@ -651,8 +1036,19 @@ class RegimeService:
         return self.get_snapshot(snapshot_id)
 
     @staticmethod
-    def _snapshot_dict(row: dict[str, Any]) -> dict[str, Any]:
-        for key in ("raw_data_json", "signals_json", "domains_json", "reasons_json", "portfolio_json", "target_plan_json", "triggers_json", "coverage_json", "observation_range_json", "macro_quadrant_json", "ai_capex_json", "upcoming_events_json", "memory_cycle_json"):
+    def _snapshot_dict(row: dict[str, Any], include_raw: bool = True) -> dict[str, Any]:
+        row["raw_data_available"] = bool(row.get("raw_data_json"))
+        json_fields = [
+            "signals_json", "domains_json", "reasons_json", "portfolio_json",
+            "target_plan_json", "triggers_json", "coverage_json",
+            "observation_range_json", "macro_quadrant_json", "ai_capex_json",
+            "upcoming_events_json", "memory_cycle_json", "feed_health_json",
+        ]
+        if include_raw:
+            json_fields.insert(0, "raw_data_json")
+        else:
+            row.pop("raw_data_json", None)
+        for key in json_fields:
             row[key.removesuffix("_json")] = json.loads(row[key]) if row.get(key) else None
             row.pop(key, None)
         return row

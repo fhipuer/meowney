@@ -13,7 +13,7 @@ from datetime import date
 from typing import Any, Callable
 
 
-QUADRANT_VERSION = "2026-08-us-macro-q2"
+QUADRANT_VERSION = "2026-08-us-macro-q3"
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
 
 
