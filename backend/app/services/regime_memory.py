@@ -184,9 +184,9 @@ def classify_memory_cycle(latest: list[dict[str, Any]]) -> tuple[str, str]:
     if contract_change is None:
         return "판정 제한", "DDR5 Contract 전월 변화율을 확인하지 못했습니다."
     if contract_change >= 5:
-        return "가격 확장", f"DDR5 Contract가 전월 대비 {contract_change:+.1f}% 상승했습니다."
+        return "가격 확장", f"DDR5 Contract가 공개 표 비교 기준 {contract_change:+.1f}% 상승했습니다."
     if contract_change > 0:
-        return "가격 상승", f"DDR5 Contract가 전월 대비 {contract_change:+.1f}% 상승했습니다."
+        return "가격 상승", f"DDR5 Contract가 공개 표 비교 기준 {contract_change:+.1f}% 상승했습니다."
     if contract_change < 0 and spot_change is not None and spot_change < 0:
         return "하락 관찰", "DDR5 Contract와 Spot이 함께 하락했습니다."
     if contract_change < 0:

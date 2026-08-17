@@ -21,6 +21,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTip } from "@/components/ui/info-tip";
+import { REGIME_SERIES_COLORS } from "@/lib/regime-tone";
 import type { RegimeSignal } from "@/types";
 
 type Props = { signals: RegimeSignal[]; fetchedAt?: string | null };
@@ -303,7 +304,7 @@ export function MarketIndicators({ signals, fetchedAt }: Props) {
                     type="monotone"
                     dataKey="market_sp500"
                     name="S&P 500"
-                    stroke="#60a5fa"
+                    stroke={REGIME_SERIES_COLORS.blue}
                     dot={false}
                     strokeWidth={2}
                     connectNulls
@@ -313,7 +314,7 @@ export function MarketIndicators({ signals, fetchedAt }: Props) {
                     type="monotone"
                     dataKey="market_nasdaq"
                     name="NASDAQ"
-                    stroke="#a78bfa"
+                    stroke={REGIME_SERIES_COLORS.violet}
                     dot={false}
                     strokeWidth={2}
                     connectNulls
@@ -323,7 +324,7 @@ export function MarketIndicators({ signals, fetchedAt }: Props) {
                     type="monotone"
                     dataKey="market_kospi"
                     name="KOSPI"
-                    stroke="#2dd4bf"
+                    stroke={REGIME_SERIES_COLORS.cyan}
                     dot={false}
                     strokeWidth={2}
                     connectNulls

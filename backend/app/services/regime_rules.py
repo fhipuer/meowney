@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from typing import Any
 
+from app.services.regime_rates import (
+    aligned_changes,
+    aligned_ten_year_changes,
+    calculate_rate_model,
+)
 
-RULE_VERSION = "2026-08-p1.9.0"
+
+RULE_VERSION = "2026-08-p2.0.0-rates-v2"
 SEVERITY_RANK = {"medium": 1, "high": 2, "critical": 3}
 REGIME_RANK = {"유지": 0, "경계": 1, "약화": 2, "전환": 3}
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
@@ -38,7 +45,15 @@ def decision_usable(signal: dict[str, Any], now: datetime | None = None) -> bool
 
 
 def _values(signal: dict[str, Any]) -> list[float]:
-    return [float(item["value"]) for item in signal.get("history", [])]
+    by_date: dict[str, float] = {}
+    for row in signal.get("history", []):
+        try:
+            value = float(row["value"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if row.get("date") and math.isfinite(value):
+            by_date[str(row["date"])] = value
+    return [by_date[key] for key in sorted(by_date)]
 
 
 def _absolute_change(signal: dict[str, Any], periods: int) -> float | None:
@@ -71,24 +86,44 @@ def _trigger(rule_id: str, domain: str, severity: str, cluster: str, summary: st
 
 
 def decompose_ten_year(signals: dict[str, dict[str, Any]], periods: int = 20) -> dict[str, Any] | None:
-    nominal = _absolute_change(signals.get("us10y", {}), periods)
-    real = _absolute_change(signals.get("tips10y", {}), periods)
-    breakeven = _absolute_change(signals.get("bei10y", {}), periods)
-    if nominal is None or real is None or breakeven is None:
+    aligned = aligned_ten_year_changes(signals, periods)
+    if not aligned:
         return None
+    nominal = aligned["changes"]["us10y"]
+    real = aligned["changes"]["tips10y"]
+    breakeven = aligned["changes"]["bei10y"]
     residual = nominal - real - breakeven
     if abs(real - breakeven) <= .10:
         driver = "혼합"
     else:
         driver = "실질금리 주도" if abs(real) > abs(breakeven) else "기대인플레이션 주도"
     return {
-        "periods": periods, "nominal_change": round(nominal, 3), "real_change": round(real, 3),
+        "periods": periods, "start_date": aligned["start_date"], "end_date": aligned["end_date"],
+        "nominal_change": round(nominal, 3), "real_change": round(real, 3),
         "breakeven_change": round(breakeven, 3), "residual": round(residual, 3), "driver": driver,
     }
 
 
-def evaluate_triggers(signal_list: list[dict[str, Any]], now: datetime | None = None) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+def evaluate_triggers(
+    signal_list: list[dict[str, Any]],
+    now: datetime | None = None,
+    rate_model: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     signals = {item["id"]: item for item in signal_list if decision_usable(item, now)}
+
+    def rate_context_usable(item: dict[str, Any]) -> bool:
+        if item.get("status") == "unavailable":
+            return False
+        if "is_stale" in item:
+            return not bool(item["is_stale"])
+        if item.get("observation_date"):
+            return signal_freshness(item, now)["fresh"]
+        return bool(item.get("history"))
+
+    rate_inputs = [
+        item for item in signal_list if rate_context_usable(item)
+    ]
+    rate_model = rate_model or calculate_rate_model(rate_inputs)
     triggers: list[dict[str, Any]] = []
 
     for key, label in (("core_cpi", "Core CPI"), ("core_pce", "Core PCE")):
@@ -108,35 +143,92 @@ def evaluate_triggers(signal_list: list[dict[str, Any]], now: datetime | None = 
     if tips_change is not None and tips_change >= .50:
         triggers.append(_trigger("tightening.real_yield.jump", "rates", "critical", "rates",
             f"10Y 실질금리 20관측일 {tips_change:+.2f}%p", {"change": tips_change, "threshold": .50}))
-    bei_change = _absolute_change(signals.get("bei10y", {}), 20)
-    nominal_change = _absolute_change(signals.get("us10y", {}), 20)
+    inflation_rate_change = aligned_changes(signals, ("bei10y", "us10y"), 20)
+    bei_change = (
+        inflation_rate_change["changes"]["bei10y"]
+        if inflation_rate_change else None
+    )
+    nominal_change = (
+        inflation_rate_change["changes"]["us10y"]
+        if inflation_rate_change else None
+    )
     if bei_change is not None and nominal_change is not None and bei_change >= .30 - 1e-9 and nominal_change >= .50 - 1e-9:
         triggers.append(_trigger("tightening.inflation_expectation", "rates", "high", "inflation_expectation",
             f"BEI {bei_change:+.2f}%p와 10Y {nominal_change:+.2f}%p 동반 상승",
-            {"bei_change": bei_change, "nominal_change": nominal_change}))
+            {"bei_change": bei_change, "nominal_change": nominal_change,
+             "start_date": inflation_rate_change["start_date"],
+             "end_date": inflation_rate_change["end_date"]}))
 
     # A stable but already-high real discount rate remains restrictive even
-    # when its 20-day change is small. Level pressure and shock pressure are
-    # deliberately separate rules.
-    tips = signals.get("tips10y")
-    term = signals.get("term_premium")
-    fed = signals.get("fedfunds")
-    core_pce = signals.get("core_pce")
-    core_pce_yoy = _percent_change(core_pce or {}, 12)
-    real_policy = (float(fed["value"]) - core_pce_yoy
-                   if fed and fed.get("value") is not None and core_pce_yoy is not None else None)
+    # when its 20-day change is small.  Term premium is decomposition context,
+    # not a second additive restriction score, because TIPS already captures
+    # the long real-rate burden.
+    long_rates = rate_model["long_rates"]
+    policy = rate_model["policy"]
+    tips_value = long_rates.get("real_10y")
+    real_policy = policy.get("real_policy_rate")
     restrictive_level = bool(
-        (tips and tips.get("value") is not None and float(tips["value"]) >= 2.25)
-        or (term and term.get("value") is not None and float(term["value"]) >= 1.25)
+        tips_value is not None
+        and (
+            (tips_value >= 2.25 and real_policy is not None and real_policy >= 0)
+            or (tips_value >= 2.75 and real_policy is None)
+        )
     )
-    if restrictive_level and (real_policy is None or real_policy >= 0):
+    if restrictive_level:
         triggers.append(_trigger("tightening.restrictive_level", "rates", "high", "rate_level",
-            f"긴축 수준 지속: 10Y TIPS {float(tips['value']):.2f}% / 실질 정책금리 {real_policy:+.2f}%p"
-            if tips and tips.get("value") is not None and real_policy is not None
-            else "장기 실질금리 또는 기간 프리미엄이 제한적 구간",
-            {"tips10y": tips.get("value") if tips else None,
-             "term_premium": term.get("value") if term else None,
-             "real_policy_rate": real_policy, "tips_threshold": 2.25, "term_premium_threshold": 1.25}))
+            f"긴축 수준 지속: 10Y TIPS {tips_value:.2f}%"
+            + (f" / 실질 정책금리 {real_policy:+.2f}%p" if real_policy is not None else " / 실질 정책금리 미확인"),
+            {"tips10y": tips_value, "real_policy_rate": real_policy,
+             "tips_threshold": 2.25, "missing_policy_threshold": 2.75,
+             "term_premium_role": "decomposition_context"}))
+
+    # 10Y-3M is the primary recession-leading curve.  10Y-2Y only confirms
+    # the same evidence cluster and therefore never creates a second trigger.
+    curve = rate_model["yield_curve"]
+    curve_state = curve.get("state")
+    curve_probability = curve.get("recession_probability_12m")
+    curve_score = curve.get("score")
+    if curve_state == "역전 지속" and curve_probability is not None and curve_probability >= 30:
+        triggers.append(_trigger(
+            "recession.yield_curve", "rates", "high", "yield_curve",
+            f"10Y-3M 월평균 역전 지속 · 12개월 침체확률 {curve_probability:.1f}%",
+            {
+                "state": curve_state,
+                "probability_12m": curve_probability,
+                "spread_10y3m_monthly_average": curve.get("monthly_average_10y3m"),
+                "spread_10y2y_monthly_average": curve.get("monthly_average_10y2y"),
+                "confirmation": curve.get("confirmation"),
+                "evidence_cluster": "yield_curve",
+            },
+        ))
+    elif curve_state == "역전 후 관찰" and curve_score is not None and curve_score >= 35:
+        triggers.append(_trigger(
+            "recession.yield_curve.post_inversion", "rates", "high", "yield_curve",
+            f"10Y-3M 역전 해소 후 {curve.get('days_since_inversion')}관측일 · 선행위험 관찰",
+            {
+                "state": curve_state,
+                "probability_12m": curve_probability,
+                "days_since_inversion": curve.get("days_since_inversion"),
+                "last_inversion_date": curve.get("last_inversion_date"),
+                "steepening": curve.get("steepening"),
+                "evidence_cluster": "yield_curve",
+            },
+        ))
+    elif (
+        curve_state in {"역전 확인 중", "평탄화 경계", "역전 후 관찰"}
+        and curve_score is not None and curve_score >= 25
+    ):
+        triggers.append(_trigger(
+            "recession.yield_curve.watch", "rates", "medium", "yield_curve",
+            f"10Y-3M {curve_state} · 12개월 침체확률 {curve_probability:.1f}%"
+            if curve_probability is not None else f"10Y-3M {curve_state}",
+            {
+                "state": curve_state,
+                "probability_12m": curve_probability,
+                "score": curve_score,
+                "evidence_cluster": "yield_curve",
+            },
+        ))
 
     unemployment = signals.get("us_unemployment")
     if unemployment:

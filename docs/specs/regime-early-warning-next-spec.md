@@ -1,19 +1,20 @@
 # 투자 레짐 조기경보 다음 구현 명세 v0.1
 
-> 구현 상태 (2026-08-16): P1.5 1차 구현 완료. `required/watch/not_needed`, 초기 물가·금리·고용·신용·시장
-> trigger, freshness/coverage, 10Y 20관측일 분해, Snapshot 동결 필드와 점검 완료 acknowledgment를 반영했다.
-> 발표 일정, 완전한 revision vintage, AI·반도체·전력 sentinel은 후속 단계다. 외부 공급자 작업은
-> 현재 거시 화면과 수집 신뢰성 개선이 안정된 뒤 재개한다.
+> 구현 상태 (2026-08-17): P1.5와 발표 일정, SEC 하이퍼스케일러 CAPEX,
+> TrendForce 공개 DRAM·NAND 표본, KOSIS·관세청·OpenDART 반도체 sentinel,
+> EIA 전력 수요·공급 맥락까지 구현했다. HBM·Server DRAM과 전력망 병목·기업 수주는
+> 신뢰할 수 있는 공급자 또는 라이선스가 정해질 때 재개한다.
 
-## 0. 외부 데이터 재개 체크포인트
+## 0. 외부 데이터 연결 상태
 
-현재 단계에서는 아래 공급자를 새로 연결하지 않는다. 추후 사용자가 다음 작업을 물으면 이 순서로 재개한다.
+현재 구현과 남은 범위는 다음과 같다.
 
-1. `SEC XBRL`: Microsoft·Alphabet·Meta·Amazon의 공시 총 CAPEX, 분기/TTM/YoY와 filed date
-2. `KOSIS/관세청·OpenDART·SEC`: 한국 반도체 수출과 삼성전자·SK하이닉스·Micron 매출/재고/CAPEX breadth
-3. `EIA`: 미국 총전력수요, 상업용 판매, 지역별 peak와 가동·계획 설비
-4. 신뢰 가능한 자동 공급자 미확보 상태 유지: DRAM/NAND/HBM 가격, 산업 재고, 변압기 lead time,
-   grid connection queue, 기업 orders/backlog
+1. 연결 완료: `SEC XBRL` Microsoft·Alphabet·Meta·Amazon 공시 총 CAPEX
+2. 연결 완료: `KOSIS/관세청·OpenDART` 한국 반도체 생산·출하·재고·메모리 수출과
+   삼성전자·SK하이닉스 매출·재고·CAPEX 확인
+3. 부분 완료: `EIA` 미국 총·상업용·산업용 전력판매, 순발전량과 순하계 설비용량
+4. 공급자 미확보: HBM·Server DRAM·Enterprise SSD 종합 수급, 변압기 lead time,
+   grid connection queue, 전력기업 orders/backlog
 
 재개 전제는 현재 P0 수집·시간축·단위·hysteresis 테스트가 안정되고 Snapshot이 새 계약을 보존하는 것이다.
 회사 공시는 scalar 거시 관측 테이블에 억지로 넣지 않고 filing/fact/derived metric 스키마를 별도로 둔다.
@@ -297,6 +298,10 @@ SEC XBRL 기반 hyperscaler CAPEX와 AI 영역
 
 > 발표 일정 1차 구현 (v1.4.0): 별도 캘린더 페이지 대신 현재 화면의 `다음 핵심 발표`
 > 카드에 BLS 공식 ICS의 CPI·PPI·고용보고서·JOLTS를 한국시간으로 표시한다.
+>
+> 운영 보강 (v1.7.0): NAS에서 BLS ICS가 403을 반환하므로 FRED Release Dates API를
+> 주 소스로 교체한다. GDP·PCE·소매판매까지 범위를 넓히고, 시각이 없는 발표일은
+> `date` 정밀도로 저장해 임의의 발표 시간을 만들지 않는다.
 > BEA GDP/PCE, FOMC, 한국 공식 일정과 기업 실적 발표일은 후속 연결 대상이다.
 
 > 메모리 가격 1차 구현 (v1.5.0): TrendForce 비로그인 공개 가격표를 하루 최대 1회
@@ -315,12 +320,13 @@ SEC XBRL 기반 hyperscaler CAPEX와 AI 영역
 
 ### P2.5
 
-반도체 공개 재무/가이던스 signal, KOSIS 반도체 수출. 신뢰 가능한 자동 출처가 없는 산업 가격과
-재고는 `미확인` 유지
+완료(v1.8.0): 관세청 메모리 수출, KOSIS 반도체 생산·출하·재고와 삼성전자·SK하이닉스
+OpenDART 재무 signal. Micron과 정성적 가이던스, HBM·Server DRAM 종합 수급은 미연결 유지.
 
 ### P3
 
-EIA 전력 데이터와 전력 기업 공시 기반 orders/backlog
+부분 완료(v1.8.0): EIA 전력판매·순발전량·순하계 설비용량. 지역 peak,
+계통 연결 대기와 전력 기업 공시 기반 orders/backlog는 후속 범위.
 
 ## 11. 미결정 제품 항목
 

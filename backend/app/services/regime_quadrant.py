@@ -12,8 +12,10 @@ import statistics
 from datetime import date
 from typing import Any, Callable
 
+from app.services.regime_rates import calculate_rate_model
 
-QUADRANT_VERSION = "2026-08-us-macro-q3"
+
+QUADRANT_VERSION = "2026-08-us-macro-q4-rates-v2"
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
 
 
@@ -202,11 +204,8 @@ def _financial_conditions(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
     def latest(key: str) -> float | None:
         values = _last_values(signals, key)
         return values[-1] if values else None
-    core_pce_yoy = _pct(_last_values(signals, "core_pce"), 12)
-    fed, tips, term, hy, ig, nfci = (latest(key) for key in ("fedfunds", "tips10y", "term_premium", "hy_oas", "ig_oas", "nfci"))
-    real_policy = fed - core_pce_yoy if fed is not None and core_pce_yoy is not None else None
-    policy_score = None if real_policy is None else round(max(-100, min(100, real_policy / 1.0 * 50)), 1)
-    rates_score = None if tips is None else round(max(-100, min(100, (tips - 1.5) / 1.0 * 60 + ((term or .5) - .5) * 20)), 1)
+    rate_model = calculate_rate_model(list(signals.values()))
+    hy, ig, nfci = (latest(key) for key in ("hy_oas", "ig_oas", "nfci"))
     credit_parts = [value for value in (
         None if hy is None else (hy - 3.5) / 1.5,
         None if ig is None else (ig - 1.2) / .6,
@@ -217,13 +216,16 @@ def _financial_conditions(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
         if score is None:
             return "판정 불가"
         return "매우 제한적" if score >= 65 else "제한적" if score >= 25 else "중립" if score >= -20 else "완화적"
-    policy_label = ("판정 불가" if real_policy is None else "제한적" if real_policy >= 1
-                    else "다소 제한적" if real_policy >= 0 else "완화적")
     return {
-        "policy": {"score": policy_score, "label": policy_label, "fed_funds": fed,
-                   "core_pce_yoy": round(core_pce_yoy, 2) if core_pce_yoy is not None else None, "real_policy_rate": round(real_policy, 2) if real_policy is not None else None},
-        "long_rates": {"score": rates_score, "label": state(rates_score), "nominal_10y": latest("us10y"),
-                       "real_10y": tips, "breakeven_10y": latest("bei10y"), "term_premium": term},
+        "rates": {
+            "score": rate_model["score"], "label": rate_model["label"],
+            "driver": rate_model["driver"], "coverage": rate_model["coverage"],
+            "version": rate_model["version"], "methodology": rate_model["methodology"],
+        },
+        "policy": rate_model["policy"],
+        "long_rates": rate_model["long_rates"],
+        "recent_shock": rate_model["recent_shock"],
+        "yield_curve": rate_model["yield_curve"],
         "credit": {"score": credit_score, "label": state(credit_score), "hy_oas": hy, "ig_oas": ig, "nfci": nfci},
     }
 
@@ -300,8 +302,15 @@ def _momentum_vector(growth: dict[str, Any], inflation: dict[str, Any]) -> dict[
     }
 
 
-def calculate_us_macro_quadrant(signal_list: list[dict[str, Any]]) -> dict[str, Any]:
+def calculate_us_macro_quadrant(
+    signal_list: list[dict[str, Any]],
+    financial_signal_list: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     signals = {item["id"]: item for item in signal_list}
+    financial_signals = {
+        item["id"]: item for item in (financial_signal_list or signal_list)
+    }
+    financial_conditions = _financial_conditions(financial_signals)
     relevant = set(GROWTH_MOMENTUM_RULES) | set(INFLATION_MOMENTUM_RULES)
     dates = [date.fromisoformat(row["date"]) for key, signal in signals.items() if key in relevant for row in signal.get("history", [])]
     if not dates:
@@ -312,6 +321,7 @@ def calculate_us_macro_quadrant(signal_list: list[dict[str, Any]]) -> dict[str, 
                 "environment_point": {"growth": None, "inflation": None, "quadrant": "unavailable",
                                       "label": "판정 불가", "semantics": "absolute_macro_level"},
                 "momentum_vector": unavailable_vector, "pressure_vector": unavailable_vector,
+                "financial_conditions": financial_conditions,
                 "trajectory_status": "unavailable_until_pit_history"}
     latest = max(dates)
     growth = _momentum_axis(signals, GROWTH_MOMENTUM_RULES, None)
@@ -335,7 +345,7 @@ def calculate_us_macro_quadrant(signal_list: list[dict[str, Any]]) -> dict[str, 
         "environment_quadrant": environment_quadrant, "environment_label": environment_label,
         "environment_point": environment_point,
         "momentum_vector": pressure_vector, "pressure_vector": pressure_vector,
-        "financial_conditions": _financial_conditions(signals),
+        "financial_conditions": financial_conditions,
         "growth_motion": {"delta": None, "direction": "현재 모멘텀", "speed": "실시간 이력 축적 전"},
         "inflation_motion": {"delta": None, "direction": "현재 모멘텀", "speed": "실시간 이력 축적 전"},
         "history_basis": "발표시점 빈티지 이력 축적 전 — 미래정보 누수를 막기 위해 과거 궤적 숨김",

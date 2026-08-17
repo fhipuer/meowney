@@ -15,6 +15,41 @@ def service_for(tmp_path):
     return service
 
 
+def test_thesis_snapshot_changes_compare_each_independent_stage():
+    previous = {
+        "ai_capex": {"state": "높은 투자 지속"},
+        "memory_cycle": {"state": "가격 상승", "nand_state": "가격 유지"},
+        "semiconductor_cycle": {
+            "dram_bottleneck": {"state": "가격 상승 확인"},
+            "hbm_server_proxy": {"state": "타이트 관찰"},
+            "demand": {"state": "수출 증가"},
+            "supply": {"state": "수급 개선"},
+            "company_confirmation": {"state": "확장 확인"},
+        },
+        "power_cycle": {"state": "완만한 변화"},
+    }
+    current = {
+        "ai_capex": {"state": "높은 투자 지속"},
+        "memory_cycle": {"state": "가격 상승", "nand_state": "관측가격 상승"},
+        "semiconductor_cycle": {
+            "dram_bottleneck": {"state": "타이트 신호"},
+            "hbm_server_proxy": {"state": "타이트 지속 신호"},
+            "demand": {"state": "수출 증가"},
+            "supply": {"state": "재고 부담"},
+            "company_confirmation": {"state": "실적 둔화"},
+        },
+        "power_cycle": {"state": "완만한 변화"},
+    }
+
+    assert RegimeService._thesis_changes(previous, current) == [
+        "NAND 가격 표본: 가격 유지 → 관측가격 상승",
+        "DRAM 수급 핵심축: 가격 상승 확인 → 타이트 신호",
+        "HBM·서버 DRAM 간접계측: 타이트 관찰 → 타이트 지속 신호",
+        "완제품 재고 보조축: 수급 개선 → 재고 부담",
+        "국내 기업 확인: 확장 확인 → 실적 둔화",
+    ]
+
+
 def test_decision_data_migration_uses_real_retail_and_adds_short_rate_proxy(tmp_path):
     service = service_for(tmp_path)
     with service.db.connect() as conn:
@@ -24,9 +59,27 @@ def test_decision_data_migration_uses_real_retail_and_adds_short_rate_proxy(tmp_
         short_rate = conn.execute(
             "SELECT source_key,domain FROM regime_indicators WHERE id='us3m'"
         ).fetchone()
+        term_premium = conn.execute(
+            "SELECT source_key,name,direction,weight FROM regime_indicators "
+            "WHERE id='term_premium'"
+        ).fetchone()
+        leading_curve = conn.execute(
+            "SELECT source_key,name,direction,weight FROM regime_indicators "
+            "WHERE id='curve10y3m'"
+        ).fetchone()
+        corroborating_curve = conn.execute(
+            "SELECT source_key,name FROM regime_indicators WHERE id='curve2s10s'"
+        ).fetchone()
 
     assert tuple(retail) == ("RRSFS", "미국 실질 소매판매", "백만 1982-84 달러")
     assert tuple(short_rate) == ("DGS3MO", "rates")
+    assert tuple(term_premium) == (
+        "THREEFYTP10", "미국 10Y 기간 프리미엄 (Kim-Wright)", "neutral", 0.5,
+    )
+    assert tuple(leading_curve) == (
+        "T10Y3M", "미국 10Y-3M 스프레드", "up_good", 2.0,
+    )
+    assert tuple(corroborating_curve) == ("T10Y2Y", "미국 10Y-2Y 스프레드")
 
 
 def test_latest_projection_never_borrows_initial_vintage_provenance(tmp_path):
@@ -65,6 +118,44 @@ def add_series(service, indicator_id, values):
             "fetched_at": "2026-08-16T00:00:00+00:00",
             "source": "fred",
         }).execute()
+
+
+def add_daily_series(service, indicator_id, values):
+    start = date.today() - timedelta(days=len(values) - 1)
+    for index, value in enumerate(values):
+        service.db.table("regime_observations").insert({
+            "id": str(uuid4()),
+            "indicator_id": indicator_id,
+            "observation_date": (start + timedelta(days=index)).isoformat(),
+            "value": value,
+            "fetched_at": datetime.now().astimezone().isoformat(),
+            "source": "fred",
+        }).execute()
+
+
+def test_rate_model_is_connected_to_canonical_rate_domain(tmp_path):
+    service = service_for(tmp_path)
+    for indicator_id, values in {
+        "tips10y": [2.39] * 90,
+        "us10y": [4.63] * 90,
+        "bei10y": [2.27] * 90,
+        "us3m": [3.87] * 90,
+        "term_premium": [0.83] * 90,
+        "curve10y3m": [-0.50] * 50 + [0.80] * 40,
+        "curve2s10s": [-0.25] * 50 + [0.50] * 40,
+    }.items():
+        add_daily_series(service, indicator_id, values)
+
+    evaluation = service.evaluate(persist=False)
+    conditions = evaluation["macro_quadrant"]["financial_conditions"]
+    rates_domain = next(item for item in evaluation["domains"] if item["id"] == "rates")
+
+    assert conditions["rates"]["version"] == "2026-08-rates-v2"
+    assert conditions["rates"]["score"] == pytest.approx(53.4)
+    assert conditions["long_rates"]["term_premium_role"] == "decomposition_context"
+    assert conditions["yield_curve"]["evidence_cluster"] == "yield_curve"
+    assert rates_domain["method"] == "three_layer_rate_model"
+    assert rates_domain["state"] == "둔화"
 
 
 def test_portfolio_context_does_not_mix_assets_from_other_portfolios(tmp_path):
@@ -147,8 +238,8 @@ def test_model_version_change_is_not_counted_as_second_data_confirmation(
     first = service.evaluate()
     original = regime_service_module.calculate_us_macro_quadrant
 
-    def changed_model(signals):
-        result = original(signals)
+    def changed_model(signals, financial_signals=None):
+        result = original(signals, financial_signals)
         result["version"] = f"{result['version']}-changed"
         return result
 
@@ -194,7 +285,7 @@ def test_snapshot_keeps_auto_and_user_judgment_separate(tmp_path):
     assert snapshot["review_urgency"] in {"required", "watch", "not_needed"}
     assert snapshot["coverage"] is not None
     assert snapshot["rule_version"]
-    assert snapshot["snapshot_schema_version"] == "2"
+    assert snapshot["snapshot_schema_version"] == "3"
     assert snapshot["input_fingerprint"]
     assert snapshot["raw_data"]["schema_version"] == "2"
     assert any(item["id"] == "us_unemployment" for item in snapshot["raw_data"]["indicators"])

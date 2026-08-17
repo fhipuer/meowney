@@ -27,14 +27,21 @@ async def test_event_failure_does_not_skip_sec_or_memory(monkeypatch):
             called.append("memory")
             return {"status": "success"}
 
+    class Thesis:
+        async def refresh(self):
+            called.append("thesis")
+            return {"status": "success"}
+
     monkeypatch.setattr(scheduler, "RegimeService", Macro)
     monkeypatch.setattr(scheduler, "RegimeEventService", Events)
     monkeypatch.setattr(scheduler, "SecCapexService", Sec)
     monkeypatch.setattr(scheduler, "MemoryPriceService", Memory)
+    monkeypatch.setattr(scheduler, "RegimeThesisDataService", Thesis)
 
     result = await scheduler.refresh_regime_sources()
 
-    assert set(called) == {"macro", "events", "sec", "memory"}
+    assert set(called) == {"macro", "events", "sec", "memory", "thesis"}
     assert isinstance(result["일정"], RuntimeError)
     assert result["SEC CAPEX"]["status"] == "success"
     assert result["메모리"]["status"] == "success"
+    assert result["반도체·전력"]["status"] == "success"

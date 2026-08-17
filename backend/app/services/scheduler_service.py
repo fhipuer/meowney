@@ -16,6 +16,7 @@ from app.services.regime_service import RegimeService
 from app.services.regime_events import RegimeEventService
 from app.services.regime_sec import SecCapexService
 from app.services.regime_memory import MemoryPriceService
+from app.services.regime_thesis import RegimeThesisDataService
 
 
 # 벤치마크 티커 목록 냥~
@@ -185,6 +186,7 @@ async def refresh_regime_sources():
         "일정": RegimeEventService().refresh(),
         "SEC CAPEX": SecCapexService().refresh(),
         "메모리": MemoryPriceService().refresh(),
+        "반도체·전력": RegimeThesisDataService().refresh(),
     }
     results = await asyncio.gather(*jobs.values(), return_exceptions=True)
     for name, result in zip(jobs, results):

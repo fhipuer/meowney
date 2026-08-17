@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/meowney.db"
     fred_api_key: str | None = None
     kosis_api_key: str | None = None
+    data_go_kr_service_key: str | None = None
+    opendart_api_key: str | None = None
+    eia_api_key: str | None = None
     sec_user_agent: str = "Meowney personal portfolio app contact@example.com"
 
     # 앱 설정

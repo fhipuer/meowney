@@ -548,6 +548,206 @@ export interface RegimeDomain {
   reasons: string[];
 }
 
+export interface RegimeTrendMetric {
+  latest: number | null;
+  observation_date: string | null;
+  yoy: number | null;
+  yoy_3m_avg: number | null;
+  momentum_3m_annualized?: number | null;
+  change_3m?: number | null;
+  unit: string;
+  history: Array<{ date: string; value: number; yoy: number | null }>;
+}
+
+export interface SemiconductorCycle {
+  state: string;
+  reason: string;
+  coverage: number;
+  role: "corroborative";
+  as_of_date: string | null;
+  dram_bottleneck: {
+    state: string;
+    reason: string;
+    coverage: number;
+    confidence: "부분" | "충분";
+    primary_signal: string;
+    conflicts: string[];
+    methodology: string;
+    limitations: string;
+  };
+  hbm_server_proxy: {
+    state: string;
+    reason: string;
+    coverage: number;
+    confidence: "부분";
+    direct_hbm_data: false;
+    conflicts: string[];
+    methodology: string;
+    limitations: string;
+    components: {
+      server_rdimm: {
+        state: string;
+        reason: string;
+        observation_date: string | null;
+        price: number | null;
+        change_percent: number | null;
+        is_stale: boolean;
+      };
+      export_decomposition: {
+        state: string;
+        reason: string;
+        coverage: number;
+        driver: "price_and_volume" | "unit_value_mix" | "volume" | "contraction" | "mixed" | "unknown";
+        conflicts: string[];
+      };
+      supplier_inventory: {
+        state: string;
+        reason: string;
+        coverage: number;
+        primary_company: "sk_hynix";
+        companies: Array<{
+          id: string;
+          name: string;
+          state: string;
+          period: string | null;
+          inventory_to_revenue: number | null;
+          prior_inventory_to_revenue: number | null;
+          ratio_change_yoy: number | null;
+          ratio_change_pp: number | null;
+          revenue_yoy: number | null;
+          inventory_yoy: number | null;
+          is_stale: boolean;
+          history: Array<{ period: string; value: number }>;
+        }>;
+      };
+    };
+  };
+  demand: {
+    state: string;
+    reason: string;
+    decomposition: {
+      state: string;
+      reason: string;
+      coverage: number;
+      driver: "price_and_volume" | "unit_value_mix" | "volume" | "contraction" | "mixed" | "unknown";
+      conflicts: string[];
+    };
+    metrics: {
+      memory: RegimeTrendMetric;
+      dram: RegimeTrendMetric;
+      flash: RegimeTrendMetric;
+      dram_weight: RegimeTrendMetric;
+      dram_unit_value: RegimeTrendMetric;
+    };
+    source: string;
+    source_url: string | null;
+    fetch_status: RegimeFeedHealth | null;
+  };
+  supply: {
+    state: string;
+    reason: string;
+    metrics: {
+      production: RegimeTrendMetric;
+      shipments: RegimeTrendMetric;
+      inventory: RegimeTrendMetric;
+    };
+    seasonally_adjusted_history: Record<
+      "production" | "shipments" | "inventory",
+      Array<{ date: string; value: number }>
+    >;
+    context: {
+      history_months: number;
+      inventory_percentile: number | null;
+      inventory_shipments_ratio: number | null;
+      inventory_shipments_ratio_percentile: number | null;
+      inventory_change_3m: number | null;
+      inventory_shipments_ratio_change_3m: number | null;
+      inventory_shipment_yoy_gap: number | null;
+      inventory_shipment_yoy_gap_last_two: number[];
+      ratio_history: Array<{ date: string; value: number }>;
+    };
+    source: string;
+    source_url: string;
+    fetch_status: RegimeFeedHealth | null;
+  };
+  company_confirmation: {
+    state: string;
+    reason: string;
+    coverage: number;
+    source: string;
+    source_url: string;
+    methodology: string;
+    limitations: string;
+    fetch_status: RegimeFeedHealth | null;
+    companies: Array<{
+      id: string;
+      name: string;
+      ticker: string;
+      latest_period: string | null;
+      age_days: number | null;
+      is_stale: boolean;
+      latest_capex: number | null;
+      capex_period: string | null;
+      capex_yoy: number | null;
+      revenue_yoy: number | null;
+      inventory_yoy: number | null;
+      operating_margin: number | null;
+      operating_margin_prior: number | null;
+      operating_margin_change_yoy_pp: number | null;
+      histories: Record<
+        "capex" | "revenue" | "operating_income" | "inventory",
+        Array<{
+          period: string;
+          value: number;
+          derivation?: string;
+          source_periods?: string[];
+        }>
+      >;
+    }>;
+  };
+  methodology: string;
+  limitations: string;
+}
+
+export interface PowerCycle {
+  state: string;
+  reason: string;
+  coverage: number;
+  role: "context";
+  as_of_date: string | null;
+  age_days: number | null;
+  is_stale: boolean;
+  metrics: Record<
+    "total_sales" | "commercial_sales" | "industrial_sales" | "generation" | "capacity",
+    RegimeTrendMetric
+  >;
+  source: string;
+  source_url: string;
+  fetch_status: RegimeFeedHealth | null;
+  methodology: string;
+  limitations: string;
+}
+
+export interface RegimeFeedHealth {
+  source: string;
+  status: string;
+  last_attempted_at?: string | null;
+  last_success_at?: string | null;
+  item_count?: number;
+  error?: string | null;
+}
+
+export interface RateChangeWindow {
+  periods: number;
+  start_date: string;
+  end_date: string;
+  changes: {
+    us10y: number;
+    tips10y: number;
+    bei10y: number;
+  };
+}
+
 export interface RegimeCurrent {
   id: string;
   evaluated_at: string;
@@ -563,13 +763,16 @@ export interface RegimeCurrent {
     automatic_regime: RegimeLevel;
   } | null;
   changes_since_snapshot: string[];
+  thesis_changes_since_snapshot: string[];
   cache_age_hours: number | null;
   newest_cache_age_hours?: number | null;
   is_stale: boolean;
   upcoming_events: Array<{
     id: string;
     event_type: string;
-    scheduled_at: string;
+    scheduled_at: string | null;
+    scheduled_date?: string | null;
+    time_precision?: "date" | "datetime";
     importance: string;
     status: string;
     source: string;
@@ -629,6 +832,8 @@ export interface RegimeCurrent {
       history: Array<{ observation_date: string; price_average: number; change_percent: number | null }>;
     }>;
   };
+  semiconductor_cycle: SemiconductorCycle;
+  power_cycle: PowerCycle;
   review_urgency: ReviewUrgency;
   review_reasons: string[];
   triggers: RegimeTrigger[];
@@ -639,6 +844,8 @@ export interface RegimeCurrent {
   };
   rate_decomposition: {
     periods: number;
+    start_date?: string;
+    end_date?: string;
     nominal_change: number;
     real_change: number;
     breakeven_change: number;
@@ -679,12 +886,21 @@ export interface RegimeCurrent {
     momentum_vector?: MacroPressureVector;
     pressure_vector?: MacroPressureVector;
     financial_conditions?: {
+      rates?: {
+        score: number | null;
+        label: string;
+        driver: string;
+        coverage: number;
+        version: string;
+        methodology: string;
+      };
       policy: {
         score: number | null;
         label: string;
         fed_funds: number | null;
         core_pce_yoy: number | null;
         real_policy_rate: number | null;
+        semantics?: string;
       };
       long_rates: {
         score: number | null;
@@ -693,6 +909,46 @@ export interface RegimeCurrent {
         real_10y: number | null;
         breakeven_10y: number | null;
         term_premium: number | null;
+        term_premium_percentile?: number | null;
+        term_premium_change_63d?: number | null;
+        term_premium_label?: string;
+        term_premium_role?: "decomposition_context";
+        term_premium_model?: string;
+      };
+      recent_shock?: {
+        score: number | null;
+        label: string;
+        direction: string;
+        persistent: boolean;
+        change_20d: RateChangeWindow | null;
+        change_63d: RateChangeWindow | null;
+      };
+      yield_curve?: {
+        score: number | null;
+        label: string;
+        state: string;
+        spread_10y3m: number | null;
+        monthly_average_10y3m: number | null;
+        recession_probability_12m: number | null;
+        spread_10y2y: number | null;
+        monthly_average_10y2y: number | null;
+        confirmation?: string;
+        inversion_days: number;
+        days_since_inversion: number | null;
+        last_inversion_date: string | null;
+        inversion_memory: boolean;
+        steepening: {
+          state: string;
+          long_change_20d: number | null;
+          short_change_20d: number | null;
+          spread_change_20d: number | null;
+          start_date?: string;
+          end_date?: string;
+        };
+        as_of_date: string | null;
+        evidence_cluster: "yield_curve";
+        probability_model?: string;
+        smoothing?: string;
       };
       credit: {
         score: number | null;
@@ -732,15 +988,8 @@ export interface RegimeCurrent {
     last_fetched_at: string | null;
   };
   feed_health: Record<
-    "macro" | "events" | "ai_capex" | "memory",
-    {
-      source: string;
-      status: string;
-      last_attempted_at?: string | null;
-      last_success_at?: string | null;
-      item_count?: number;
-      error?: string | null;
-    } | null
+    "macro" | "events" | "ai_capex" | "memory" | "kosis" | "customs" | "opendart" | "eia",
+    RegimeFeedHealth | null
   >;
 }
 
@@ -803,6 +1052,8 @@ export interface RegimeSnapshot {
   macro_quadrant?: RegimeCurrent["macro_quadrant"];
   ai_capex?: RegimeCurrent["ai_capex"];
   memory_cycle?: RegimeCurrent["memory_cycle"];
+  semiconductor_cycle?: RegimeCurrent["semiconductor_cycle"];
+  power_cycle?: RegimeCurrent["power_cycle"];
   input_fingerprint?: string | null;
   assessment_fingerprint?: string | null;
   snapshot_schema_version?: string;

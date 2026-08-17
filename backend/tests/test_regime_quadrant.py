@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from app.services.regime_quadrant import calculate_us_macro_quadrant
 
 
@@ -164,5 +166,7 @@ def test_high_real_long_rate_is_visible_even_without_a_recent_jump():
         series("nfci", [-.55] * 60),
     ]
     conditions = calculate_us_macro_quadrant(fixture)["financial_conditions"]
-    assert conditions["long_rates"]["label"] == "매우 제한적"
+    assert conditions["long_rates"]["label"] == "제한적"
+    assert conditions["long_rates"]["score"] == pytest.approx(53.4)
+    assert conditions["long_rates"]["term_premium_role"] == "decomposition_context"
     assert conditions["credit"]["label"] == "완화적"

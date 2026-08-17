@@ -377,10 +377,8 @@ class RegimeService:
         if key in {"us10y", "tips10y", "bei10y", "term_premium", "fedfunds"}:
             if key == "tips10y" and latest >= 2.25:
                 return (-1, f"현재 {latest:.2f}% · 제한적 실질금리")
-            if key == "term_premium" and latest >= 1.25:
-                return (-1, f"현재 {latest:.2f}% · 높은 기간 프리미엄")
             return (-1.5 if delta3 >= .5 else -.75 if delta3 >= .25 else .25, f"3개월 {delta3:+.2f}%p")
-        if key == "curve2s10s":
+        if key in {"curve2s10s", "curve10y3m"}:
             return (-1 if latest < -.5 else -.5 if latest < 0 else .5, f"현재 {latest:+.2f}%p")
         direction = 1 if key in {"us_gdp", "us_payrolls", "us_retail", "us_indpro", "fed_assets", "bank_reserves"} else 0
         if direction:
@@ -499,17 +497,13 @@ class RegimeService:
 
             conditions = macro_quadrant.get("financial_conditions", {})
             if key == "rates":
-                scores = [
-                    item.get("score") for item in (
-                        conditions.get("policy", {}), conditions.get("long_rates", {})
-                    ) if item.get("score") is not None
-                ]
-                if len(scores) == 2:
-                    pressure = max(scores)
+                pressure = conditions.get("rates", {}).get("score")
+                if pressure is not None:
                     state = "약화" if pressure >= 65 else "둔화" if pressure >= 25 else "중립" if pressure >= -20 else "강함"
                     score = {"강함": .75, "중립": 0.0, "둔화": -.75, "약화": -1.5}[state]
-                    method = "financial_conditions"
-                    reasons = [f"정책·장기금리 제한 강도 {pressure:.1f}"] if state in {"둔화", "약화"} else []
+                    method = "three_layer_rate_model"
+                    driver = conditions.get("rates", {}).get("driver", "금리 복합모델")
+                    reasons = [f"{driver} · 금리 압력 {pressure:.1f}"] if state in {"둔화", "약화"} else []
             elif key == "liquidity":
                 pressure = conditions.get("credit", {}).get("score")
                 if pressure is not None:
@@ -532,13 +526,22 @@ class RegimeService:
         weights = {item["id"]: float(item["weight"]) for item in definitions}
         signals = [self._signal(item, now) for item in definitions]
         signal_map = {item["id"]: item for item in signals}
-        macro_quadrant = calculate_us_macro_quadrant([
+        macro_input = [
             {"id": item["id"], "name": item["name"], "frequency": item["frequency"],
              "history": [{"date": row["observation_date"], "value": float(row["value"])}
                          for row in item["observations"]]}
             for item in definitions
             if signal_map[item["id"]].get("usable_for_decision")
-        ])
+        ]
+        financial_input = [
+            {"id": item["id"], "name": item["name"], "frequency": item["frequency"],
+             "history": [{"date": row["observation_date"], "value": float(row["value"])}
+                         for row in item["observations"]]}
+            for item in definitions
+            if signal_map[item["id"]].get("status") != "unavailable"
+            and not signal_map[item["id"]].get("is_stale")
+        ]
+        macro_quadrant = calculate_us_macro_quadrant(macro_input, financial_input)
         available = [item for item in signals if item["status"] != "unavailable"]
         fingerprint_source = self._fingerprint_payload(definitions, signals, macro_quadrant)
         fingerprint = hashlib.sha256(json.dumps(fingerprint_source, sort_keys=True).encode()).hexdigest()
@@ -624,18 +627,40 @@ class RegimeService:
         from app.services.regime_events import RegimeEventService
         from app.services.regime_sec import SecCapexService
         from app.services.regime_memory import MemoryPriceService
+        from app.services.regime_thesis import RegimeThesisDataService
 
         evaluation = self.evaluate(persist=False)
+        # Thesis summaries are attached before snapshot comparison so the
+        # Current inbox can surface their state changes without mixing them
+        # into the macro regime or review-urgency calculation.
+        evaluation["ai_capex"] = SecCapexService().summary()
+        evaluation["memory_cycle"] = MemoryPriceService().summary()
+        thesis_service = RegimeThesisDataService()
+        evaluation["semiconductor_cycle"] = thesis_service.semiconductor_summary(
+            evaluation["memory_cycle"]
+        )
+        evaluation["power_cycle"] = thesis_service.power_summary()
         with self.db.connect() as conn:
             latest_fetch = conn.execute("SELECT * FROM regime_fetch_runs ORDER BY started_at DESC LIMIT 1").fetchone()
-            latest_snapshot = conn.execute("SELECT created_at,automatic_regime,domains_json FROM regime_snapshots ORDER BY created_at DESC LIMIT 1").fetchone()
+            latest_snapshot = conn.execute(
+                "SELECT created_at,automatic_regime,domains_json,ai_capex_json,memory_cycle_json,"
+                "semiconductor_cycle_json,power_cycle_json "
+                "FROM regime_snapshots ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
             prior_evaluation = conn.execute(
                 "SELECT automatic_regime FROM regime_evaluations WHERE id<>? ORDER BY evaluated_at DESC LIMIT 1",
                 (evaluation["id"],),
             ).fetchone()
         evaluation["last_fetch"] = dict(latest_fetch) if latest_fetch else None
-        evaluation["previous_snapshot"] = dict(latest_snapshot) if latest_snapshot else None
+        evaluation["previous_snapshot"] = (
+            {
+                "created_at": latest_snapshot["created_at"],
+                "automatic_regime": latest_snapshot["automatic_regime"],
+            }
+            if latest_snapshot else None
+        )
         evaluation["changes_since_snapshot"] = []
+        evaluation["thesis_changes_since_snapshot"] = []
         worsened_domains = 0
         if latest_snapshot:
             previous_domains = {item["id"]: item["state"] for item in json.loads(latest_snapshot["domains_json"])}
@@ -649,8 +674,27 @@ class RegimeService:
                 state_rank.get(item["state"], 4) > state_rank.get(previous_domains.get(item["id"], "데이터 없음"), 4)
                 for item in evaluation["domains"] if item["id"] in previous_domains
             )
-            evaluation["previous_snapshot"].pop("domains_json", None)
-        triggers, rate_decomposition = evaluate_triggers(evaluation["signals"])
+            previous_thesis = {
+                "ai_capex": json.loads(latest_snapshot["ai_capex_json"])
+                if latest_snapshot["ai_capex_json"] else None,
+                "memory_cycle": json.loads(latest_snapshot["memory_cycle_json"])
+                if latest_snapshot["memory_cycle_json"] else None,
+                "semiconductor_cycle": json.loads(latest_snapshot["semiconductor_cycle_json"])
+                if latest_snapshot["semiconductor_cycle_json"] else None,
+                "power_cycle": json.loads(latest_snapshot["power_cycle_json"])
+                if latest_snapshot["power_cycle_json"] else None,
+            }
+            evaluation["thesis_changes_since_snapshot"] = self._thesis_changes(
+                previous_thesis, evaluation
+            )
+        # Reuse the full-history rate model already calculated for the macro
+        # quadrant.  Recomputing from display-truncated signal histories would
+        # shorten the 252-observation post-inversion memory by the 21-day
+        # smoothing window and could make the card and trigger disagree.
+        triggers, rate_decomposition = evaluate_triggers(
+            evaluation["signals"],
+            rate_model=evaluation["macro_quadrant"].get("financial_conditions"),
+        )
         coverage = calculate_coverage(evaluation["signals"])
         urgency, review_reasons = calculate_review_urgency(
             evaluation["automatic_regime"], evaluation["candidate_regime"], triggers, coverage, worsened_domains,
@@ -699,10 +743,41 @@ class RegimeService:
         evaluation["data_quality"] = self._data_quality(evaluation["signals"], coverage)
         event_service = RegimeEventService()
         evaluation["upcoming_events"] = event_service.upcoming()
-        evaluation["ai_capex"] = SecCapexService().summary()
-        evaluation["memory_cycle"] = MemoryPriceService().summary()
         evaluation["feed_health"] = self._feed_health()
         return evaluation
+
+    @staticmethod
+    def _thesis_changes(
+        previous: dict[str, Any], current: dict[str, Any]
+    ) -> list[str]:
+        """Compare like-for-like thesis stages without changing macro state."""
+
+        def nested(payload: dict[str, Any] | None, *path: str) -> Any:
+            value: Any = payload
+            for key in path:
+                if not isinstance(value, dict):
+                    return None
+                value = value.get(key)
+            return value
+
+        comparisons = [
+            ("AI 투자 강도", "ai_capex", ("state",)),
+            ("DRAM 가격 표본", "memory_cycle", ("state",)),
+            ("NAND 가격 표본", "memory_cycle", ("nand_state",)),
+            ("DRAM 수급 핵심축", "semiconductor_cycle", ("dram_bottleneck", "state")),
+            ("HBM·서버 DRAM 간접계측", "semiconductor_cycle", ("hbm_server_proxy", "state")),
+            ("메모리 수요", "semiconductor_cycle", ("demand", "state")),
+            ("완제품 재고 보조축", "semiconductor_cycle", ("supply", "state")),
+            ("국내 기업 확인", "semiconductor_cycle", ("company_confirmation", "state")),
+            ("전력 수요 맥락", "power_cycle", ("state",)),
+        ]
+        changes: list[str] = []
+        for label, section, path in comparisons:
+            before = nested(previous.get(section), *path)
+            after = nested(current.get(section), *path)
+            if before is not None and after is not None and before != after:
+                changes.append(f"{label}: {before} → {after}")
+        return changes
 
     @staticmethod
     def _data_quality(signals: list[dict[str, Any]], coverage: dict[str, Any]) -> dict[str, Any]:
@@ -741,6 +816,8 @@ class RegimeService:
         }
 
     def _feed_health(self) -> dict[str, Any]:
+        from app.services.regime_thesis import RegimeThesisDataService
+
         with self.db.connect() as conn:
             macro = conn.execute(
                 "SELECT source,last_attempted_at,last_success_at,status,item_count,error FROM regime_feed_status "
@@ -757,7 +834,7 @@ class RegimeService:
                     "status": run["status"], "item_count": run["observations_saved"], "error": run["error"],
                 } if run else None)
             events = conn.execute(
-                "SELECT * FROM regime_feed_status WHERE source='bls_events'"
+                "SELECT * FROM regime_feed_status WHERE source='macro_events'"
             ).fetchone()
             memory = conn.execute(
                 "SELECT source,last_attempted_at,last_success_at,status,observation_count AS item_count,error "
@@ -775,6 +852,7 @@ class RegimeService:
         )
         ai_successes = [row["last_success_at"] for row in companies if row.get("last_success_at")]
         ai_attempts = [row["last_attempted_at"] for row in companies if row.get("last_attempted_at")]
+        thesis_feeds = RegimeThesisDataService().feed_health()
         return {
             "macro": dict(macro) if macro else None,
             "events": dict(events) if events else None,
@@ -786,6 +864,10 @@ class RegimeService:
                 "error": " · ".join(row["error"] for row in companies if row.get("error")) or None,
             },
             "memory": dict(memory) if memory else None,
+            "kosis": thesis_feeds["kosis_semiconductor"],
+            "customs": thesis_feeds["customs_memory_exports"],
+            "opendart": thesis_feeds["opendart_semiconductor"],
+            "eia": thesis_feeds["eia_power"],
         }
 
     def _sync_triggers(self, triggers: list[dict[str, Any]]) -> None:
@@ -948,10 +1030,12 @@ class RegimeService:
             "ai_capex_json": current["ai_capex"],
             "upcoming_events_json": current["upcoming_events"],
             "memory_cycle_json": current["memory_cycle"],
+            "semiconductor_cycle_json": current["semiconductor_cycle"],
+            "power_cycle_json": current["power_cycle"],
             "input_fingerprint": current.get("data_fingerprint"),
             "assessment_fingerprint": current.get("assessment_fingerprint"),
             "feed_health_json": current.get("feed_health"),
-            "snapshot_schema_version": "2",
+            "snapshot_schema_version": "3",
         }
         acknowledgment = self._acknowledgment_payload(current, user_note)
         # Snapshot and its implicit review acknowledgment describe one user
@@ -1043,6 +1127,7 @@ class RegimeService:
             "target_plan_json", "triggers_json", "coverage_json",
             "observation_range_json", "macro_quadrant_json", "ai_capex_json",
             "upcoming_events_json", "memory_cycle_json", "feed_health_json",
+            "semiconductor_cycle_json", "power_cycle_json",
         ]
         if include_raw:
             json_fields.insert(0, "raw_data_json")
@@ -1074,8 +1159,22 @@ class RegimeService:
             f"- {item['product_name']} ({item['market_type']}): {item['price_average']:.3f} / 변화 {item['change_percent']:+.2f}% / 기준 {item['observation_date']}"
             for item in memory["series"] if item.get("change_percent") is not None
         ]
+        semiconductor = current["semiconductor_cycle"]
+        lines += ["", "## 반도체·메모리 수요·공급 확인", "",
+                  f"- 반도체 종합판정: {semiconductor['state']}",
+                  f"- 근거: {semiconductor['reason']}",
+                  f"- DRAM 수급 핵심축: {semiconductor['dram_bottleneck']['state']} · {semiconductor['dram_bottleneck']['reason']}",
+                  f"- HBM·서버 DRAM 간접계측: {semiconductor['hbm_server_proxy']['state']} · {semiconductor['hbm_server_proxy']['reason']}",
+                  f"- DRAM 수출: {semiconductor['demand']['state']} · {semiconductor['demand']['reason']}",
+                  f"- DRAM 수출 구조: {semiconductor['demand']['decomposition']['state']} · {semiconductor['demand']['decomposition']['reason']}",
+                  f"- 한국 반도체 완제품 재고 보조축: {semiconductor['supply']['state']} · {semiconductor['supply']['reason']}",
+                  f"- 국내 기업 공시: {semiconductor['company_confirmation']['state']} · {semiconductor['company_confirmation']['reason']}",
+                  f"- 제한: {semiconductor['limitations']}"]
+        power = current["power_cycle"]
+        lines += ["", "## 미국 전력 수요", "", f"- 판정: {power['state']}",
+                  f"- 근거: {power['reason']}", f"- 제한: {power['limitations']}"]
         lines += ["", "## 다음 핵심 발표", ""]
-        lines += [f"- {item['scheduled_at']}: {item['event_type']} ({', '.join(item['affected_domains'])})"
+        lines += [f"- {item.get('scheduled_at') or item.get('scheduled_date')}: {item['event_type']} ({', '.join(item['affected_domains'])})"
                   for item in current["upcoming_events"]]
         lines += ["", "## 현재 포트폴리오", ""]
         lines += [f"- {item.get('name')}: {item.get('ticker') or item.get('asset_type')}" for item in current["portfolio"]["assets"]]

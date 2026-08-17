@@ -16,6 +16,7 @@ import {
 } from "recharts";
 import { MarketIndicators } from "@/components/dashboard/MarketIndicators";
 import { RegimeCurrentOverview } from "@/components/regime/RegimeCurrentOverview";
+import { CompanyFilingCard } from "@/components/regime/CompanyFilingCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,14 +25,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { InfoTip } from "@/components/ui/info-tip";
 import { regimeApi } from "@/lib/api";
+import { inventoryBurdenLabel, priorInventoryRatio } from "@/lib/regime-company";
 import {
+  REGIME_SERIES_COLORS,
   TONE_STYLES,
   aiCapexDeltaTone,
   aiCapexTone,
+  financialConditionTone,
   memoryPriceTone,
   memorySupplierPriceDeltaTone,
+  powerDemandTone,
   regimeLevelTone,
+  signalMetricTone,
   signalStatusTone,
+  thesisSignalTone,
+  type SemanticTone,
 } from "@/lib/regime-tone";
 import type {
   RegimeCurrent,
@@ -48,7 +56,23 @@ const DOMAIN_TABS = [
   { id: "inflation", label: "물가" },
   { id: "rates", label: "금리" },
   { id: "liquidity", label: "유동성·신용" },
-  { id: "ai", label: "AI CAPEX·메모리" },
+  { id: "ai", label: "AI 투자" },
+  { id: "semiconductor", label: "메모리·반도체" },
+  { id: "power", label: "전력 수요·공급" },
+];
+const MACRO_DOMAIN_TABS = DOMAIN_TABS.slice(0, 5);
+const THESIS_DOMAIN_TABS = DOMAIN_TABS.slice(5);
+const RATE_SIGNAL_ORDER = [
+  "fedfunds",
+  "tips10y",
+  "us10y",
+  "bei10y",
+  "curve10y3m",
+  "curve2s10s",
+  "term_premium",
+  "us3m",
+  "us2y",
+  "us30y",
 ];
 const urgencyLabel: Record<ReviewUrgency, string> = {
   required: "지금 다시 상세점검",
@@ -68,6 +92,8 @@ const signalStatusLabel: Record<string, string> = {
   약화: "악화 범위",
   unavailable: "미수집",
 };
+const signed = (value: number | null | undefined, digits = 1) =>
+  value == null ? "-" : `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
 
 export function signalRuleHelp(signal: RegimeSignal) {
   if (["us_unemployment", "us_claims"].includes(signal.id))
@@ -76,13 +102,21 @@ export function signalRuleHelp(signal: RegimeSignal) {
     ["cpi", "core_cpi", "pce", "core_pce", "ppi", "wages"].includes(signal.id)
   )
     return "최근 3개월 연율을 사용합니다. 물가·임금 상승세 재가속은 악화 방향, 목표 수준을 향한 둔화는 개선 방향입니다.";
-  if (
-    ["us3m", "us10y", "tips10y", "bei10y", "term_premium", "fedfunds"].includes(
-      signal.id,
-    )
-  )
-    return "주로 최근 3개월 금리 변화로 판정하며, 실질금리와 기간 프리미엄은 높은 절대수준도 함께 봅니다. 상승은 금융여건 악화 방향입니다.";
-  if (["hy_oas", "ig_oas", "nfci", "curve2s10s"].includes(signal.id))
+  if (signal.id === "fedfunds")
+    return "Fed 기준금리에서 Core PCE 전년비를 뺀 실질 정책금리 대용치로 현재 정책 제약을 계산합니다. 0%p 이상은 다소 제한적, 1%p 이상은 제한적 구간입니다.";
+  if (signal.id === "tips10y")
+    return "10년 실질금리의 높은 절대수준으로 장기 할인율 부담을 계산하고, 공통 관측일 기준 20·63관측일 상승폭으로 최근 실질금리 충격을 별도 판정합니다.";
+  if (signal.id === "term_premium")
+    return "Kim-Wright 현재 10년 제로쿠폰 기간 프리미엄 추정치입니다. 장기금리 상승 원인을 해석하는 맥락 지표이며 TIPS와 중복해 자동 점수에 더하지 않습니다.";
+  if (signal.id === "curve10y3m")
+    return "핵심 침체 선행축입니다. 최근 21관측일 평균을 뉴욕 연은 공개 probit 식에 넣어 향후 12개월 침체확률을 계산하며, 역전 해소 뒤에도 위험 기억을 단계적으로 유지합니다.";
+  if (signal.id === "curve2s10s")
+    return "10Y-3M 침체 선행신호의 확인축입니다. 동반 역전 여부만 보조하며 같은 수익률곡선 근거를 별도 경보로 중복 합산하지 않습니다.";
+  if (["us10y", "bei10y"].includes(signal.id))
+    return "TIPS와 공통 관측일을 맞춘 20·63관측일 변화로 최근 금리 충격의 원인을 분해합니다. 명목금리와 BEI의 동반 급등은 인플레이션 기대 충격으로 판정합니다.";
+  if (["us3m", "us2y", "us30y"].includes(signal.id))
+    return "금리곡선의 현재 모양과 재가팔라짐 원인을 해석하는 맥락 지표입니다. 단기금리 하락 주도와 장기금리 상승 주도를 구분하며 단독 레짐 점수로 쓰지 않습니다.";
+  if (["hy_oas", "ig_oas", "nfci"].includes(signal.id))
     return "현재 절대수준을 중심으로 판정합니다. 신용스프레드·NFCI 상승은 악화 방향이며, 장단기금리차는 역전 폭 확대가 악화 방향입니다.";
   if (
     [
@@ -107,15 +141,21 @@ function ChangeMetric({
   label,
   value,
   unit = "%",
+  tone = "neutral",
 }: {
   label: string;
   value?: number | null;
   unit?: string;
+  tone?: SemanticTone;
 }) {
   return (
     <div className="rounded-md bg-muted/50 px-3 py-2">
       <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-sm font-medium tabular-nums text-foreground">
+      <p
+        className={`mt-0.5 text-sm font-medium tabular-nums ${TONE_STYLES[tone].text}`}
+        data-metric-label={label}
+        data-semantic-tone={tone}
+      >
         {value == null
           ? "-"
           : `${value > 0 ? "↑ " : value < 0 ? "↓ " : ""}${value > 0 ? "+" : ""}${value.toFixed(1)}${unit}`}
@@ -132,7 +172,11 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
   const chartSeries = decisionChart?.series || [
     { key: "value", label: signal.name },
   ];
-  const chartColors = ["#60a5fa", "#f59e0b", "#34d399"];
+  const chartColors = [
+    REGIME_SERIES_COLORS.blue,
+    REGIME_SERIES_COLORS.violet,
+    REGIME_SERIES_COLORS.cyan,
+  ];
   const role =
     signal.usage === "regime"
       ? "레짐 산출"
@@ -197,6 +241,12 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
               label={metric.label}
               value={metric.value}
               unit={metric.unit}
+              tone={signalMetricTone(
+                signal.id,
+                metric.kind,
+                metric.value,
+                !signal.is_stale,
+              )}
             />
           ))}
         </div>
@@ -362,7 +412,7 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
                 type="monotone"
                 dataKey="us10y"
                 name="10Y 명목"
-                stroke="#60a5fa"
+                stroke={REGIME_SERIES_COLORS.blue}
                 dot={false}
                 strokeWidth={2}
                 isAnimationActive={false}
@@ -371,7 +421,7 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
                 type="monotone"
                 dataKey="tips10y"
                 name="10Y 실질"
-                stroke="#f97316"
+                stroke={REGIME_SERIES_COLORS.violet}
                 dot={false}
                 strokeWidth={2}
                 isAnimationActive={false}
@@ -380,7 +430,7 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
                 type="monotone"
                 dataKey="bei10y"
                 name="10Y BEI"
-                stroke="#34d399"
+                stroke={REGIME_SERIES_COLORS.cyan}
                 dot={false}
                 strokeWidth={2}
                 isAnimationActive={false}
@@ -393,12 +443,158 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
   );
 }
 
+export function RateModelOverview({
+  data,
+  signals,
+}: {
+  data: RegimeCurrent;
+  signals: RegimeSignal[];
+}) {
+  const conditions = data.macro_quadrant.financial_conditions;
+  const rates = conditions?.rates;
+  const policy = conditions?.policy;
+  const longRates = conditions?.long_rates;
+  const shock = conditions?.recent_shock;
+  const curve = conditions?.yield_curve;
+  const curveSignals = signals.filter((signal) =>
+    ["curve10y3m", "curve2s10s"].includes(signal.id),
+  );
+  const byDate = new Map<string, Record<string, string | number>>();
+  curveSignals.forEach((signal) =>
+    signal.history?.forEach((point) => {
+      byDate.set(point.date, {
+        ...(byDate.get(point.date) || { date: point.date }),
+        [signal.id]: point.value,
+      });
+    }),
+  );
+  const curveChartData = [...byDate.values()].sort((a, b) =>
+    String(a.date).localeCompare(String(b.date)),
+  );
+  const shock20 = shock?.change_20d?.changes;
+  const tone = financialConditionTone(rates?.label);
+
+  return (
+    <Card className={`mb-6 ${TONE_STYLES[tone].panel}`}>
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-1">
+              <CardTitle>금리 레짐 계산</CardTitle>
+              <InfoTip label="금리 레짐 계산 방법">
+                현재 정책·실질금리 제약, 최근 20·63관측일 금리 충격,
+                10Y-3M 침체 선행위험을 서로 다른 층으로 계산한 뒤 가장 강한
+                압력을 금리 영역 판정에 반영합니다. 같은 경제적 근거는 중복
+                합산하지 않습니다.
+              </InfoTip>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              현재 제약 · 최근 충격 · 수익률곡선 선행위험을 분리해 매일 재계산
+            </p>
+          </div>
+          <div className="text-right">
+            <Badge variant={TONE_STYLES[tone].badge}>
+              {rates?.label || "판정 불가"}
+            </Badge>
+            <p className="mt-2 text-xs text-muted-foreground">
+              주도: {rates?.driver || "자료 부족"}
+            </p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-5 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.4fr)]">
+        <div className="grid gap-3">
+          <div className="rounded-lg border bg-muted/10 p-4">
+            <p className="text-xs font-medium text-muted-foreground">1 · 현재 제약 수준</p>
+            <div className="mt-2 flex items-baseline justify-between gap-3">
+              <strong>{policy?.label || "판정 불가"}</strong>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                실질 정책 {signed(policy?.real_policy_rate, 2)}%p
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              장기 실질금리 {longRates?.real_10y?.toFixed(2) ?? "-"}% · {longRates?.label || "판정 불가"}
+            </p>
+          </div>
+          <div className="rounded-lg border bg-muted/10 p-4">
+            <p className="text-xs font-medium text-muted-foreground">2 · 최근 금리 충격</p>
+            <div className="mt-2 flex items-baseline justify-between gap-3">
+              <strong>{shock?.label || "판정 불가"}</strong>
+              <span className="text-xs text-muted-foreground">
+                {shock?.persistent ? "20·63관측일 지속" : "단기 지속성 미확인"}
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              {shock20
+                ? `명목 ${signed(shock20.us10y, 2)} · TIPS ${signed(shock20.tips10y, 2)} · BEI ${signed(shock20.bei10y, 2)}%p`
+                : "공통 관측일 자료 부족"}
+            </p>
+          </div>
+          <div className="rounded-lg border bg-muted/10 p-4">
+            <p className="text-xs font-medium text-muted-foreground">3 · 침체 선행위험</p>
+            <div className="mt-2 flex items-baseline justify-between gap-3">
+              <strong>{curve?.state || "판정 불가"}</strong>
+              <span className="text-sm font-semibold tabular-nums">
+                {curve?.recession_probability_12m?.toFixed(1) ?? "-"}%
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              10Y-3M 21관측일 평균 {signed(curve?.monthly_average_10y3m, 2)}%p · {curve?.steepening.state || "기울기 자료 부족"}
+            </p>
+          </div>
+          <p className="px-1 text-[11px] leading-5 text-muted-foreground">
+            모델 {rates?.version || "-"} · coverage {rates ? Math.round(rates.coverage * 100) : 0}%
+          </p>
+        </div>
+        <div className="min-w-0 rounded-lg border bg-muted/5 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold">수익률곡선 최근 1년</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                10Y-3M은 주축, 10Y-2Y는 확인축 · 0%p 아래는 역전
+              </p>
+            </div>
+            <Badge variant={TONE_STYLES[financialConditionTone(curve?.label)].badge}>
+              {curve?.label || "판정 불가"}
+            </Badge>
+          </div>
+          {curveChartData.length > 1 ? (
+            <div className="mt-4 h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={curveChartData} margin={{ top: 8, right: 16, bottom: 8, left: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                  <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={40} tick={{ fontSize: 11 }} />
+                  <YAxis width={52} tick={{ fontSize: 11 }} unit="%p" />
+                  <Tooltip
+                    labelFormatter={(label) => `관측일 ${label}`}
+                    contentStyle={{
+                      background: "hsl(var(--card))",
+                      borderColor: "hsl(var(--border))",
+                      borderRadius: 8,
+                    }}
+                  />
+                  <ReferenceLine y={0} stroke="#f59e0b" strokeDasharray="5 4" label={{ value: "역전 기준", fill: "#f59e0b", fontSize: 10 }} />
+                  <Legend />
+                  <Line type="monotone" dataKey="curve10y3m" name="10Y-3M 주축" stroke={REGIME_SERIES_COLORS.blue} strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
+                  <Line type="monotone" dataKey="curve2s10s" name="10Y-2Y 확인축" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="5 4" dot={false} connectNulls isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="mt-4 flex h-72 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
+              수익률곡선 이력이 아직 부족합니다.
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function AiCapexDashboard({
   data,
-  memory,
 }: {
   data: NonNullable<RegimeCurrent["ai_capex"]>;
-  memory: RegimeCurrent["memory_cycle"];
 }) {
   const chartData = Array.from(
     new Set(data.companies.flatMap((company) => company.history.map((point) => point.period))),
@@ -417,10 +613,10 @@ function AiCapexDashboard({
       ),
     }));
   const colors: Record<string, string> = {
-    microsoft: "#60a5fa",
-    alphabet: "#fbbf24",
-    meta: "#a78bfa",
-    amazon: "#34d399",
+    microsoft: REGIME_SERIES_COLORS.blue,
+    alphabet: REGIME_SERIES_COLORS.violet,
+    meta: REGIME_SERIES_COLORS.cyan,
+    amazon: REGIME_SERIES_COLORS.pink,
   };
   const stateTone = aiCapexTone(data.state);
   return (
@@ -475,7 +671,6 @@ function AiCapexDashboard({
           )}
         </CardContent>
       </Card>
-      <MemoryCyclePanel data={memory} />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {data.companies.map((company) => (
           <Card key={company.id}>
@@ -543,11 +738,32 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
   const memoryHistory = [...historyByDate.values()].sort((a, b) =>
     String(a.date).localeCompare(String(b.date)),
   );
-  const memoryColors = ["#60a5fa", "#a78bfa", "#34d399", "#f59e0b", "#f472b6", "#22d3ee"];
+  const memoryColors = [
+    REGIME_SERIES_COLORS.blue,
+    REGIME_SERIES_COLORS.violet,
+    REGIME_SERIES_COLORS.cyan,
+    REGIME_SERIES_COLORS.pink,
+    REGIME_SERIES_COLORS.indigo,
+    REGIME_SERIES_COLORS.sky,
+  ];
   const priceCard = (item: (typeof ordered)[number]) => {
+    const role = item.market_type === "contract"
+      ? "direct"
+      : item.market_type === "module_spot"
+        ? "proxy"
+        : item.market_type === "nand_wafer_spot"
+          ? "nand"
+          : item.market_type === "nand_client_ssd_contract"
+            ? "context"
+            : "spot";
+    const aggregateState = item.market_type.startsWith("nand_")
+      ? data.nand_state
+      : data.state;
     const tone = memorySupplierPriceDeltaTone(
       item.change_percent,
       !item.is_stale,
+      role,
+      aggregateState,
     );
     return (
       <div key={item.series_id} className="rounded-lg border bg-muted/20 p-4">
@@ -582,12 +798,12 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
     <Card>
       <CardHeader>
         <div className="flex flex-wrap items-center gap-3">
-          <CardTitle>공개 DRAM 가격 표본</CardTitle>
+          <CardTitle>DRAM 가격 원자료</CardTitle>
           <Badge variant={TONE_STYLES[dramTone].badge}>{memoryStateLabel[data.state] || data.state}</Badge>
           <InfoTip label="공개 DRAM 표본의 범위">
-            공개된 DDR5 SO-DIMM Contract와 일부 Spot 가격을 봅니다. Server
-            DRAM·HBM·NAND 전체를 대표하지 않으며 AI 수요의 직접 판정에는
-            사용하지 않습니다.
+            공개된 DDR5 SO-DIMM Contract와 일부 Spot 가격을 봅니다. 이 계약가격은
+            DRAM 수급 핵심축의 직접 가격 프록시로 사용하지만 Server DRAM·HBM
+            전체를 대표하지는 않습니다.
           </InfoTip>
         </div>
         <p className="text-sm text-muted-foreground">{data.reason}</p>
@@ -664,6 +880,555 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function SemiconductorDashboard({
+  data,
+  memory,
+}: {
+  data: RegimeCurrent["semiconductor_cycle"];
+  memory: RegimeCurrent["memory_cycle"];
+}) {
+  const hbmProxy = data.hbm_server_proxy;
+  const rdimmProxy = hbmProxy.components.server_rdimm;
+  const exportDecomposition = hbmProxy.components.export_decomposition;
+  const supplierInventory = hbmProxy.components.supplier_inventory;
+  const skHynixInventory = supplierInventory.companies.find(
+    (company) => company.id === supplierInventory.primary_company,
+  );
+  const exportDates = new Set(
+    Object.values(data.demand.metrics).flatMap((metric) => metric.history.map((point) => point.date)),
+  );
+  const exportData = [...exportDates].sort().slice(-36).map((date) => ({
+    date,
+    memory: data.demand.metrics.memory.history.find((point) => point.date === date)?.value == null ? null : (data.demand.metrics.memory.history.find((point) => point.date === date)?.value as number) / 1e9,
+    dram: data.demand.metrics.dram.history.find((point) => point.date === date)?.value == null ? null : (data.demand.metrics.dram.history.find((point) => point.date === date)?.value as number) / 1e9,
+    flash: data.demand.metrics.flash.history.find((point) => point.date === date)?.value == null ? null : (data.demand.metrics.flash.history.find((point) => point.date === date)?.value as number) / 1e9,
+  }));
+  const structureMetrics = {
+    exportValue: data.demand.metrics.dram,
+    exportWeight: data.demand.metrics.dram_weight,
+    unitValue: data.demand.metrics.dram_unit_value,
+  };
+  const structureDates = data.demand.metrics.dram.history
+    .map((point) => point.date)
+    .filter((date) => Object.values(structureMetrics).every((metric) =>
+      metric.history.some((point) => point.date === date && point.value !== 0),
+    ))
+    .sort()
+    .slice(-36);
+  const structureBaseDate = structureDates.at(0) || null;
+  const structureBases = Object.fromEntries(
+    Object.entries(structureMetrics).map(([key, metric]) => [
+      key,
+      metric.history.find((point) => point.date === structureBaseDate)?.value || null,
+    ]),
+  ) as Record<keyof typeof structureMetrics, number | null>;
+  const exportStructureData = structureDates.map((date) => ({
+    date,
+    ...Object.fromEntries(
+      Object.entries(structureMetrics).map(([key, metric]) => {
+        const value = metric.history.find((point) => point.date === date)?.value;
+        const base = structureBases[key as keyof typeof structureMetrics];
+        return [key, value == null || !base ? null : value / base * 100];
+      }),
+    ),
+  }));
+  const supplyDates = new Set(
+    Object.values(data.supply.metrics).flatMap((metric) => metric.history.map((point) => point.date)),
+  );
+  const supplyData = [...supplyDates].sort().slice(-36).map((date) => ({
+    date,
+    production: data.supply.metrics.production.history.find((point) => point.date === date)?.value,
+    shipments: data.supply.metrics.shipments.history.find((point) => point.date === date)?.value,
+    inventory: data.supply.metrics.inventory.history.find((point) => point.date === date)?.value,
+  }));
+  const capexPeriods = new Set(
+    data.company_confirmation.companies.flatMap((company) =>
+      company.histories.capex.map((point) => point.period),
+    ),
+  );
+  const capexData = [...capexPeriods].sort().slice(-8).map((period) => ({
+    period,
+    ...Object.fromEntries(
+      data.company_confirmation.companies.map((company) => [
+        company.id,
+        company.histories.capex.find((point) => point.period === period)?.value == null ? null : (company.histories.capex.find((point) => point.period === period)?.value as number) / 1e12,
+      ]),
+    ),
+  }));
+  const stateTone = thesisSignalTone(data.state);
+  const laneCards = [
+    {
+      label: "DRAM 수급 핵심축",
+      state: data.dram_bottleneck.state,
+      reason: data.dram_bottleneck.reason,
+      className: "lg:col-span-6",
+    },
+    {
+      label: "HBM·서버 DRAM 간접계측",
+      state: hbmProxy.state,
+      reason: hbmProxy.reason,
+      className: "lg:col-span-6",
+    },
+    {
+      label: "DRAM 수출 확인",
+      state: data.demand.state,
+      reason: data.demand.reason,
+      className: "lg:col-span-4",
+    },
+    {
+      label: "완제품 재고 보조",
+      state: data.supply.state,
+      reason: data.supply.reason,
+      className: "lg:col-span-4",
+    },
+    {
+      label: "국내 2사 실적 보조",
+      state: data.company_confirmation.state,
+      reason: data.company_confirmation.reason,
+      className: "lg:col-span-4",
+    },
+  ] as const;
+  return (
+    <div className="space-y-6">
+      <div className="px-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-xl font-semibold">반도체·메모리 수요·공급</h2>
+          <Badge variant={TONE_STYLES[stateTone].badge}>{data.state}</Badge>
+          <InfoTip label="반도체 판정 방법">{data.methodology} {data.limitations}</InfoTip>
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">{data.reason}</p>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-12">
+        {laneCards.map((item) => {
+          const tone = thesisSignalTone(item.state);
+          return (
+            <Card key={item.label} className={`${TONE_STYLES[tone].panel} ${item.className}`}>
+              <CardHeader className="pb-2">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <CardTitle className="min-w-0 text-base leading-6">{item.label}</CardTitle>
+                  <Badge className="shrink-0" variant={TONE_STYLES[tone].badge}>{item.state}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent><p className="text-sm leading-6 text-muted-foreground">{item.reason}</p></CardContent>
+            </Card>
+          );
+        })}
+      </div>
+      <Card className={TONE_STYLES[thesisSignalTone(hbmProxy.state)].panel}>
+        <CardHeader>
+          <div className="flex flex-wrap items-center gap-3">
+            <CardTitle>HBM·서버 DRAM 간접계측</CardTitle>
+            <Badge variant={TONE_STYLES[thesisSignalTone(hbmProxy.state)].badge}>
+              {hbmProxy.state}
+            </Badge>
+            <Badge variant="neutral">직접 HBM 데이터 아님</Badge>
+            <InfoTip label="간접계측 방법과 한계">
+              {hbmProxy.methodology}. {hbmProxy.limitations}.
+            </InfoTip>
+          </div>
+          <p className="text-sm leading-6 text-muted-foreground">{hbmProxy.reason}</p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              {
+                label: "서버 RDIMM 공개가격",
+                value: `${signed(rdimmProxy.change_percent, 2)}%`,
+                detail: `${rdimmProxy.state} · ${rdimmProxy.observation_date || "미수집"}`,
+                tone: memoryPriceTone(rdimmProxy.state),
+                help: "공개 DDR5 RDIMM 모듈 표본의 최근 표기 변화율입니다. 서버 DRAM 계약가격이나 HBM 가격을 직접 뜻하지 않습니다.",
+              },
+              {
+                label: "DRAM 단가·믹스 프록시",
+                value: `${signed(data.demand.metrics.dram_unit_value.yoy_3m_avg)}%`,
+                detail: `3개월 평균 YoY · ${exportDecomposition.state}`,
+                tone: thesisSignalTone(exportDecomposition.state),
+                help: "관세청 DRAM 수출액을 신고 중량으로 나눈 단위중량당 수출액입니다. 실제 가격과 HBM 등 고부가 제품 비중 변화가 함께 반영됩니다.",
+              },
+              {
+                label: "DRAM 수출중량",
+                value: `${signed(data.demand.metrics.dram_weight.yoy_3m_avg)}%`,
+                detail: "3개월 평균 YoY · bit 출하량 아님",
+                tone: "neutral" as const,
+                help: "관세청 신고 중량입니다. 패키징과 제품 믹스 영향을 받으므로 DRAM bit 출하량이나 실제 메모리 용량 증가율로 해석하지 않습니다.",
+              },
+              {
+                label: "SK하이닉스 재고/매출 비율",
+                value: skHynixInventory?.inventory_to_revenue == null
+                  ? "-"
+                  : `${skHynixInventory.inventory_to_revenue.toFixed(1)}%`,
+                detail: `수준은 중립 · ${inventoryBurdenLabel(supplierInventory.state)}`,
+                tone: "neutral" as const,
+                help: "분기말 재고를 같은 분기 매출로 나눈 수준입니다. 비율 하락은 재고 절대액 감소나 물리적 소진을 뜻하지 않으며, 같은 DART 매출·재고의 파생 맥락이라 HBM 판정에 독립 신호로 중복 합산하지 않습니다.",
+              },
+            ].map((item) => (
+              <div key={item.label} className="rounded-lg border bg-muted/10 p-4">
+                <div className="flex items-center gap-1">
+                  <p className="text-xs text-muted-foreground">{item.label}</p>
+                  <InfoTip label={`${item.label} 설명`}>{item.help}</InfoTip>
+                </div>
+                <p className={`mt-2 text-xl font-semibold tabular-nums ${TONE_STYLES[item.tone].text}`}>
+                  {item.value}
+                </p>
+                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{item.detail}</p>
+              </div>
+            ))}
+          </div>
+          {hbmProxy.conflicts.length > 0 && (
+            <div className="mt-4 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-xs leading-5">
+              <span className="font-medium text-warning">상충 확인</span>
+              <span className="ml-2 text-muted-foreground">{hbmProxy.conflicts.join(" · ")}</span>
+            </div>
+          )}
+          <div className="mt-6 grid gap-6 xl:grid-cols-2">
+            <div className="rounded-lg border bg-muted/5 p-4">
+              <div className="mb-3">
+                <div className="flex items-center gap-1">
+                  <p className="font-medium">DRAM 관세 신고 기준 수출 구조 프록시</p>
+                  <InfoTip label="DRAM 수출 구조 프록시 설명">
+                    수출액을 신고 중량과 단위중량당 수출액으로 나눠, 증가가 물량에서
+                    왔는지 가격·고부가 제품 믹스에서 왔는지 구분합니다. 수출액과
+                    단위중량당 수출액만 오르고 중량이 정체·감소하면 가격·믹스 주도이며,
+                    세 계열이 함께 오르면 물량도 동반된 확장으로 읽습니다. 세 선은
+                    같은 관세 자료를 구조적으로 분해한 것이며 독립된 세 증거가 아닙니다.
+                  </InfoTip>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  공통 기준 {structureBaseDate || "미확인"}=100 · 신고중량≠bit 출하량 · 단가 프록시=가격+제품믹스
+                </p>
+              </div>
+              <div className="mb-3 rounded-md border bg-background/25 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">최근 3개월 평균 YoY 구조</p>
+                  <Badge variant={TONE_STYLES[thesisSignalTone(exportDecomposition.state)].badge}>
+                    {exportDecomposition.state}
+                  </Badge>
+                </div>
+                <div className="mt-3 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-2 text-center">
+                  <div><p className="text-[10px] text-muted-foreground">수출액</p><p className="mt-1 text-sm font-semibold tabular-nums">{data.demand.metrics.dram.yoy_3m_avg == null ? "-" : `${(1 + data.demand.metrics.dram.yoy_3m_avg / 100).toFixed(2)}배`}</p><p className="text-[9px] text-muted-foreground">YoY {signed(data.demand.metrics.dram.yoy_3m_avg)}%</p></div>
+                  <span className="text-muted-foreground">≈</span>
+                  <div><p className="text-[10px] text-muted-foreground">신고중량</p><p className="mt-1 text-sm font-semibold tabular-nums">{data.demand.metrics.dram_weight.yoy_3m_avg == null ? "-" : `${(1 + data.demand.metrics.dram_weight.yoy_3m_avg / 100).toFixed(2)}배`}</p><p className="text-[9px] text-muted-foreground">YoY {signed(data.demand.metrics.dram_weight.yoy_3m_avg)}%</p></div>
+                  <span className="text-muted-foreground">×</span>
+                  <div><p className="text-[10px] text-muted-foreground">단가·믹스</p><p className="mt-1 text-sm font-semibold tabular-nums">{data.demand.metrics.dram_unit_value.yoy_3m_avg == null ? "-" : `${(1 + data.demand.metrics.dram_unit_value.yoy_3m_avg / 100).toFixed(2)}배`}</p><p className="text-[9px] text-muted-foreground">YoY {signed(data.demand.metrics.dram_unit_value.yoy_3m_avg)}%</p></div>
+                </div>
+              </div>
+              <div className="h-60">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={exportStructureData} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                    <ReferenceLine y={100} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" opacity={0.45} />
+                    <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={32} tick={{ fontSize: 11 }} />
+                    <YAxis width={48} tick={{ fontSize: 11 }} />
+                    <Tooltip
+                      labelFormatter={(label) => `관측월 ${label}`}
+                      formatter={(value: number, name: string) => [
+                        Number(value).toFixed(1),
+                        name === "exportValue" ? "수출액" : name === "exportWeight" ? "수출중량" : "단위중량당 수출액",
+                      ]}
+                      contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }}
+                    />
+                    <Legend formatter={(value) => value === "exportValue" ? "수출액" : value === "exportWeight" ? "수출중량" : "단위중량당 수출액"} />
+                    <Line type="monotone" dataKey="exportValue" stroke={REGIME_SERIES_COLORS.blue} dot={false} strokeWidth={2} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="exportWeight" stroke={REGIME_SERIES_COLORS.violet} dot={false} strokeWidth={1.7} strokeDasharray="5 3" isAnimationActive={false} />
+                    <Line type="monotone" dataKey="unitValue" stroke={REGIME_SERIES_COLORS.cyan} dot={false} strokeWidth={2} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div className="rounded-lg border bg-muted/5 p-4">
+              <div className="mb-3">
+                <div className="flex items-center gap-1">
+                  <p className="font-medium">공급사 분기매출 대비 재고 · 회사별 추세</p>
+                  <InfoTip label="공급사 매출 대비 재고 설명">
+                    분기말 재고자산을 같은 분기 매출로 나눈 비율입니다. 20%라면 분기
+                    매출 100원당 분기말 재고가 20원이라는 뜻입니다. 비율 하락은 재고
+                    절대액이 줄거나 물리적으로 소진됐다는 뜻이 아니라, 매출 분모가
+                    재고보다 빠르게 늘어난 방향입니다. 같은 DART 매출·재고를 재표현한
+                    값이라 독립 판정축으로 중복 합산하지 않습니다.
+                  </InfoTip>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  비율 수준(%) · 판정은 같은 회사의 전년동기 %p 변화 · 재고일수 아님
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {supplierInventory.companies.map((company, index) => {
+                  const prior = priorInventoryRatio(company);
+                  return (
+                    <div key={company.id} className="rounded-md border bg-background/25 p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">{company.name}</p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            {prior == null || company.inventory_to_revenue == null
+                              ? "전년동기 비교 불가"
+                              : `${prior.toFixed(1)}% → ${company.inventory_to_revenue.toFixed(1)}% (${signed(company.ratio_change_pp)}%p)`}
+                          </p>
+                        </div>
+                        <Badge variant={TONE_STYLES[thesisSignalTone(company.state)].badge}>
+                          {inventoryBurdenLabel(company.state)}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 h-44">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={company.history.slice(-12)} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" opacity={0.18} vertical={false} />
+                            <XAxis dataKey="period" tickFormatter={formatDate} minTickGap={28} tick={{ fontSize: 10 }} />
+                            <YAxis width={40} tick={{ fontSize: 10 }} unit="%" domain={["auto", "auto"]} />
+                            <Tooltip
+                              labelFormatter={(label) => `분기말 ${label}`}
+                              formatter={(value: number) => [`${Number(value).toFixed(1)}%`, "재고/분기매출"]}
+                              contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }}
+                            />
+                            <Line type="monotone" dataKey="value" stroke={index ? REGIME_SERIES_COLORS.violet : REGIME_SERIES_COLORS.blue} dot={{ r: 2 }} strokeWidth={2} isAnimationActive={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      <MemoryCyclePanel data={memory} />
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>한국 메모리 수출액</CardTitle>
+            <p className="text-sm text-muted-foreground">관세청 월별 품목 · 십억 달러</p>
+          </CardHeader>
+          <CardContent>
+            {exportData.length ? (
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={exportData} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                    <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={32} tick={{ fontSize: 11 }} />
+                    <YAxis width={48} tick={{ fontSize: 11 }} unit="B" />
+                    <Tooltip labelFormatter={(label) => `관측월 ${label}`} formatter={(value: number, name: string) => [`$${Number(value).toFixed(2)}B`, name === "memory" ? "전체 메모리" : name === "dram" ? "DRAM" : "플래시메모리"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                    <Legend formatter={(value) => value === "memory" ? "전체 메모리" : value === "dram" ? "DRAM" : "플래시메모리"} />
+                    <Line type="monotone" dataKey="memory" stroke={REGIME_SERIES_COLORS.blue} dot={false} strokeWidth={2} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="dram" stroke={REGIME_SERIES_COLORS.cyan} dot={false} strokeWidth={2} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="flash" stroke={REGIME_SERIES_COLORS.violet} dot={false} strokeWidth={2} strokeDasharray="5 3" isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">관세청 데이터를 아직 수집하지 않았습니다.</div>}
+            {data.demand.source_url && <a href={data.demand.source_url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-primary hover:underline">관세청 원본 통계</a>}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>한국 반도체 완제품 생산·출하·재고</CardTitle>
+            <p className="text-sm text-muted-foreground">KOSIS C261 광의 지수 · 2020=100</p>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-4 grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="rounded-md border bg-muted/10 px-2 py-3">
+                <p className="text-muted-foreground">재고 수준</p>
+                <p className="mt-1 font-medium tabular-nums">
+                  {data.supply.context.inventory_percentile == null
+                    ? "-"
+                    : `${data.supply.context.inventory_percentile.toFixed(0)}백분위`}
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/10 px-2 py-3">
+                <p className="text-muted-foreground">재고/출하</p>
+                <p className="mt-1 font-medium tabular-nums">
+                  {data.supply.context.inventory_shipments_ratio_percentile == null
+                    ? "-"
+                    : `${data.supply.context.inventory_shipments_ratio_percentile.toFixed(0)}백분위`}
+                </p>
+              </div>
+              <div className="rounded-md border bg-muted/10 px-2 py-3">
+                <p className="text-muted-foreground">재고 3개월</p>
+                <p className="mt-1 font-medium tabular-nums">
+                  {signed(data.supply.context.inventory_change_3m)}%
+                </p>
+              </div>
+            </div>
+            {supplyData.length ? (
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={supplyData} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                    <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={32} tick={{ fontSize: 11 }} />
+                    <YAxis width={48} tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
+                    <Tooltip labelFormatter={(label) => `관측월 ${label}`} formatter={(value: number, name: string) => [Number(value).toFixed(1), name === "production" ? "생산" : name === "shipments" ? "출하" : "재고"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                    <Legend formatter={(value) => value === "production" ? "생산" : value === "shipments" ? "출하" : "재고"} />
+                    <Line type="monotone" dataKey="production" stroke={REGIME_SERIES_COLORS.blue} dot={false} strokeWidth={2} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="shipments" stroke={REGIME_SERIES_COLORS.cyan} dot={false} strokeWidth={2} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="inventory" stroke={REGIME_SERIES_COLORS.pink} dot={false} strokeWidth={2} strokeDasharray="5 3" isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">KOSIS 데이터를 아직 수집하지 않았습니다.</div>}
+            <a href={data.supply.source_url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-primary hover:underline">KOSIS 원본 통계</a>
+          </CardContent>
+        </Card>
+      </div>
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center gap-3">
+            <CardTitle>국내 2사 실적 확인 · 보조축</CardTitle>
+            <Badge variant={TONE_STYLES[thesisSignalTone(data.company_confirmation.state)].badge}>{data.company_confirmation.state}</Badge>
+            <InfoTip label="공시 확인 범위">{data.company_confirmation.methodology} {data.company_confirmation.limitations}</InfoTip>
+          </div>
+          <p className="text-sm leading-6 text-muted-foreground">
+            {data.company_confirmation.reason} 삼성전자는 전사 수치로 메모리 부문 단독 실적이 아닙니다.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {data.company_confirmation.companies.map((company) => (
+              <CompanyFilingCard
+                key={company.id}
+                company={company}
+                inventory={supplierInventory.companies.find((item) => item.id === company.id)}
+              />
+            ))}
+          </div>
+          <div className="mt-6 rounded-lg border bg-muted/5 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-1">
+                  <p className="font-medium">공급사 CAPEX 맥락 · 현재 판정 미사용</p>
+                  <InfoTip label="공급사 CAPEX 차트 설명">
+                    OpenDART 현금흐름표의 유형자산 취득을 단독 분기로 환산한 값입니다.
+                    지급 시점 변동이 있고 메모리·AI 전용 투자로 분리되지 않습니다. 증가는
+                    투자 의지와 미래 공급 확대를 함께 뜻할 수 있어 현재 실적·수급 판정에
+                    기계적으로 합산하지 않습니다.
+                  </InfoTip>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  회사별 최신 CAPEX 분기는 위 실적 기준분기와 다를 수 있습니다.
+                </p>
+              </div>
+              <Badge variant="info">공급 증설 맥락</Badge>
+            </div>
+            {capexData.length ? (
+              <div className="mt-4 h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={capexData} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                    <XAxis dataKey="period" tickFormatter={formatDate} tick={{ fontSize: 11 }} />
+                    <YAxis width={48} tick={{ fontSize: 11 }} unit="조" />
+                    <Tooltip labelFormatter={(label) => `분기말 ${label}`} formatter={(value: number, name: string) => [`₩${Number(value).toFixed(1)}조`, data.company_confirmation.companies.find((company) => company.id === name)?.name || name]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                    <Legend formatter={(value) => data.company_confirmation.companies.find((company) => company.id === value)?.name || value} />
+                    {data.company_confirmation.companies.map((company, index) => <Bar key={company.id} dataKey={company.id} fill={index ? REGIME_SERIES_COLORS.violet : REGIME_SERIES_COLORS.blue} maxBarSize={30} isAnimationActive={false} />)}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">OpenDART 데이터를 아직 수집하지 않았습니다.</div>}
+          </div>
+          <a href={data.company_confirmation.source_url} target="_blank" rel="noreferrer" className="mt-4 inline-block text-xs text-primary hover:underline">OpenDART 원본 공시 안내</a>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function PowerDashboard({ data }: { data: RegimeCurrent["power_cycle"] }) {
+  const metrics = data.metrics;
+  const dates = new Set(
+    [metrics.total_sales, metrics.commercial_sales, metrics.industrial_sales, metrics.generation]
+      .flatMap((metric) => metric.history.map((point) => point.date)),
+  );
+  const monthly = [...dates].sort().slice(-48).map((date) => ({
+    date,
+    total: metrics.total_sales.history.find((point) => point.date === date)?.value == null ? null : (metrics.total_sales.history.find((point) => point.date === date)?.value as number) / 1000,
+    commercial: metrics.commercial_sales.history.find((point) => point.date === date)?.value == null ? null : (metrics.commercial_sales.history.find((point) => point.date === date)?.value as number) / 1000,
+    industrial: metrics.industrial_sales.history.find((point) => point.date === date)?.value == null ? null : (metrics.industrial_sales.history.find((point) => point.date === date)?.value as number) / 1000,
+    generation: metrics.generation.history.find((point) => point.date === date)?.value == null ? null : (metrics.generation.history.find((point) => point.date === date)?.value as number) / 1000,
+  }));
+  const capacity = metrics.capacity.history.map((point) => ({
+    date: point.date, capacity: point.value / 1000,
+  }));
+  const tone = thesisSignalTone(data.state);
+  const demandTone = powerDemandTone(data.state, !data.is_stale);
+  return (
+    <div className="space-y-6">
+      <div className="px-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-xl font-semibold">미국 전력 수요·공급 맥락</h2>
+          <Badge variant={TONE_STYLES[tone].badge}>{data.state}</Badge>
+          <InfoTip label="전력 데이터의 판정 범위">{data.methodology} {data.limitations}</InfoTip>
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">{data.reason}</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {[
+          { label: "총 전력판매", metric: metrics.total_sales, tone: demandTone },
+          { label: "상업용 판매", metric: metrics.commercial_sales, tone: demandTone },
+          { label: "산업용 판매", metric: metrics.industrial_sales, tone: "neutral" as const },
+          { label: "순발전량", metric: metrics.generation, tone: "neutral" as const },
+        ].map(({ label, metric: item, tone: metricTone }) => {
+          return (
+            <Card key={label}>
+              <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">{label}</CardTitle></CardHeader>
+              <CardContent>
+                <p
+                  className={`text-2xl font-semibold tabular-nums ${TONE_STYLES[metricTone].text}`}
+                  data-metric-label={label}
+                  data-semantic-tone={metricTone}
+                >
+                  {item.yoy_3m_avg == null ? "-" : `${item.yoy_3m_avg > 0 ? "+" : ""}${item.yoy_3m_avg.toFixed(1)}%`}
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">3개월 평균 YoY · {item.observation_date || "미수집"}</p>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+        <Card>
+          <CardHeader><CardTitle>월간 전력판매와 순발전량</CardTitle><p className="text-sm text-muted-foreground">EIA · TWh</p></CardHeader>
+          <CardContent>
+            {monthly.length ? (
+              <div className="h-96">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={monthly} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                    <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={32} tick={{ fontSize: 11 }} />
+                    <YAxis width={52} tick={{ fontSize: 11 }} />
+                    <Tooltip labelFormatter={(label) => `관측월 ${label}`} formatter={(value: number, name: string) => [`${Number(value).toFixed(1)} TWh`, name === "total" ? "총판매" : name === "commercial" ? "상업용" : name === "industrial" ? "산업용" : "순발전"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                    <Legend formatter={(value) => value === "total" ? "총판매" : value === "commercial" ? "상업용" : value === "industrial" ? "산업용" : "순발전"} />
+                    <Line type="monotone" dataKey="generation" stroke={REGIME_SERIES_COLORS.blue} dot={false} strokeWidth={2} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="total" stroke={REGIME_SERIES_COLORS.violet} dot={false} strokeWidth={2} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="commercial" stroke={REGIME_SERIES_COLORS.cyan} dot={false} strokeWidth={1.7} strokeDasharray="5 3" isAnimationActive={false} />
+                    <Line type="monotone" dataKey="industrial" stroke={REGIME_SERIES_COLORS.pink} dot={false} strokeWidth={1.7} strokeDasharray="2 3" isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">EIA 데이터를 아직 수집하지 않았습니다.</div>}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>미국 순하계 설비용량</CardTitle><p className="text-sm text-muted-foreground">EIA 연간 · GW</p></CardHeader>
+          <CardContent>
+            {capacity.length ? (
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={capacity} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                    <XAxis dataKey="date" tickFormatter={(value) => String(value).slice(0, 4)} tick={{ fontSize: 11 }} />
+                    <YAxis width={58} tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
+                    <Tooltip labelFormatter={(label) => `연도 ${String(label).slice(0, 4)}`} formatter={(value: number) => [`${Number(value).toFixed(1)} GW`, "설비용량"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                    <Line type="monotone" dataKey="capacity" stroke={REGIME_SERIES_COLORS.blue} dot={{ r: 2 }} strokeWidth={2} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">설비용량 데이터를 아직 수집하지 않았습니다.</div>}
+            <a href={data.source_url} target="_blank" rel="noreferrer" className="mt-4 inline-block text-xs text-primary hover:underline">EIA 원본 데이터 안내</a>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
 
@@ -842,14 +1607,34 @@ export function RegimePage() {
 
         <TabsContent value="indicators" className="mt-0">
           <Tabs defaultValue="market" className="space-y-6">
-            <div className="sticky top-16 z-10 -mx-1 overflow-x-auto bg-background/95 px-1 py-3 backdrop-blur">
-              <TabsList className="w-max">
-                {DOMAIN_TABS.map((tab) => (
-                  <TabsTrigger key={tab.id} value={tab.id}>
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
+            <div className="sticky top-16 z-10 -mx-1 overflow-x-auto border-b border-border/70 bg-background/95 px-1 py-3 backdrop-blur">
+              <div className="flex w-max items-end gap-5">
+                <div>
+                  <p className="mb-1.5 px-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                    거시·시장
+                  </p>
+                  <TabsList className="w-max">
+                    {MACRO_DOMAIN_TABS.map((tab) => (
+                      <TabsTrigger key={tab.id} value={tab.id}>
+                        {tab.label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </div>
+                <div className="h-9 w-px bg-border" />
+                <div>
+                  <p className="mb-1.5 px-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                    AI 투자 가설
+                  </p>
+                  <TabsList className="w-max">
+                    {THESIS_DOMAIN_TABS.map((tab) => (
+                      <TabsTrigger key={tab.id} value={tab.id}>
+                        {tab.label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </div>
+              </div>
             </div>
             <TabsContent value="market" className="mt-0 space-y-6">
               <MarketIndicators
@@ -865,13 +1650,39 @@ export function RegimePage() {
               if (tab.id === "ai") {
                 return (
                   <TabsContent key={tab.id} value={tab.id} className="mt-0">
-                    {data && <AiCapexDashboard data={data.ai_capex} memory={data.memory_cycle} />}
+                    {data && <AiCapexDashboard data={data.ai_capex} />}
                   </TabsContent>
                 );
               }
-              const signals =
+              if (tab.id === "semiconductor") {
+                return (
+                  <TabsContent key={tab.id} value={tab.id} className="mt-0">
+                    {data && (
+                      <SemiconductorDashboard
+                        data={data.semiconductor_cycle}
+                        memory={data.memory_cycle}
+                      />
+                    )}
+                  </TabsContent>
+                );
+              }
+              if (tab.id === "power") {
+                return (
+                  <TabsContent key={tab.id} value={tab.id} className="mt-0">
+                    {data && <PowerDashboard data={data.power_cycle} />}
+                  </TabsContent>
+                );
+              }
+              const rawSignals =
                 data?.signals.filter((signal) => signal.domain === tab.id) ||
                 [];
+              const signals = tab.id === "rates"
+                ? [...rawSignals].sort((a, b) => {
+                    const aIndex = RATE_SIGNAL_ORDER.indexOf(a.id);
+                    const bIndex = RATE_SIGNAL_ORDER.indexOf(b.id);
+                    return (aIndex < 0 ? 999 : aIndex) - (bIndex < 0 ? 999 : bIndex);
+                  })
+                : rawSignals;
               return (
                 <TabsContent
                   key={tab.id}
@@ -885,7 +1696,12 @@ export function RegimePage() {
                       표시합니다.
                     </p>
                   </div>
-                  {tab.id === "rates" && <RateComparison signals={signals} />}
+                  {tab.id === "rates" && data && (
+                    <>
+                      <RateModelOverview data={data} signals={signals} />
+                      <RateComparison signals={signals} />
+                    </>
+                  )}
                   <div className="grid gap-5 xl:grid-cols-2">
                     {signals.map((signal) => (
                       <SignalCard key={signal.id} signal={signal} />
@@ -918,11 +1734,12 @@ export function RegimePage() {
                       </Badge>
                     )}
                   </div>
-                  <div className="mt-4 grid gap-3 rounded-lg bg-muted/20 p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="mt-4 grid gap-3 rounded-lg bg-muted/20 p-4 text-xs sm:grid-cols-2 lg:grid-cols-5">
                     <p><span className="text-muted-foreground">사용자 판정</span><span className="mt-1 block font-medium">{item.user_regime || "미입력"}</span></p>
                     <p><span className="text-muted-foreground">경제환경·최근 방향</span><span className="mt-1 block font-medium">{item.macro_quadrant?.environment_point?.label || "미확인"} / {recordedDirection}</span></p>
                     <p><span className="text-muted-foreground">활성 임계신호</span><span className="mt-1 block font-medium">{item.triggers?.length || 0}개</span></p>
                     <p><span className="text-muted-foreground">AI·메모리 보조지표</span><span className="mt-1 block font-medium">CAPEX {item.ai_capex?.state || "미확인"} · DRAM {item.memory_cycle?.state ? memoryStateLabel[item.memory_cycle.state] || item.memory_cycle.state : "미확인"} · NAND {item.memory_cycle?.nand_state || "미확인"}</span></p>
+                    <p><span className="text-muted-foreground">수급·전력 보조지표</span><span className="mt-1 block font-medium">반도체 {item.semiconductor_cycle?.state || "미확인"} · 전력 {item.power_cycle?.state || "미확인"}</span></p>
                   </div>
                   <p className="mt-3 text-sm text-muted-foreground">
                     {item.reasons?.slice(0, 3).join(" · ") ||

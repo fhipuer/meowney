@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -11,8 +11,9 @@ from app.services.regime_rules import (
 
 
 def signal(key, values, *, domain="rates", frequency="daily", start_day=1):
+    start = date(2026, 7, start_day)
     history = [
-        {"date": f"2026-07-{min(start_day + index, 28):02d}", "value": value}
+        {"date": (start + timedelta(days=index)).isoformat(), "value": value}
         for index, value in enumerate(values)
     ]
     return {
@@ -32,6 +33,12 @@ def test_trigger_result_is_deterministic_and_sorted_by_severity_then_id():
     second, _ = evaluate_triggers(list(reversed(signals)))
     assert first == second
     assert [item["rule_id"] for item in first] == sorted(item["rule_id"] for item in first)
+
+
+def test_trigger_result_is_independent_from_history_order():
+    original = signal("tips10y", [1.0] * 20 + [1.5])
+    reversed_history = {**original, "history": list(reversed(original["history"]))}
+    assert evaluate_triggers([original]) == evaluate_triggers([reversed_history])
 
 
 def test_core_inflation_reacceleration_is_immediate_critical_trigger():
@@ -81,6 +88,36 @@ def test_rate_decomposition_identifies_real_yield_driver():
     })
     assert result["driver"] == "실질금리 주도"
     assert result["nominal_change"] == pytest.approx(.8)
+    assert result["start_date"] == "2026-07-01"
+    assert result["end_date"] == "2026-07-21"
+
+
+def test_term_premium_is_not_a_standalone_restrictive_trigger():
+    triggers, _ = evaluate_triggers([signal("term_premium", [2.0] * 90)])
+    assert "tightening.restrictive_level" not in trigger_ids(triggers)
+
+
+def test_high_tips_and_nonnegative_real_policy_create_one_level_trigger():
+    triggers, _ = evaluate_triggers([
+        signal("tips10y", [2.30] * 30),
+        signal("fedfunds", [4.0]),
+        signal("core_pce", [100.0] * 12 + [103.0], domain="inflation", frequency="monthly"),
+    ])
+    assert "tightening.restrictive_level" in trigger_ids(triggers)
+
+
+def test_persistent_10y3m_inversion_creates_only_one_curve_cluster():
+    triggers, _ = evaluate_triggers([
+        signal("curve10y3m", [-0.50] * 50),
+        signal("curve2s10s", [-0.25] * 50),
+    ])
+    curve_triggers = [
+        item for item in triggers if item["evidence_cluster"] == "yield_curve"
+    ]
+    assert len(curve_triggers) == 1
+    assert curve_triggers[0]["rule_id"] == "recession.yield_curve"
+    assert curve_triggers[0]["severity"] == "high"
+    assert curve_triggers[0]["evidence"]["confirmation"] == "동반 역전"
 
 
 def test_stale_data_is_not_treated_as_neutral():

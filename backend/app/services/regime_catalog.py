@@ -8,12 +8,12 @@ from typing import Any
 DISPLAY_POINTS = {"daily": 252, "weekly": 104, "monthly": 60, "quarterly": 40}
 
 RATE_IDS = {"fedfunds", "us3m", "us2y", "us10y", "us30y", "tips10y", "bei10y", "term_premium"}
-SPREAD_IDS = {"curve2s10s", "hy_oas", "ig_oas"}
+SPREAD_IDS = {"curve10y3m", "curve2s10s", "hy_oas", "ig_oas"}
 INFLATION_INDEX_IDS = {"cpi", "core_cpi", "pce", "core_pce", "ppi", "wages"}
 
 CORE_IDS = {
     "us_unemployment", "us_claims", "us_payrolls", "us_indpro",
-    "core_cpi", "core_pce", "tips10y", "us10y", "bei10y",
+    "core_cpi", "core_pce", "tips10y", "us10y", "bei10y", "curve10y3m",
     "hy_oas", "ig_oas", "nfci",
 }
 TRIGGER_ONLY_IDS = {
@@ -23,7 +23,7 @@ CONTEXT_IDS = {
     "fed_assets", "bank_reserves", "reverse_repo", "market_kospi",
     "market_dollar", "market_wti", "market_copper",
     "market_gold", "market_silver", "market_gold_silver_ratio",
-    "us3m",
+    "us3m", "us2y", "us30y", "term_premium",
 }
 
 
@@ -149,11 +149,11 @@ def decision_chart(indicator_id: str, observations: list[dict[str, Any]]) -> dic
         series = [{"key": "value", "label": "현재 수준"}]
         reference_map = {
             "tips10y": [(2.25, "제한적 2.25%")],
-            "term_premium": [(1.25, "높음 1.25%")],
             "hy_oas": [(4, "주의 4%p"), (5, "악화 5%p")],
             "ig_oas": [(1.2, "주의 1.2%p"), (1.5, "악화 1.5%p")],
             "nfci": [(0, "긴축 전환 0"), (.5, "악화 0.5")],
             "curve2s10s": [(0, "역전 경계 0"), (-.5, "악화 -0.5%p")],
+            "curve10y3m": [(0, "역전 경계 0"), (-.5, "깊은 역전 -0.5%p")],
         }
         references = [
             {"value": value, "label": label}
@@ -167,7 +167,7 @@ def decision_chart(indicator_id: str, observations: list[dict[str, Any]]) -> dic
         "title": title,
         "unit": unit,
         "series": series,
-        "points": points[-60:],
+        "points": points[-252:] if indicator_id in RATE_IDS | SPREAD_IDS | {"nfci"} else points[-60:],
         "reference_lines": references,
     } if points else None
 
