@@ -1,10 +1,11 @@
 """Deterministic U.S. rate-regime model.
 
-The model keeps three economically different questions separate:
+The model keeps four economically different questions separate:
 
 1. current policy/real-rate restriction,
 2. recent rate shock and its driver,
-3. forward recession risk embedded in the yield curve.
+3. long-end duration/fiscal stress concentrated in the 30-year sector,
+4. forward recession risk embedded in the yield curve.
 
 Yield-curve probability follows the New York Fed's published 10Y-3M probit
 parameters.  A rolling 21-observation mean lets the monthly model update every
@@ -17,7 +18,7 @@ import math
 from typing import Any, Iterable
 
 
-RATE_MODEL_VERSION = "2026-08-rates-v2"
+RATE_MODEL_VERSION = "2026-08-rates-v3"
 NYFED_PROBIT_INTERCEPT = -0.5333
 NYFED_PROBIT_SLOPE = -0.6330
 MONTHLY_TRADING_DAYS = 21
@@ -124,6 +125,16 @@ def aligned_ten_year_changes(
     return _aligned_changes(signals, ("us10y", "tips10y", "bei10y"), periods)
 
 
+def aligned_long_end_changes(
+    signals: dict[str, dict[str, Any]], periods: int = 20,
+) -> dict[str, Any] | None:
+    """Align official 10Y/30Y nominal and real Treasury observations."""
+
+    return _aligned_changes(
+        signals, ("us10y", "us30y", "tips10y", "tips30y"), periods,
+    )
+
+
 def _percentile_rank(values: list[float], current: float | None) -> float | None:
     if current is None or len(values) < 60:
         return None
@@ -168,6 +179,8 @@ def _long_rate_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
     tips = _latest(signals.get("tips10y"))
     breakeven = _latest(signals.get("bei10y"))
     term = _latest(signals.get("term_premium"))
+    nominal_30y = _latest(signals.get("us30y"))
+    real_30y = _latest(signals.get("tips30y"))
     # TIPS already contains the long real-rate burden.  The estimated nominal
     # term premium explains that burden but is not added again to the score.
     score = None if tips is None else round(_clamp((tips - 1.5) * 60), 1)
@@ -188,6 +201,10 @@ def _long_rate_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
         "nominal_10y": nominal,
         "real_10y": tips,
         "breakeven_10y": breakeven,
+        "nominal_30y": nominal_30y,
+        "real_30y": real_30y,
+        "spread_30y10y": round(nominal_30y - nominal, 3)
+        if nominal_30y is not None and nominal is not None else None,
         "term_premium": term,
         "term_premium_percentile": term_percentile,
         "term_premium_change_63d": round(term_change_63d, 3) if term_change_63d is not None else None,
@@ -197,13 +214,141 @@ def _long_rate_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _shock_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _duration_stress_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Detect a persistent shock concentrated in the far end of the curve.
+
+    The 30Y lane is bounded confirmation. It can raise review urgency and put
+    a floor under the recent-shock layer, but cannot become a separate macro
+    domain or create a severe rate score by itself.
+    """
+
+    nominal_10y = _latest(signals.get("us10y"))
+    nominal_30y = _latest(signals.get("us30y"))
+    real_30y = _latest(signals.get("tips30y"))
+    spread = (
+        nominal_30y - nominal_10y
+        if nominal_30y is not None and nominal_10y is not None else None
+    )
+    change20 = aligned_long_end_changes(signals, 20)
+    change63 = aligned_long_end_changes(signals, 63)
+
+    histories = {
+        key: dict(_history(signals.get(key)))
+        for key in ("us10y", "us30y", "tips30y")
+    }
+    common_dates = sorted(set.intersection(*(set(rows) for rows in histories.values())))
+    confirmation_dates = common_dates[-5:]
+    confirmation_count = sum(
+        histories["tips30y"][when] >= 3.0
+        and histories["us30y"][when] - histories["us10y"][when] >= .50
+        for when in confirmation_dates
+    )
+    confirmed = len(confirmation_dates) >= 3 and confirmation_count >= 3
+
+    if not change20 or real_30y is None or spread is None:
+        return {
+            "score": None,
+            "bounded_shock_floor": 0.0,
+            "label": "판정 불가",
+            "driver": "판정 불가",
+            "nominal_10y": nominal_10y,
+            "nominal_30y": nominal_30y,
+            "real_30y": real_30y,
+            "spread_30y10y": round(spread, 3) if spread is not None else None,
+            "change_20d": change20,
+            "change_63d": change63,
+            "confirmation_count_5d": confirmation_count,
+            "confirmed": False,
+            "persistent": False,
+            "role": "bounded_confirmation",
+        }
+
+    changes20 = change20["changes"]
+    nominal_change = changes20["us30y"]
+    real_change = changes20["tips30y"]
+    bei_change = _delta(signals.get("bei10y"), 20)
+    score = 0.0
+    if confirmed and (
+        real_change >= .25
+        or (nominal_change >= .35 and real_change >= .15)
+    ):
+        score = 55.0
+    elif confirmed and real_30y >= 3.0 and real_change >= .15 and spread >= .50:
+        score = 35.0
+    elif confirmed and nominal_change >= .25 and spread >= .50:
+        score = 25.0
+
+    changes63 = change63["changes"] if change63 else None
+    persistent = bool(
+        score > 0
+        and changes63
+        and changes63["tips30y"] >= .20
+        and changes63["us30y"] >= .20
+    )
+    if persistent:
+        score = min(60.0, score + 5.0)
+
+    if real_change >= .15 and (bei_change is None or bei_change < .10):
+        driver = "30Y 실질금리 주도"
+    elif bei_change is not None and bei_change >= .15:
+        driver = "인플레이션 기대 동반"
+    else:
+        driver = "장기금리 혼합"
+    label = (
+        "장기 듀레이션 충격" if score >= 50
+        else "장기 듀레이션 부담 경계" if score >= 35
+        else "장기금리 상승 관찰" if score >= 25
+        else "장기 구간 추가 충격 없음"
+    )
+    return {
+        "score": round(score, 1),
+        "bounded_shock_floor": round(min(score, 40.0), 1),
+        "label": label,
+        "driver": driver,
+        "nominal_10y": nominal_10y,
+        "nominal_30y": nominal_30y,
+        "real_30y": real_30y,
+        "spread_30y10y": round(spread, 3),
+        "change_20d": change20,
+        "change_63d": change63,
+        "breakeven_10y_change_20d": round(bei_change, 4)
+        if bei_change is not None else None,
+        "confirmation_count_5d": confirmation_count,
+        "confirmed": confirmed,
+        "persistent": persistent,
+        "role": "bounded_confirmation",
+        "thresholds": {
+            "real_30y_level": 3.0,
+            "real_30y_change_20d": .15,
+            "spread_30y10y": .50,
+            "confirmation_observations": "3_of_5",
+        },
+    }
+
+
+def _shock_layer(
+    signals: dict[str, dict[str, Any]],
+    duration_stress: dict[str, Any],
+) -> dict[str, Any]:
     change20 = aligned_ten_year_changes(signals, 20)
     change63 = aligned_ten_year_changes(signals, 63)
     if not change20:
+        duration_floor = float(duration_stress.get("bounded_shock_floor") or 0)
+        if duration_floor > 0:
+            return {
+                "score": duration_floor,
+                "base_score": None,
+                "duration_floor": duration_floor,
+                "label": "긴축 충격" if duration_floor >= 35 else "상승 압력",
+                "direction": "긴축",
+                "persistent": bool(duration_stress.get("persistent")),
+                "change_20d": None,
+                "change_63d": None,
+            }
         return {
             "score": None, "label": "판정 불가", "direction": "판정 불가",
             "persistent": False, "change_20d": None, "change_63d": None,
+            "base_score": None, "duration_floor": 0.0,
         }
 
     c20 = change20["changes"]
@@ -228,7 +373,16 @@ def _shock_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
     if persistent and 0 < pressure < 65:
         pressure = min(60, pressure + 10)
 
-    if real20 <= -.15 and nominal20 <= -.15:
+    base_pressure = pressure
+    duration_floor = float(duration_stress.get("bounded_shock_floor") or 0)
+    pressure = max(pressure, duration_floor)
+    persistent = persistent or bool(
+        duration_floor > 0 and duration_stress.get("persistent")
+    )
+
+    if duration_floor > 0:
+        direction = "긴축"
+    elif real20 <= -.15 and nominal20 <= -.15:
         direction = "완화"
     elif real20 >= .15 or nominal20 >= .25:
         direction = "긴축"
@@ -245,6 +399,8 @@ def _shock_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
     )
     return {
         "score": round(pressure, 1),
+        "base_score": round(base_pressure, 1),
+        "duration_floor": round(duration_floor, 1),
         "label": label,
         "direction": direction,
         "persistent": persistent,
@@ -386,12 +542,13 @@ def _yield_curve_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
 
 
 def calculate_rate_model(signal_list: list[dict[str, Any]]) -> dict[str, Any]:
-    """Calculate the three-layer rate model from cached signal histories."""
+    """Calculate the layered rate model from cached signal histories."""
 
     signals = {item["id"]: item for item in signal_list}
     policy = _policy_layer(signals)
     long_rates = _long_rate_layer(signals)
-    recent_shock = _shock_layer(signals)
+    duration_stress = _duration_stress_layer(signals)
+    recent_shock = _shock_layer(signals, duration_stress)
     yield_curve = _yield_curve_layer(signals)
 
     restriction_scores = [
@@ -426,7 +583,7 @@ def calculate_rate_model(signal_list: list[dict[str, Any]]) -> dict[str, Any]:
         "yield_curve": yield_curve["score"] is not None,
     }
     as_of_dates = [
-        rows[-1][0] for key in ("fedfunds", "tips10y", "curve10y3m")
+        rows[-1][0] for key in ("fedfunds", "tips10y", "tips30y", "curve10y3m")
         if (rows := _history(signals.get(key)))
     ]
     return {
@@ -437,9 +594,13 @@ def calculate_rate_model(signal_list: list[dict[str, Any]]) -> dict[str, Any]:
         "policy": policy,
         "long_rates": long_rates,
         "recent_shock": recent_shock,
+        "duration_stress": duration_stress,
         "yield_curve": yield_curve,
         "coverage": round(sum(coverage_inputs.values()) / len(coverage_inputs), 3),
         "coverage_inputs": coverage_inputs,
         "as_of_date": max(as_of_dates) if as_of_dates else None,
-        "methodology": "현재 제약 수준·최근 금리 충격·10Y-3M 침체 선행위험의 최댓값",
+        "methodology": (
+            "현재 제약 수준·30년물 확인을 포함한 최근 금리 충격·"
+            "10Y-3M 침체 선행위험의 최댓값"
+        ),
     }

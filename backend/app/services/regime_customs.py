@@ -19,6 +19,9 @@ CUSTOMS_SOURCE_URL = "https://www.data.go.kr/data/15101609/openapi.do"
 FEED_ID = "customs_memory_exports"
 DRAM_HS = "8542321010"
 FLASH_HS = "8542321030"
+MCP_HS = "8542323000"
+DRAM_MODULE_HS = "8473304060"
+QUERY_HS_CODES = ("854232", DRAM_MODULE_HS)
 
 
 def _month_shift(year: int, month: int, delta: int) -> tuple[int, int]:
@@ -51,7 +54,7 @@ def parse_customs_memory_xml(content: bytes) -> list[dict[str, Any]]:
         item = {child.tag: child.text for child in node}
         hs_code = item.get("hsCode") or ""
         period = item.get("year") or ""
-        if not hs_code.startswith("854232") or len(period) != 7 or period[4] != ".":
+        if not any(hs_code.startswith(prefix) for prefix in QUERY_HS_CODES) or len(period) != 7 or period[4] != ".":
             continue
         try:
             export_usd = float(item.get("expDlr") or 0)
@@ -97,12 +100,13 @@ class CustomsMemoryExportService:
             observations: list[dict[str, Any]] = []
             async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
                 for start, end in customs_query_windows():
-                    response = await client.get(CUSTOMS_ENDPOINT, params={
-                        "serviceKey": service_key, "strtYymm": start, "endYymm": end,
-                        "hsSgn": "854232", "numOfRows": "1000", "pageNo": "1",
-                    })
-                    response.raise_for_status()
-                    observations.extend(parse_customs_memory_xml(response.content))
+                    for hs_code in QUERY_HS_CODES:
+                        response = await client.get(CUSTOMS_ENDPOINT, params={
+                            "serviceKey": service_key, "strtYymm": start, "endYymm": end,
+                            "hsSgn": hs_code, "numOfRows": "1000", "pageNo": "1",
+                        })
+                        response.raise_for_status()
+                        observations.extend(parse_customs_memory_xml(response.content))
             if not observations:
                 raise ValueError("관세청 메모리 수출 응답에 유효한 월별 품목이 없습니다.")
             fetched_at = datetime.now(timezone.utc).isoformat()
@@ -121,24 +125,32 @@ class CustomsMemoryExportService:
 def aggregate_customs_exports(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Aggregate raw HS children without using the provider's total row.
 
-    DRAM is also decomposed into export value, reported weight, and value per
-    kilogram.  The last measure is an export-unit-value/mix proxy, not a pure
-    product price: a shift toward HBM or other high-value packages can move it
-    even when the underlying contract price is unchanged.
+    DRAM chips are decomposed into export value, customs-declared net weight,
+    and value per kilogram. MCP and DRAM-module export values are kept as
+    separate downstream confirmation lanes. Declared weight is packaging mass,
+    not bit shipment volume, and USD/kg is a price/product-mix proxy rather
+    than a pure contract price.
     """
     totals: dict[str, float] = defaultdict(float)
     dram: dict[str, float] = defaultdict(float)
     dram_weight: dict[str, float] = defaultdict(float)
     flash: dict[str, float] = defaultdict(float)
+    mcp: dict[str, float] = defaultdict(float)
+    dram_module: dict[str, float] = defaultdict(float)
     for row in rows:
         hs_code = row.get("dimensions", {}).get("hs_code") or ""
         when = row["observation_date"]
         if row["series_id"].endswith("_export_usd"):
-            totals[when] += float(row["value"])
+            if hs_code.startswith("854232"):
+                totals[when] += float(row["value"])
             if hs_code == DRAM_HS:
                 dram[when] += float(row["value"])
             if hs_code == FLASH_HS:
                 flash[when] += float(row["value"])
+            if hs_code == MCP_HS:
+                mcp[when] += float(row["value"])
+            if hs_code == DRAM_MODULE_HS:
+                dram_module[when] += float(row["value"])
         elif row["series_id"].endswith("_export_kg") and hs_code == DRAM_HS:
             dram_weight[when] += float(row["value"])
 
@@ -154,6 +166,8 @@ def aggregate_customs_exports(rows: list[dict[str, Any]]) -> dict[str, list[dict
         "memory": points(totals),
         "dram": points(dram),
         "flash": points(flash),
+        "mcp": points(mcp),
+        "dram_module": points(dram_module),
         "dram_weight": points(dram_weight),
         "dram_unit_value": points(dram_unit_value),
     }

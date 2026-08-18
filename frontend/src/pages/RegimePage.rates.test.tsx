@@ -13,9 +13,11 @@ describe("rate regime presentation", () => {
     expect(help("curve2s10s")).toContain("중복 합산하지 않습니다");
     expect(help("term_premium")).toContain("자동 점수에 더하지 않습니다");
     expect(help("tips10y")).toContain("절대수준");
+    expect(help("us30y")).toContain("장기 듀레이션 경보");
+    expect(help("tips30y")).toContain("중복 합산하지 않습니다");
   });
 
-  it("shows level, shock and curve as separate model layers", () => {
+  it("shows level, shock, long-end stress and curve as separate model layers", () => {
     const data = {
       macro_quadrant: {
         financial_conditions: {
@@ -24,7 +26,7 @@ describe("rate regime presentation", () => {
             label: "제한적",
             driver: "현재 제약 수준",
             coverage: 1,
-            version: "2026-08-rates-v2",
+            version: "2026-08-rates-v3",
           },
           policy: {
             label: "다소 제한적",
@@ -41,6 +43,22 @@ describe("rate regime presentation", () => {
               changes: { us10y: 0.06, tips10y: 0.04, bei10y: 0.03 },
             },
           },
+          duration_stress: {
+            score: 35,
+            bounded_shock_floor: 35,
+            label: "장기 듀레이션 부담 경계",
+            driver: "30Y 실질금리 주도",
+            nominal_10y: 4.72,
+            nominal_30y: 5.31,
+            real_30y: 3.06,
+            spread_30y10y: 0.59,
+            change_20d: null,
+            change_63d: null,
+            confirmation_count_5d: 5,
+            confirmed: true,
+            persistent: false,
+            role: "bounded_confirmation",
+          },
           yield_curve: {
             label: "선행위험 낮음",
             state: "정상 우상향",
@@ -56,9 +74,13 @@ describe("rate regime presentation", () => {
       <RateModelOverview data={data} signals={[]} />,
     );
 
-    expect(html).toContain("1 · 현재 제약 수준");
-    expect(html).toContain("2 · 최근 금리 충격");
-    expect(html).toContain("3 · 침체 선행위험");
+    expect(html).toContain("1 · 현재 금리 부담");
+    expect(html).toContain("2 · 최근 추가 금리 충격");
+    expect(html).toContain("3 · 30년물 장기채 부담");
+    expect(html).toContain("4 · 수익률곡선의 침체 선행 신호");
+    expect(html).toContain("30년 실질금리 상승이 주도");
+    expect(html).toContain("단기금리가 수요를 약하게 억제");
+    expect(html).toContain("투자·차입에 뚜렷한 부담");
     expect(html).toContain("17.6%");
     expect(html).toContain("10Y-3M은 주축");
   });

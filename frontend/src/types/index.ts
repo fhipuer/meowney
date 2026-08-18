@@ -553,6 +553,8 @@ export interface RegimeTrendMetric {
   observation_date: string | null;
   yoy: number | null;
   yoy_3m_avg: number | null;
+  mom?: number | null;
+  sequential_3m?: number | null;
   momentum_3m_annualized?: number | null;
   change_3m?: number | null;
   unit: string;
@@ -597,8 +599,17 @@ export interface SemiconductorCycle {
         state: string;
         reason: string;
         coverage: number;
-        driver: "price_and_volume" | "unit_value_mix" | "volume" | "contraction" | "mixed" | "unknown";
+        driver: "unit_value_mix" | "value_and_downstream" | "export_value" | "contraction" | "mixed" | "unknown";
         conflicts: string[];
+        confirmations: string[];
+        context: {
+          declared_weight_yoy_3m_avg: number | null;
+          declared_weight_role: "declared_packaging_mass_context" | "packaging_mix_context";
+          mcp_export_yoy_3m_avg: number | null;
+          dram_module_export_yoy_3m_avg: number | null;
+          export_value_mom: number | null;
+          export_value_sequential_3m: number | null;
+        };
       };
       supplier_inventory: {
         state: string;
@@ -629,13 +640,24 @@ export interface SemiconductorCycle {
       state: string;
       reason: string;
       coverage: number;
-      driver: "price_and_volume" | "unit_value_mix" | "volume" | "contraction" | "mixed" | "unknown";
+      driver: "unit_value_mix" | "value_and_downstream" | "export_value" | "contraction" | "mixed" | "unknown";
       conflicts: string[];
+      confirmations: string[];
+      context: {
+        declared_weight_yoy_3m_avg: number | null;
+        declared_weight_role: "declared_packaging_mass_context" | "packaging_mix_context";
+        mcp_export_yoy_3m_avg: number | null;
+        dram_module_export_yoy_3m_avg: number | null;
+        export_value_mom: number | null;
+        export_value_sequential_3m: number | null;
+      };
     };
     metrics: {
       memory: RegimeTrendMetric;
       dram: RegimeTrendMetric;
       flash: RegimeTrendMetric;
+      mcp: RegimeTrendMetric;
+      dram_module: RegimeTrendMetric;
       dram_weight: RegimeTrendMetric;
       dram_unit_value: RegimeTrendMetric;
     };
@@ -745,6 +767,18 @@ export interface RateChangeWindow {
     us10y: number;
     tips10y: number;
     bei10y: number;
+  };
+}
+
+export interface LongEndRateChangeWindow {
+  periods: number;
+  start_date: string;
+  end_date: string;
+  changes: {
+    us10y: number;
+    us30y: number;
+    tips10y: number;
+    tips30y: number;
   };
 }
 
@@ -908,6 +942,9 @@ export interface RegimeCurrent {
         nominal_10y: number | null;
         real_10y: number | null;
         breakeven_10y: number | null;
+        nominal_30y: number | null;
+        real_30y: number | null;
+        spread_30y10y: number | null;
         term_premium: number | null;
         term_premium_percentile?: number | null;
         term_premium_change_63d?: number | null;
@@ -917,11 +954,30 @@ export interface RegimeCurrent {
       };
       recent_shock?: {
         score: number | null;
+        base_score?: number | null;
+        duration_floor?: number;
         label: string;
         direction: string;
         persistent: boolean;
         change_20d: RateChangeWindow | null;
         change_63d: RateChangeWindow | null;
+      };
+      duration_stress?: {
+        score: number | null;
+        bounded_shock_floor: number;
+        label: string;
+        driver: string;
+        nominal_10y: number | null;
+        nominal_30y: number | null;
+        real_30y: number | null;
+        spread_30y10y: number | null;
+        change_20d: LongEndRateChangeWindow | null;
+        change_63d: LongEndRateChangeWindow | null;
+        breakeven_10y_change_20d?: number | null;
+        confirmation_count_5d: number;
+        confirmed: boolean;
+        persistent: boolean;
+        role: "bounded_confirmation";
       };
       yield_curve?: {
         score: number | null;

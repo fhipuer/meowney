@@ -61,7 +61,7 @@ describe("AiThesisMonitor", () => {
           coverage: 1,
           confidence: "부분",
           direct_hbm_data: false,
-          conflicts: ["DRAM 수출중량 3개월 평균 YoY -10.0%"],
+          conflicts: ["MCP 수출액 감소"],
           methodology: "세 개의 간접 프록시를 순차 확인",
           limitations: "HBM 계약가격을 직접 수집하지 않음",
           components: {
@@ -78,7 +78,16 @@ describe("AiThesisMonitor", () => {
               reason: "수출액과 단위중량당 수출액이 상승했습니다.",
               coverage: 1,
               driver: "unit_value_mix",
-              conflicts: ["DRAM 수출중량 3개월 평균 YoY -10.0%"],
+              conflicts: [],
+              confirmations: ["MCP 수출액 증가", "DRAM 모듈 수출액 증가"],
+              context: {
+                declared_weight_yoy_3m_avg: -10,
+                declared_weight_role: "declared_packaging_mass_context",
+                mcp_export_yoy_3m_avg: 25,
+                dram_module_export_yoy_3m_avg: 30,
+                export_value_mom: 5,
+                export_value_sequential_3m: 10,
+              },
             },
             supplier_inventory: {
               state: "상대 재고부담 크게 완화",
@@ -125,9 +134,19 @@ describe("AiThesisMonitor", () => {
             coverage: 1,
             driver: "unit_value_mix",
             conflicts: [],
+            confirmations: ["MCP 수출액 증가", "DRAM 모듈 수출액 증가"],
+            context: {
+              declared_weight_yoy_3m_avg: -10,
+              declared_weight_role: "declared_packaging_mass_context",
+              mcp_export_yoy_3m_avg: 25,
+              dram_module_export_yoy_3m_avg: 30,
+              export_value_mom: 5,
+              export_value_sequential_3m: 10,
+            },
           },
           metrics: {
             dram: metric(20), memory: metric(10), flash: metric(5),
+            mcp: metric(25), dram_module: metric(30),
             dram_weight: metric(-10), dram_unit_value: metric(480),
           },
         },
@@ -201,7 +220,7 @@ describe("AiThesisMonitor", () => {
     expect(html).toContain("한국 반도체 완제품 재고");
     expect(html).toContain("국내 2사 실적 확인");
     expect(html).toContain("미국 전력 수요");
-    expect(html).toContain("상충 신호");
+    expect(html).toContain("서로 엇갈리는 근거");
     expect(html).toContain("재고 부담");
     expect(html).toContain("90백분위");
     expect(html).toContain("서버 DRAM");
@@ -214,7 +233,7 @@ describe("AiThesisMonitor", () => {
     expect(html).toContain("(-37.6%p)");
     expect(html).toContain("재고 절대액은 증가했지만");
     expect(html).toContain("판정 미사용");
-    expect(html).toContain("상충 확인");
+    expect(html).toContain("서로 엇갈리는 근거");
     expect(html).toContain("전력 후속 수요");
     expect(html).toContain("가설 전달 단계");
     expect(html).toContain("AI 투자 상세");

@@ -374,9 +374,11 @@ class RegimeService:
             return (-1.5 if latest >= 1.5 else -.75 if latest >= 1.2 else .5, f"현재 {latest:.2f}%p")
         if key == "nfci":
             return (-2 if latest >= .5 else -1 if latest >= 0 else .5, f"현재 {latest:.2f}")
-        if key in {"us10y", "tips10y", "bei10y", "term_premium", "fedfunds"}:
+        if key in {"us10y", "us30y", "tips10y", "tips30y", "bei10y", "term_premium", "fedfunds"}:
             if key == "tips10y" and latest >= 2.25:
                 return (-1, f"현재 {latest:.2f}% · 제한적 실질금리")
+            if key == "tips30y" and latest >= 3.0:
+                return (-1, f"현재 {latest:.2f}% · 장기 듀레이션 부담 경계")
             return (-1.5 if delta3 >= .5 else -.75 if delta3 >= .25 else .25, f"3개월 {delta3:+.2f}%p")
         if key in {"curve2s10s", "curve10y3m"}:
             return (-1 if latest < -.5 else -.5 if latest < 0 else .5, f"현재 {latest:+.2f}%p")
@@ -836,6 +838,9 @@ class RegimeService:
             events = conn.execute(
                 "SELECT * FROM regime_feed_status WHERE source='macro_events'"
             ).fetchone()
+            treasury = conn.execute(
+                "SELECT * FROM regime_feed_status WHERE source='treasury_curve'"
+            ).fetchone()
             memory = conn.execute(
                 "SELECT source,last_attempted_at,last_success_at,status,observation_count AS item_count,error "
                 "FROM memory_price_fetch_status WHERE source='trendforce_public'"
@@ -856,6 +861,7 @@ class RegimeService:
         return {
             "macro": dict(macro) if macro else None,
             "events": dict(events) if events else None,
+            "treasury": dict(treasury) if treasury else None,
             "ai_capex": {
                 "source": "sec_capex", "status": ai_status,
                 "last_attempted_at": max(ai_attempts) if ai_attempts else None,

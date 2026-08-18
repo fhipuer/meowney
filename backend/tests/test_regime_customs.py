@@ -25,17 +25,21 @@ def test_customs_parser_keeps_raw_hs_children_and_skips_provider_total():
     result = parse_customs_memory_xml(xml([
         {"year": "2026.07", "hsCode": "8542321010", "statKor": "디램", "expDlr": "100", "expWgt": "2", "impDlr": "20", "balPayments": "80"},
         {"year": "2026.07", "hsCode": "8542321030", "statKor": "플래시 메모리", "expDlr": "30", "expWgt": "1", "impDlr": "5", "balPayments": "25"},
+        {"year": "2026.07", "hsCode": "8542323000", "statKor": "복합구조칩", "expDlr": "40", "expWgt": "1", "impDlr": "4", "balPayments": "36"},
+        {"year": "2026.07", "hsCode": "8473304060", "statKor": "디램모듈", "expDlr": "50", "expWgt": "1", "impDlr": "6", "balPayments": "44"},
         {"year": "총계", "hsCode": "-", "statKor": "-", "expDlr": "999", "expWgt": "9", "impDlr": "0", "balPayments": "999"},
     ]))
 
-    assert len(result) == 4
+    assert len(result) == 8
     assert result[0]["series_id"] == "kr_customs_hs_8542321010_export_usd"
     assert result[0]["observation_date"] == "2026-07-01"
 
     aggregate = aggregate_customs_exports(result)
-    assert aggregate["memory"][-1]["value"] == 130
+    assert aggregate["memory"][-1]["value"] == 170
     assert aggregate["dram"][-1]["value"] == 100
     assert aggregate["flash"][-1]["value"] == 30
+    assert aggregate["mcp"][-1]["value"] == 40
+    assert aggregate["dram_module"][-1]["value"] == 50
     assert aggregate["dram_weight"][-1]["value"] == 2
     assert aggregate["dram_unit_value"][-1]["value"] == 50
 

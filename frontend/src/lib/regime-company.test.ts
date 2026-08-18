@@ -48,7 +48,7 @@ describe("company filing interpretation", () => {
     const result = companyFilingVerdict(company({ inventory_yoy: 34.1 }), inventory());
 
     expect(result.tone).toBe("positive");
-    expect(result.label).toContain("상대 재고부담 완화");
+    expect(result.label).toContain("매출 대비 재고 부담 감소");
     expect(result.explanation).toContain("재고 절대액은 증가했지만");
     expect(priorInventoryRatio(inventory())).toBeCloseTo(60.3);
   });
@@ -65,7 +65,7 @@ describe("company filing interpretation", () => {
     );
 
     expect(result).toMatchObject({
-      label: "실적 확장 · 상대 재고 경계",
+      label: "실적 성장·매출 대비 재고 부담 증가",
       tone: "caution",
     });
   });
@@ -77,7 +77,7 @@ describe("company filing interpretation", () => {
     );
 
     expect(result.tone).toBe("neutral");
-    expect(result.label).toBe("혼조");
+    expect(result.label).toBe("매출·수익성·재고 방향 엇갈림");
   });
 
   it("treats a sharp margin decline as weakening despite positive margin", () => {
@@ -88,7 +88,7 @@ describe("company filing interpretation", () => {
     }), inventory());
 
     expect(result.tone).toBe("negative");
-    expect(result.label).toBe("실적 둔화");
+    expect(result.label).toBe("실적 둔화 확인");
   });
 
   it("colors confirmed earnings contributions without coloring ambiguous inventory or capex", () => {
@@ -115,6 +115,8 @@ describe("company filing interpretation", () => {
   it("formats missing values without producing a dangling percent sign", () => {
     expect(formatSignedPercent(null)).toBe("-");
     expect(formatSignedPercent(3.2)).toBe("+3.2%");
-    expect(inventoryBurdenLabel("상대 재고부담 크게 완화")).toContain("크게 완화");
+    expect(inventoryBurdenLabel("상대 재고부담 크게 완화")).toContain("크게 감소");
+    expect(inventoryBurdenLabel("안정")).toBe("매출 대비 재고 부담 변화 작음");
+    expect(inventoryBurdenLabel("판정 불가")).toBe("매출 대비 재고 비교자료 부족");
   });
 });

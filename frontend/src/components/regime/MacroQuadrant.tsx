@@ -1,6 +1,13 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTip } from "@/components/ui/info-tip";
+import {
+  growthLevelLabel,
+  inflationLevelLabel,
+  macroEnvironmentLabel,
+  momentumDirectionLabel,
+  momentumStrengthLabel,
+} from "@/lib/regime-display";
 import type { RegimeCurrent } from "@/types";
 
 type Quadrant = RegimeCurrent["macro_quadrant"];
@@ -88,17 +95,20 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
           vector.strength_score ?? 0,
         )
       : null;
-  const environment =
+  const rawEnvironment =
     data.environment_point?.label ??
     data.environment_label ??
     (data.growth_level && data.inflation_level
       ? `${data.growth_level.label}·물가 ${data.inflation_level.label}`
       : "판정 불가");
+  const environment = macroEnvironmentLabel(rawEnvironment);
+  const direction = momentumDirectionLabel(vector?.direction);
+  const strength = momentumStrengthLabel(vector?.strength);
 
   return (
     <Card className="overflow-hidden">
-      <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-2">
-        <div>
+      <CardHeader className="flex-row flex-wrap items-start justify-between gap-4 space-y-0 pb-2">
+        <div className="min-w-0">
           <div className="flex items-center gap-1">
             <CardTitle>미국 거시경제 현재 수준과 최근 방향</CardTitle>
             <InfoTip label="거시경제 상태 차트 읽는 법">
@@ -108,8 +118,10 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
             </InfoTip>
           </div>
         </div>
-        <div className="text-right">
-          <Badge variant="secondary">{environment}</Badge>
+        <div className="min-w-0 text-right">
+          <Badge className="max-w-full whitespace-normal text-right leading-4" variant="secondary">
+            {environment}
+          </Badge>
           <p className="mt-2 text-xs text-muted-foreground">
             가장 최근 관측일 {data.as_of_date || "-"}
           </p>
@@ -122,7 +134,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
               <svg
                 viewBox={`0 0 ${SIZE} ${SIZE}`}
                 role="img"
-                aria-label={`현재 환경 ${environment}. 최근 압력 ${vector?.direction || "판정 불가"}`}
+                aria-label={`현재 환경 ${environment}. ${direction}. ${strength}`}
                 className="h-auto w-full text-foreground [&_text]:fill-current"
               >
                 <defs>
@@ -270,8 +282,8 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
               <div className="rounded-lg border p-4">
                 <p className="text-xs text-muted-foreground">현재 수준 · 모형 기준</p>
                 <p className="mt-1 font-semibold">
-                  {data.growth_level?.label || "-"} · 물가{" "}
-                  {data.inflation_level?.label || "-"}
+                  {growthLevelLabel(data.growth_level?.label)} ·{" "}
+                  {inflationLevelLabel(data.inflation_level?.label)}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   성장 {signed(levelX)} / 물가 {signed(levelY)}
@@ -280,10 +292,10 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
               <div className="rounded-lg border p-4">
                 <p className="text-xs text-muted-foreground">최근 지표의 상대 방향</p>
                 <p className="mt-1 font-semibold">
-                  {vector?.direction || "판정 불가"} · {vector?.strength || "-"}
+                  {direction}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  성장 {signed(vector?.dx)} / 물가 {signed(vector?.dy)}
+                  {strength} · 성장 {signed(vector?.dx)} / 물가 {signed(vector?.dy)}
                 </p>
               </div>
               <div className="rounded-lg border p-4">

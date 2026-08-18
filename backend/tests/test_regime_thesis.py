@@ -156,7 +156,7 @@ def test_dram_bottleneck_requires_direct_price_proxy():
     assert "공개 DDR5 계약가격" in reason
 
 
-def test_dram_export_decomposition_distinguishes_mix_from_volume():
+def test_dram_export_decomposition_keeps_declared_weight_as_context():
     result = classify_dram_export_decomposition(
         yoy_metric([100, 100, 100], [400, 420, 450]),
         yoy_metric([100, 100, 100], [92, 90, 95]),
@@ -165,18 +165,34 @@ def test_dram_export_decomposition_distinguishes_mix_from_volume():
 
     assert result["state"] == "단가·믹스 주도 확장"
     assert result["driver"] == "unit_value_mix"
-    assert result["conflicts"] == ["DRAM 수출중량 3개월 평균 YoY -7.7%"]
+    assert result["conflicts"] == []
+    assert result["context"]["declared_weight_yoy_3m_avg"] == pytest.approx(-7.6667, abs=1e-4)
+    assert result["context"]["declared_weight_role"] == "declared_packaging_mass_context"
 
 
-def test_dram_export_decomposition_can_identify_volume_led_growth():
+def test_dram_export_decomposition_does_not_call_declared_weight_bit_volume():
     result = classify_dram_export_decomposition(
         yoy_metric([100, 100, 100], [125, 130, 135]),
         yoy_metric([100, 100, 100], [125, 130, 135]),
         yoy_metric([1, 1, 1], [1, 1, 1]),
     )
 
-    assert result["state"] == "물량 주도 확장"
-    assert result["driver"] == "volume"
+    assert result["state"] == "수출액 확장"
+    assert result["driver"] == "export_value"
+
+
+def test_dram_export_decomposition_uses_mcp_and_module_as_downstream_confirmation():
+    result = classify_dram_export_decomposition(
+        yoy_metric([100, 100, 100], [125, 130, 135]),
+        yoy_metric([100, 100, 100], [92, 90, 95]),
+        yoy_metric([1, 1, 1], [1.05, 1.08, 1.10]),
+        mcp_metric=yoy_metric([100, 100, 100], [120, 125, 130]),
+        module_metric=yoy_metric([100, 100, 100], [140, 145, 150]),
+    )
+
+    assert result["state"] == "수출액·후공정 동반 확장"
+    assert result["driver"] == "value_and_downstream"
+    assert result["confirmations"] == ["MCP 수출액 증가", "DRAM 모듈 수출액 증가"]
 
 
 def test_supplier_ratio_improves_when_revenue_outgrows_absolute_inventory():
@@ -251,10 +267,10 @@ def test_server_rdimm_proxy_rejects_stale_price():
     assert result["is_stale"] is True
 
 
-def test_hbm_server_proxy_requires_rdimm_and_keeps_volume_conflict():
+def test_hbm_server_proxy_requires_rdimm_and_keeps_export_conflict():
     export = {
         "state": "단가·믹스 주도 확장", "coverage": 1,
-        "conflicts": ["DRAM 수출중량 3개월 평균 YoY -10.0%"],
+        "conflicts": ["MCP 수출액 감소"],
     }
     supplier = {"state": "상대 재고부담 크게 완화"}
 
@@ -267,7 +283,7 @@ def test_hbm_server_proxy_requires_rdimm_and_keeps_volume_conflict():
 
     assert positive["state"] == "타이트 지속 신호"
     assert positive["direct_hbm_data"] is False
-    assert positive["conflicts"] == ["DRAM 수출중량 3개월 평균 YoY -10.0%"]
+    assert positive["conflicts"] == ["MCP 수출액 감소"]
     assert limited["state"] == "판정 제한"
 
 

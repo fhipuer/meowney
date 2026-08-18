@@ -27,6 +27,37 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { regimeApi } from "@/lib/api";
 import { inventoryBurdenLabel, priorInventoryRatio } from "@/lib/regime-company";
 import {
+  aiCapexStateLabel,
+  companyConfirmationStateLabel,
+  domainStateLabel,
+  dramBottleneckStateLabel,
+  durationStressDriverLabel,
+  durationStressLabel,
+  exportDemandStateLabel,
+  exportStructureStateLabel,
+  hbmProxyStateLabel,
+  longRatePressureLabel,
+  macroEnvironmentLabel,
+  memoryPriceStateLabel,
+  momentumDirectionLabel,
+  nandPriceStateLabel,
+  plainLanguageStateText,
+  policyPressureLabel,
+  powerStateLabel,
+  rateDriverLabel,
+  ratePressureLabel,
+  recentRateShockLabel,
+  rdimmStateLabel,
+  regimeLevelLabel,
+  reviewUrgencyLabel,
+  semiconductorStateLabel,
+  signalStatusLabel,
+  supplyStateLabel,
+  yieldCurveChangeLabel,
+  yieldCurveRiskLabel,
+  yieldCurveStateLabel,
+} from "@/lib/regime-display";
+import {
   REGIME_SERIES_COLORS,
   TONE_STYLES,
   aiCapexDeltaTone,
@@ -46,7 +77,6 @@ import type {
   RegimeLevel,
   RegimeSignal,
   RegimeSnapshot,
-  ReviewUrgency,
 } from "@/types";
 
 const LEVELS: RegimeLevel[] = ["유지", "경계", "약화", "전환"];
@@ -64,34 +94,43 @@ const MACRO_DOMAIN_TABS = DOMAIN_TABS.slice(0, 5);
 const THESIS_DOMAIN_TABS = DOMAIN_TABS.slice(5);
 const RATE_SIGNAL_ORDER = [
   "fedfunds",
-  "tips10y",
+  "us3m",
+  "us2y",
   "us10y",
+  "us30y",
+  "tips10y",
+  "tips30y",
   "bei10y",
   "curve10y3m",
   "curve2s10s",
   "term_premium",
-  "us3m",
-  "us2y",
-  "us30y",
 ];
-const urgencyLabel: Record<ReviewUrgency, string> = {
-  required: "지금 다시 상세점검",
-  watch: "다음 발표까지 관찰",
-  not_needed: "새 상세점검 사유 없음",
-};
-const memoryStateLabel: Record<string, string> = {
-  "가격 확장": "관측가격 큰 폭 상승",
-  "가격 상승": "관측가격 상승",
-  "하락 관찰": "관측가격 하락 관찰",
-  "가격 유지": "관측가격 변화 미미",
-};
-const signalStatusLabel: Record<string, string> = {
-  강함: "우호 범위",
-  중립: "중립 범위",
-  둔화: "주의 범위",
-  약화: "악화 범위",
-  unavailable: "미수집",
-};
+const RATE_SIGNAL_GROUPS = [
+  {
+    id: "policy",
+    title: "정책금리와 단기금리",
+    description: "Fed 정책 수준과 3개월·2년 구간에 반영된 단기 자금조달 부담",
+    ids: ["fedfunds", "us3m", "us2y"],
+  },
+  {
+    id: "nominal-long",
+    title: "명목 장기금리",
+    description: "경제 전반의 할인율을 보여주는 10년물과 장기 듀레이션 부담을 보여주는 30년물",
+    ids: ["us10y", "us30y"],
+  },
+  {
+    id: "real-inflation",
+    title: "실질금리와 기대인플레이션",
+    description: "10년·30년 실질 할인율과 명목 10년 금리의 기대인플레이션 성분",
+    ids: ["tips10y", "tips30y", "bei10y"],
+  },
+  {
+    id: "curve-context",
+    title: "수익률곡선과 기간 프리미엄",
+    description: "침체 선행 신호인 장단기 금리차와 장기금리 상승 원인을 설명하는 보조 추정치",
+    ids: ["curve10y3m", "curve2s10s", "term_premium"],
+  },
+];
 const signed = (value: number | null | undefined, digits = 1) =>
   value == null ? "-" : `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
 
@@ -103,9 +142,11 @@ export function signalRuleHelp(signal: RegimeSignal) {
   )
     return "최근 3개월 연율을 사용합니다. 물가·임금 상승세 재가속은 악화 방향, 목표 수준을 향한 둔화는 개선 방향입니다.";
   if (signal.id === "fedfunds")
-    return "Fed 기준금리에서 Core PCE 전년비를 뺀 실질 정책금리 대용치로 현재 정책 제약을 계산합니다. 0%p 이상은 다소 제한적, 1%p 이상은 제한적 구간입니다.";
+    return "Fed 기준금리에서 Core PCE 전년비를 뺀 실질 정책금리 대용치로 단기금리가 수요를 얼마나 누르는지 봅니다. 0~1%p는 약한 수요 억제, 1%p 이상은 뚜렷한 수요 억제로 표시합니다.";
   if (signal.id === "tips10y")
     return "10년 실질금리의 높은 절대수준으로 장기 할인율 부담을 계산하고, 공통 관측일 기준 20·63관측일 상승폭으로 최근 실질금리 충격을 별도 판정합니다.";
+  if (["us30y", "tips30y"].includes(signal.id))
+    return "미 재무부의 30년 명목·실질금리입니다. 30년 실질금리 수준, 최근 20·63관측일 변화와 30Y-10Y 금리차가 함께 높아질 때 장기 듀레이션 경보에 사용하며, 10년 실질금리와 별도 거시영역으로 중복 합산하지 않습니다.";
   if (signal.id === "term_premium")
     return "Kim-Wright 현재 10년 제로쿠폰 기간 프리미엄 추정치입니다. 장기금리 상승 원인을 해석하는 맥락 지표이며 TIPS와 중복해 자동 점수에 더하지 않습니다.";
   if (signal.id === "curve10y3m")
@@ -114,7 +155,7 @@ export function signalRuleHelp(signal: RegimeSignal) {
     return "10Y-3M 침체 선행신호의 확인축입니다. 동반 역전 여부만 보조하며 같은 수익률곡선 근거를 별도 경보로 중복 합산하지 않습니다.";
   if (["us10y", "bei10y"].includes(signal.id))
     return "TIPS와 공통 관측일을 맞춘 20·63관측일 변화로 최근 금리 충격의 원인을 분해합니다. 명목금리와 BEI의 동반 급등은 인플레이션 기대 충격으로 판정합니다.";
-  if (["us3m", "us2y", "us30y"].includes(signal.id))
+  if (["us3m", "us2y"].includes(signal.id))
     return "금리곡선의 현재 모양과 재가팔라짐 원인을 해석하는 맥락 지표입니다. 단기금리 하락 주도와 장기금리 상승 주도를 구분하며 단독 레짐 점수로 쓰지 않습니다.";
   if (["hy_oas", "ig_oas", "nfci"].includes(signal.id))
     return "현재 절대수준을 중심으로 판정합니다. 신용스프레드·NFCI 상승은 악화 방향이며, 장단기금리차는 역전 폭 확대가 악화 방향입니다.";
@@ -179,16 +220,22 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
   ];
   const role =
     signal.usage === "regime"
-      ? "레짐 산출"
+      ? "자동 판정에 사용"
       : signal.usage === "trigger"
-        ? "경보 전용"
-        : "맥락 지표";
+        ? "점검 기준에만 사용"
+        : "참고자료";
+  const roleSentence =
+    signal.usage === "regime"
+      ? "자동 판정에 사용합니다."
+      : signal.usage === "trigger"
+        ? "상세점검 기준에만 사용합니다."
+        : "현재 환경을 설명하는 참고자료입니다.";
   const status =
     signal.is_stale
-      ? `오래됨 · ${signal.age_days ?? "-"}일`
+      ? `판정 제외 · ${signal.age_days ?? "-"}일 경과`
       : signal.usage === "display" && signal.status !== "unavailable"
-      ? "판정 미적용"
-      : signalStatusLabel[signal.status] || signal.status;
+      ? "자동 판정에 사용하지 않음"
+      : signalStatusLabel(signal);
   const tone = signalStatusTone(
     signal.status,
     signal.is_stale || signal.usage === "display",
@@ -200,7 +247,7 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle className="text-base">{signal.name}</CardTitle>
-              <Badge variant="outline" className="text-[10px] font-normal">
+              <Badge variant="outline" className="whitespace-normal text-center text-[10px] font-normal leading-4">
                 {role}
               </Badge>
             </div>
@@ -211,17 +258,17 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <Badge
-              className="whitespace-nowrap"
+              className="max-w-[180px] whitespace-normal text-right leading-4"
               variant={TONE_STYLES[tone].badge}
             >
               {status}
             </Badge>
             <InfoTip label={`${signal.name} ${signal.usage === "display" ? "사용 범위" : "판정 기준"}`}>
               {signal.usage === "display"
-                ? "현재 환경을 해석하는 보조자료이며 자동 레짐과 임계경보 계산에는 사용하지 않습니다. 현재 카드는 최신 저장값을 표시합니다."
-                : `${signalRuleHelp(signal)} 현재 판정 근거: ${signal.reason}. 현재 카드는 최신 저장값을 표시하며 초기 발표값과 수정 이력은 시점기준 이력으로 별도 보관합니다.`}
+                ? "현재 환경을 해석하는 참고자료입니다. 자동 레짐이나 상세점검 기준 계산에는 사용하지 않으며, 최신 저장값만 보여줍니다."
+                : `${signalRuleHelp(signal)} 현재 판정 근거: ${plainLanguageStateText(signal.reason)}. 현재 카드는 최신 저장값을 표시하며 초기 발표값과 수정 이력은 시점기준 이력으로 별도 보관합니다.`}
               {signal.is_stale
-                ? ` 최신 관측이 허용기간 ${signal.max_age_days ?? "-"}일을 넘어 판정에서 제외됐습니다.`
+                ? ` 최신 관측이 허용기간 ${signal.max_age_days ?? "-"}일을 넘어 현재 자동 판정에서 제외됐습니다.`
                 : ""}
             </InfoTip>
           </div>
@@ -343,7 +390,7 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
         <div className="mt-3 flex items-start gap-2 border-t pt-3 text-xs text-muted-foreground">
           <HelpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <p>
-            {signal.reason} · {role} 지표입니다.
+            {plainLanguageStateText(signal.reason)} · {roleSentence}
           </p>
         </div>
       </CardContent>
@@ -370,7 +417,7 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   if (!chartData.length) return null;
   return (
-    <Card className="mb-6">
+    <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center gap-1">
           <CardTitle>미국 10년 금리의 수준 구성</CardTitle>
@@ -443,6 +490,95 @@ function RateComparison({ signals }: { signals: RegimeSignal[] }) {
   );
 }
 
+function LongEndComparison({ signals }: { signals: RegimeSignal[] }) {
+  const requiredIds = ["us10y", "us30y", "tips10y", "tips30y"];
+  const selected = signals.filter((signal) => requiredIds.includes(signal.id));
+  const byDate = new Map<string, Record<string, string | number>>();
+  selected.forEach((signal) =>
+    signal.history?.forEach((point) => {
+      byDate.set(point.date, {
+        ...(byDate.get(point.date) || { date: point.date }),
+        [signal.id]: point.value,
+      });
+    }),
+  );
+  const chartData = [...byDate.values()]
+    .filter((point) => requiredIds.every((id) => typeof point[id] === "number"))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  if (!chartData.length) return null;
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-1">
+          <CardTitle>미국 장기금리 10Y·30Y</CardTitle>
+          <InfoTip label="장기금리 비교 읽는 법">
+            10년물은 경제 전반의 장기 할인율, 30년물은 듀레이션·재정·국채 공급
+            부담이 더 강하게 반영되는 구간입니다. 실질 30년물 상승과 30Y-10Y
+            확대가 함께 나타나는지를 별도 경보로 확인합니다.
+          </InfoTip>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          실선은 명목금리 · 점선은 실질금리 · 미 재무부 공통 관측일
+        </p>
+      </CardHeader>
+      <CardContent className="pt-3">
+        <div className="h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 12, right: 20, bottom: 8, left: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+              <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={38} tick={{ fontSize: 11 }} />
+              <YAxis width={52} tick={{ fontSize: 11 }} unit="%" domain={["auto", "auto"]} />
+              <Tooltip
+                labelFormatter={(label) => `관측일 ${label}`}
+                contentStyle={{
+                  background: "hsl(var(--card))",
+                  borderColor: "hsl(var(--border))",
+                  borderRadius: 8,
+                }}
+              />
+              <Legend />
+              <Line type="monotone" dataKey="us10y" name="10Y 명목" stroke={REGIME_SERIES_COLORS.blue} dot={false} strokeWidth={1.8} isAnimationActive={false} />
+              <Line type="monotone" dataKey="us30y" name="30Y 명목" stroke={REGIME_SERIES_COLORS.cyan} dot={false} strokeWidth={2.2} isAnimationActive={false} />
+              <Line type="monotone" dataKey="tips10y" name="10Y 실질" stroke={REGIME_SERIES_COLORS.violet} strokeDasharray="5 4" dot={false} strokeWidth={1.6} isAnimationActive={false} />
+              <Line type="monotone" dataKey="tips30y" name="30Y 실질" stroke="#f59e0b" strokeDasharray="5 4" dot={false} strokeWidth={2} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RateSignalGroups({ signals }: { signals: RegimeSignal[] }) {
+  const byId = new Map(signals.map((signal) => [signal.id, signal]));
+  return (
+    <div className="space-y-10">
+      {RATE_SIGNAL_GROUPS.map((group) => {
+        const items = group.ids
+          .map((id) => byId.get(id))
+          .filter((signal): signal is RegimeSignal => Boolean(signal));
+        if (!items.length) return null;
+        const columns = items.length === 2
+          ? "md:grid-cols-2"
+          : items.length >= 3
+            ? "md:grid-cols-2 xl:grid-cols-3"
+            : "grid-cols-1";
+        return (
+          <section key={group.id} data-rate-group={group.id}>
+            <div className="mb-4 border-l-2 border-primary/60 pl-3">
+              <h3 className="font-semibold">{group.title}</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{group.description}</p>
+            </div>
+            <div className={`grid gap-5 ${columns}`}>
+              {items.map((signal) => <SignalCard key={signal.id} signal={signal} />)}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 export function RateModelOverview({
   data,
   signals,
@@ -455,6 +591,7 @@ export function RateModelOverview({
   const policy = conditions?.policy;
   const longRates = conditions?.long_rates;
   const shock = conditions?.recent_shock;
+  const duration = conditions?.duration_stress;
   const curve = conditions?.yield_curve;
   const curveSignals = signals.filter((signal) =>
     ["curve10y3m", "curve2s10s"].includes(signal.id),
@@ -480,24 +617,24 @@ export function RateModelOverview({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-1">
-              <CardTitle>금리 레짐 계산</CardTitle>
-              <InfoTip label="금리 레짐 계산 방법">
-                현재 정책·실질금리 제약, 최근 20·63관측일 금리 충격,
-                10Y-3M 침체 선행위험을 서로 다른 층으로 계산한 뒤 가장 강한
-                압력을 금리 영역 판정에 반영합니다. 같은 경제적 근거는 중복
-                합산하지 않습니다.
+              <CardTitle>금리 환경 판단</CardTitle>
+              <InfoTip label="금리 환경 판단 방법">
+                현재 금리 수준이 수요와 차입을 얼마나 누르는지, 최근 금리가 추가로
+                얼마나 움직였는지, 과거 장단기 금리 역전의 침체 선행 신호가 남아
+                있는지와 30년물 장기채 부담을 따로 계산합니다. 네 결과 중 투자환경에 가장 큰 부담을
+                금리 영역 판정에 반영하며 같은 경제적 근거는 중복 합산하지 않습니다.
               </InfoTip>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              현재 제약 · 최근 충격 · 수익률곡선 선행위험을 분리해 매일 재계산
+              현재 금리 부담 · 최근 추가 충격 · 30년물 부담 · 수익률곡선 선행 신호를 분리해 매일 재계산
             </p>
           </div>
           <div className="text-right">
             <Badge variant={TONE_STYLES[tone].badge}>
-              {rates?.label || "판정 불가"}
+              {ratePressureLabel(rates?.label)}
             </Badge>
             <p className="mt-2 text-xs text-muted-foreground">
-              주도: {rates?.driver || "자료 부족"}
+              가장 큰 부담: {rateDriverLabel(rates?.driver)}
             </p>
           </div>
         </div>
@@ -505,22 +642,22 @@ export function RateModelOverview({
       <CardContent className="grid gap-5 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.4fr)]">
         <div className="grid gap-3">
           <div className="rounded-lg border bg-muted/10 p-4">
-            <p className="text-xs font-medium text-muted-foreground">1 · 현재 제약 수준</p>
-            <div className="mt-2 flex items-baseline justify-between gap-3">
-              <strong>{policy?.label || "판정 불가"}</strong>
-              <span className="text-xs tabular-nums text-muted-foreground">
+            <p className="text-xs font-medium text-muted-foreground">1 · 현재 금리 부담</p>
+            <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2">
+              <strong className="min-w-0 leading-6">{policyPressureLabel(policy?.label)}</strong>
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                 실질 정책 {signed(policy?.real_policy_rate, 2)}%p
               </span>
             </div>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              장기 실질금리 {longRates?.real_10y?.toFixed(2) ?? "-"}% · {longRates?.label || "판정 불가"}
+              장기 실질금리 {longRates?.real_10y?.toFixed(2) ?? "-"}% · {longRatePressureLabel(longRates?.label)}
             </p>
           </div>
           <div className="rounded-lg border bg-muted/10 p-4">
-            <p className="text-xs font-medium text-muted-foreground">2 · 최근 금리 충격</p>
-            <div className="mt-2 flex items-baseline justify-between gap-3">
-              <strong>{shock?.label || "판정 불가"}</strong>
-              <span className="text-xs text-muted-foreground">
+            <p className="text-xs font-medium text-muted-foreground">2 · 최근 추가 금리 충격</p>
+            <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2">
+              <strong className="min-w-0 leading-6">{recentRateShockLabel(shock?.label)}</strong>
+              <span className="shrink-0 text-xs text-muted-foreground">
                 {shock?.persistent ? "20·63관측일 지속" : "단기 지속성 미확인"}
               </span>
             </div>
@@ -530,20 +667,34 @@ export function RateModelOverview({
                 : "공통 관측일 자료 부족"}
             </p>
           </div>
+          <div className={`rounded-lg border bg-muted/10 p-4 ${TONE_STYLES[financialConditionTone(duration?.label)].panel}`}>
+            <p className="text-xs font-medium text-muted-foreground">3 · 30년물 장기채 부담</p>
+            <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2">
+              <strong className={`min-w-0 leading-6 ${TONE_STYLES[financialConditionTone(duration?.label)].text}`}>
+                {durationStressLabel(duration?.label)}
+              </strong>
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                실질 30Y {duration?.real_30y?.toFixed(2) ?? "-"}%
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              30Y-10Y {signed(duration?.spread_30y10y, 2)}%p · {durationStressDriverLabel(duration?.driver)} · 최근 5회 중 {duration?.confirmation_count_5d ?? 0}회
+            </p>
+          </div>
           <div className="rounded-lg border bg-muted/10 p-4">
-            <p className="text-xs font-medium text-muted-foreground">3 · 침체 선행위험</p>
-            <div className="mt-2 flex items-baseline justify-between gap-3">
-              <strong>{curve?.state || "판정 불가"}</strong>
-              <span className="text-sm font-semibold tabular-nums">
+            <p className="text-xs font-medium text-muted-foreground">4 · 수익률곡선의 침체 선행 신호</p>
+            <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2">
+              <strong className="min-w-0 leading-6">{yieldCurveStateLabel(curve?.state)}</strong>
+              <span className="shrink-0 text-sm font-semibold tabular-nums">
                 {curve?.recession_probability_12m?.toFixed(1) ?? "-"}%
               </span>
             </div>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              10Y-3M 21관측일 평균 {signed(curve?.monthly_average_10y3m, 2)}%p · {curve?.steepening.state || "기울기 자료 부족"}
+              10Y-3M 21관측일 평균 {signed(curve?.monthly_average_10y3m, 2)}%p · {yieldCurveChangeLabel(curve?.steepening.state)}
             </p>
           </div>
           <p className="px-1 text-[11px] leading-5 text-muted-foreground">
-            모델 {rates?.version || "-"} · coverage {rates ? Math.round(rates.coverage * 100) : 0}%
+            계산 규칙 {rates?.version || "-"} · 사용 가능 자료 {rates ? Math.round(rates.coverage * 100) : 0}%
           </p>
         </div>
         <div className="min-w-0 rounded-lg border bg-muted/5 p-4">
@@ -555,7 +706,7 @@ export function RateModelOverview({
               </p>
             </div>
             <Badge variant={TONE_STYLES[financialConditionTone(curve?.label)].badge}>
-              {curve?.label || "판정 불가"}
+              {yieldCurveRiskLabel(curve?.label)}
             </Badge>
           </div>
           {curveChartData.length > 1 ? (
@@ -624,7 +775,9 @@ function AiCapexDashboard({
       <div className="px-1">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-semibold">하이퍼스케일러 설비투자 프록시</h2>
-          <Badge variant={TONE_STYLES[stateTone].badge}>{data.state}</Badge>
+          <Badge className="max-w-full whitespace-normal text-right leading-4" variant={TONE_STYLES[stateTone].badge}>
+            {aiCapexStateLabel(data.state)}
+          </Badge>
           <InfoTip label="설비투자 프록시의 범위">
             SEC 공시의 기업 전체 현금 CAPEX입니다. AI 인프라 투자도 포함하지만
             AI 전용 금액은 분리되지 않으므로 투자 강도의 보조지표로 사용합니다.
@@ -799,7 +952,9 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
       <CardHeader>
         <div className="flex flex-wrap items-center gap-3">
           <CardTitle>DRAM 가격 원자료</CardTitle>
-          <Badge variant={TONE_STYLES[dramTone].badge}>{memoryStateLabel[data.state] || data.state}</Badge>
+          <Badge className="max-w-full whitespace-normal text-right leading-4" variant={TONE_STYLES[dramTone].badge}>
+            {memoryPriceStateLabel(data.state)}
+          </Badge>
           <InfoTip label="공개 DRAM 표본의 범위">
             공개된 DDR5 SO-DIMM Contract와 일부 Spot 가격을 봅니다. 이 계약가격은
             DRAM 수급 핵심축의 직접 가격 프록시로 사용하지만 Server DRAM·HBM
@@ -857,7 +1012,9 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
         <div className="mt-7 border-t pt-6">
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <h3 className="font-semibold">공개 NAND 가격 표본</h3>
-            <Badge variant={TONE_STYLES[nandTone].badge}>{data.nand_state}</Badge>
+            <Badge className="max-w-full whitespace-normal text-right leading-4" variant={TONE_STYLES[nandTone].badge}>
+              {nandPriceStateLabel(data.nand_state)}
+            </Badge>
             <InfoTip label="공개 NAND 표본의 범위">
               512Gb TLC wafer spot을 주 방향 신호로 사용하고 PC Client SSD
               계약가격을 함께 표시합니다. Enterprise SSD 계약가격·재고·출하량을
@@ -963,30 +1120,35 @@ function SemiconductorDashboard({
     {
       label: "DRAM 수급 핵심축",
       state: data.dram_bottleneck.state,
+      displayState: dramBottleneckStateLabel(data.dram_bottleneck.state),
       reason: data.dram_bottleneck.reason,
       className: "lg:col-span-6",
     },
     {
       label: "HBM·서버 DRAM 간접계측",
       state: hbmProxy.state,
+      displayState: hbmProxyStateLabel(hbmProxy.state),
       reason: hbmProxy.reason,
       className: "lg:col-span-6",
     },
     {
       label: "DRAM 수출 확인",
       state: data.demand.state,
+      displayState: exportDemandStateLabel(data.demand.state),
       reason: data.demand.reason,
       className: "lg:col-span-4",
     },
     {
       label: "완제품 재고 보조",
       state: data.supply.state,
+      displayState: supplyStateLabel(data.supply.state),
       reason: data.supply.reason,
       className: "lg:col-span-4",
     },
     {
       label: "국내 2사 실적 보조",
       state: data.company_confirmation.state,
+      displayState: companyConfirmationStateLabel(data.company_confirmation.state),
       reason: data.company_confirmation.reason,
       className: "lg:col-span-4",
     },
@@ -996,7 +1158,9 @@ function SemiconductorDashboard({
       <div className="px-1">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-semibold">반도체·메모리 수요·공급</h2>
-          <Badge variant={TONE_STYLES[stateTone].badge}>{data.state}</Badge>
+          <Badge className="max-w-full whitespace-normal text-right leading-4" variant={TONE_STYLES[stateTone].badge}>
+            {semiconductorStateLabel(data.state)}
+          </Badge>
           <InfoTip label="반도체 판정 방법">{data.methodology} {data.limitations}</InfoTip>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">{data.reason}</p>
@@ -1009,7 +1173,9 @@ function SemiconductorDashboard({
               <CardHeader className="pb-2">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <CardTitle className="min-w-0 text-base leading-6">{item.label}</CardTitle>
-                  <Badge className="shrink-0" variant={TONE_STYLES[tone].badge}>{item.state}</Badge>
+                  <Badge className="max-w-full shrink-0 whitespace-normal text-right leading-4" variant={TONE_STYLES[tone].badge}>
+                    {item.displayState}
+                  </Badge>
                 </div>
               </CardHeader>
               <CardContent><p className="text-sm leading-6 text-muted-foreground">{item.reason}</p></CardContent>
@@ -1021,8 +1187,8 @@ function SemiconductorDashboard({
         <CardHeader>
           <div className="flex flex-wrap items-center gap-3">
             <CardTitle>HBM·서버 DRAM 간접계측</CardTitle>
-            <Badge variant={TONE_STYLES[thesisSignalTone(hbmProxy.state)].badge}>
-              {hbmProxy.state}
+            <Badge className="max-w-full whitespace-normal text-right leading-4" variant={TONE_STYLES[thesisSignalTone(hbmProxy.state)].badge}>
+              {hbmProxyStateLabel(hbmProxy.state)}
             </Badge>
             <Badge variant="neutral">직접 HBM 데이터 아님</Badge>
             <InfoTip label="간접계측 방법과 한계">
@@ -1032,35 +1198,58 @@ function SemiconductorDashboard({
           <p className="text-sm leading-6 text-muted-foreground">{hbmProxy.reason}</p>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {[
               {
                 label: "서버 RDIMM 공개가격",
                 value: `${signed(rdimmProxy.change_percent, 2)}%`,
-                detail: `${rdimmProxy.state} · ${rdimmProxy.observation_date || "미수집"}`,
+                detail: `${rdimmStateLabel(rdimmProxy.state)} · ${rdimmProxy.observation_date || "미수집"}`,
                 tone: memoryPriceTone(rdimmProxy.state),
                 help: "공개 DDR5 RDIMM 모듈 표본의 최근 표기 변화율입니다. 서버 DRAM 계약가격이나 HBM 가격을 직접 뜻하지 않습니다.",
               },
               {
-                label: "DRAM 단가·믹스 프록시",
-                value: `${signed(data.demand.metrics.dram_unit_value.yoy_3m_avg)}%`,
-                detail: `3개월 평균 YoY · ${exportDecomposition.state}`,
-                tone: thesisSignalTone(exportDecomposition.state),
-                help: "관세청 DRAM 수출액을 신고 중량으로 나눈 단위중량당 수출액입니다. 실제 가격과 HBM 등 고부가 제품 비중 변화가 함께 반영됩니다.",
+                label: "DRAM 칩 수출액",
+                value: `${signed(data.demand.metrics.dram.yoy_3m_avg)}%`,
+                detail: `3개월 평균 YoY · 최근 3M/직전 3M ${signed(data.demand.metrics.dram.sequential_3m)}%`,
+                tone: data.demand.metrics.dram.yoy_3m_avg == null
+                  ? "neutral" as const
+                  : data.demand.metrics.dram.yoy_3m_avg >= 15 ? "positive" as const
+                  : data.demand.metrics.dram.yoy_3m_avg < 0 ? "negative" as const : "neutral" as const,
+                help: "관세청 HS 8542321010 DRAM 칩 수출액입니다. 전년동월 비교의 3개월 평균을 주 방향으로 사용하고, 최근 3개월 평균과 직전 3개월 평균의 차이를 단기 속도로 따로 표시합니다.",
               },
               {
-                label: "DRAM 수출중량",
-                value: `${signed(data.demand.metrics.dram_weight.yoy_3m_avg)}%`,
-                detail: "3개월 평균 YoY · bit 출하량 아님",
-                tone: "neutral" as const,
-                help: "관세청 신고 중량입니다. 패키징과 제품 믹스 영향을 받으므로 DRAM bit 출하량이나 실제 메모리 용량 증가율로 해석하지 않습니다.",
+                label: "MCP 수출액",
+                value: `${signed(data.demand.metrics.mcp.yoy_3m_avg)}%`,
+                detail: `3개월 평균 YoY · 최근 3M/직전 3M ${signed(data.demand.metrics.mcp.sequential_3m)}%`,
+                tone: data.demand.metrics.mcp.yoy_3m_avg == null
+                  ? "neutral" as const
+                  : data.demand.metrics.mcp.yoy_3m_avg >= 15 ? "positive" as const
+                  : data.demand.metrics.mcp.yoy_3m_avg < 0 ? "negative" as const : "neutral" as const,
+                help: "관세청 HS 8542323000 복합구조칩 집적회로 수출액입니다. HBM을 직접 분리하지 못하지만 고집적 메모리 패키지 수요의 확인축으로 사용합니다.",
+              },
+              {
+                label: "DRAM 모듈 수출액",
+                value: `${signed(data.demand.metrics.dram_module.yoy_3m_avg)}%`,
+                detail: `3개월 평균 YoY · 최근 3M/직전 3M ${signed(data.demand.metrics.dram_module.sequential_3m)}%`,
+                tone: data.demand.metrics.dram_module.yoy_3m_avg == null
+                  ? "neutral" as const
+                  : data.demand.metrics.dram_module.yoy_3m_avg >= 15 ? "positive" as const
+                  : data.demand.metrics.dram_module.yoy_3m_avg < 0 ? "negative" as const : "neutral" as const,
+                help: "관세청 HS 8473304060 DRAM 모듈 수출액입니다. 칩 수출과 다른 분류에서 서버·완제품 단계 수요를 확인하는 보조축입니다.",
+              },
+              {
+                label: "단가·제품믹스 프록시",
+                value: `${signed(data.demand.metrics.dram_unit_value.yoy_3m_avg)}%`,
+                detail: `3개월 평균 YoY · ${exportStructureStateLabel(exportDecomposition.state)}`,
+                tone: thesisSignalTone(exportDecomposition.state),
+                help: "관세청 DRAM 수출액을 신고 중량으로 나눈 단위중량당 수출액입니다. 실제 가격과 HBM 등 고부가 제품 비중 변화가 함께 반영됩니다.",
               },
               {
                 label: "SK하이닉스 재고/매출 비율",
                 value: skHynixInventory?.inventory_to_revenue == null
                   ? "-"
                   : `${skHynixInventory.inventory_to_revenue.toFixed(1)}%`,
-                detail: `수준은 중립 · ${inventoryBurdenLabel(supplierInventory.state)}`,
+                detail: `현재 비율은 참고값 · ${inventoryBurdenLabel(supplierInventory.state)}`,
                 tone: "neutral" as const,
                 help: "분기말 재고를 같은 분기 매출로 나눈 수준입니다. 비율 하락은 재고 절대액 감소나 물리적 소진을 뜻하지 않으며, 같은 DART 매출·재고의 파생 맥락이라 HBM 판정에 독립 신호로 중복 합산하지 않습니다.",
               },
@@ -1079,8 +1268,10 @@ function SemiconductorDashboard({
           </div>
           {hbmProxy.conflicts.length > 0 && (
             <div className="mt-4 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-xs leading-5">
-              <span className="font-medium text-warning">상충 확인</span>
-              <span className="ml-2 text-muted-foreground">{hbmProxy.conflicts.join(" · ")}</span>
+              <span className="font-medium text-warning">서로 엇갈리는 근거</span>
+              <span className="ml-2 text-muted-foreground">
+                {hbmProxy.conflicts.map(plainLanguageStateText).join(" · ")}
+              </span>
             </div>
           )}
           <div className="mt-6 grid gap-6 xl:grid-cols-2">
@@ -1089,11 +1280,10 @@ function SemiconductorDashboard({
                 <div className="flex items-center gap-1">
                   <p className="font-medium">DRAM 관세 신고 기준 수출 구조 프록시</p>
                   <InfoTip label="DRAM 수출 구조 프록시 설명">
-                    수출액을 신고 중량과 단위중량당 수출액으로 나눠, 증가가 물량에서
-                    왔는지 가격·고부가 제품 믹스에서 왔는지 구분합니다. 수출액과
-                    단위중량당 수출액만 오르고 중량이 정체·감소하면 가격·믹스 주도이며,
-                    세 계열이 함께 오르면 물량도 동반된 확장으로 읽습니다. 세 선은
-                    같은 관세 자료를 구조적으로 분해한 것이며 독립된 세 증거가 아닙니다.
+                    수출액을 신고중량과 단위중량당 수출액으로 산술 분해합니다.
+                    신고중량은 패키징을 포함한 관세 신고 순중량이지 DRAM bit 출하량이
+                    아니므로, 중량 감소만으로 수요 약화나 재고 부담을 판정하지 않습니다.
+                    세 선은 같은 관세 자료를 재표현한 맥락이며 독립된 세 증거가 아닙니다.
                   </InfoTip>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -1104,7 +1294,7 @@ function SemiconductorDashboard({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">최근 3개월 평균 YoY 구조</p>
                   <Badge variant={TONE_STYLES[thesisSignalTone(exportDecomposition.state)].badge}>
-                    {exportDecomposition.state}
+                    {exportStructureStateLabel(exportDecomposition.state)}
                   </Badge>
                 </div>
                 <div className="mt-3 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-2 text-center">
@@ -1126,11 +1316,11 @@ function SemiconductorDashboard({
                       labelFormatter={(label) => `관측월 ${label}`}
                       formatter={(value: number, name: string) => [
                         Number(value).toFixed(1),
-                        name === "exportValue" ? "수출액" : name === "exportWeight" ? "수출중량" : "단위중량당 수출액",
+                        name === "exportValue" ? "수출액" : name === "exportWeight" ? "신고중량(참고)" : "단위중량당 수출액",
                       ]}
                       contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }}
                     />
-                    <Legend formatter={(value) => value === "exportValue" ? "수출액" : value === "exportWeight" ? "수출중량" : "단위중량당 수출액"} />
+                    <Legend formatter={(value) => value === "exportValue" ? "수출액" : value === "exportWeight" ? "신고중량(참고)" : "단위중량당 수출액"} />
                     <Line type="monotone" dataKey="exportValue" stroke={REGIME_SERIES_COLORS.blue} dot={false} strokeWidth={2} isAnimationActive={false} />
                     <Line type="monotone" dataKey="exportWeight" stroke={REGIME_SERIES_COLORS.violet} dot={false} strokeWidth={1.7} strokeDasharray="5 3" isAnimationActive={false} />
                     <Line type="monotone" dataKey="unitValue" stroke={REGIME_SERIES_COLORS.cyan} dot={false} strokeWidth={2} isAnimationActive={false} />
@@ -1276,7 +1466,12 @@ function SemiconductorDashboard({
         <CardHeader>
           <div className="flex flex-wrap items-center gap-3">
             <CardTitle>국내 2사 실적 확인 · 보조축</CardTitle>
-            <Badge variant={TONE_STYLES[thesisSignalTone(data.company_confirmation.state)].badge}>{data.company_confirmation.state}</Badge>
+            <Badge
+              className="max-w-full whitespace-normal text-right leading-4"
+              variant={TONE_STYLES[thesisSignalTone(data.company_confirmation.state)].badge}
+            >
+              {companyConfirmationStateLabel(data.company_confirmation.state)}
+            </Badge>
             <InfoTip label="공시 확인 범위">{data.company_confirmation.methodology} {data.company_confirmation.limitations}</InfoTip>
           </div>
           <p className="text-sm leading-6 text-muted-foreground">
@@ -1356,7 +1551,9 @@ function PowerDashboard({ data }: { data: RegimeCurrent["power_cycle"] }) {
       <div className="px-1">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-semibold">미국 전력 수요·공급 맥락</h2>
-          <Badge variant={TONE_STYLES[tone].badge}>{data.state}</Badge>
+          <Badge className="max-w-full whitespace-normal text-right leading-4" variant={TONE_STYLES[tone].badge}>
+            {powerStateLabel(data.state)}
+          </Badge>
           <InfoTip label="전력 데이터의 판정 범위">{data.methodology} {data.limitations}</InfoTip>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">{data.reason}</p>
@@ -1448,7 +1645,7 @@ function JudgmentEditor({ snapshot }: { snapshot: RegimeSnapshot }) {
       client.invalidateQueries({ queryKey: ["regime", "history"] }),
   });
   return (
-    <div className="mt-5 grid gap-3 md:grid-cols-[160px_1fr_auto]">
+    <div className="mt-5 grid gap-3 md:grid-cols-[260px_1fr_auto]">
       <select
         className="h-10 rounded-md border bg-background px-3 text-sm"
         value={level}
@@ -1456,7 +1653,7 @@ function JudgmentEditor({ snapshot }: { snapshot: RegimeSnapshot }) {
       >
         <option value="">내 판정 미입력</option>
         {LEVELS.map((item) => (
-          <option key={item}>{item}</option>
+          <option key={item} value={item}>{regimeLevelLabel(item)}</option>
         ))}
       </select>
       <Textarea
@@ -1517,11 +1714,11 @@ export function RegimePage() {
           <div className="mb-2 flex items-center gap-1 text-xs font-medium text-primary">
             <span>포트폴리오 조기점검</span>
             <InfoTip label="투자 레짐 판정 체계">
-              확정 점검 레짐은 미국 거시 수준·최근 모멘텀·금융여건을 동일한
-              판정 경로로 계산한 뒤 독립 발표에서 재확인한 상태입니다. 후보는
-              최신 자료의 즉시 계산이며, 경제환경 4분면 자체와는 용도가
-              다릅니다. 데이터 품질은 수집 완전성을 뜻하며 예측 적중률이
-              아닙니다.
+              현재 투자 가설 판정은 미국 거시 수준·최근 지표 방향·금융여건을
+              같은 규칙으로 계산하고 여러 독립 발표에서 재확인한 결과입니다.
+              전환 후보는 최신 자료로 먼저 계산된 값이며, 같은 방향이 반복 확인되기
+              전에는 현재 판정을 바꾸지 않습니다. 데이터 품질은 자료가 얼마나
+              빠짐없이 수집됐는지를 뜻하며 예측 적중률이 아닙니다.
             </InfoTip>
           </div>
           <h1 className="text-3xl font-bold">투자 레짐</h1>
@@ -1699,14 +1896,21 @@ export function RegimePage() {
                   {tab.id === "rates" && data && (
                     <>
                       <RateModelOverview data={data} signals={signals} />
-                      <RateComparison signals={signals} />
+                      <div className="grid gap-6 xl:grid-cols-2">
+                        <RateComparison signals={signals} />
+                        <LongEndComparison signals={signals} />
+                      </div>
                     </>
                   )}
-                  <div className="grid gap-5 xl:grid-cols-2">
-                    {signals.map((signal) => (
-                      <SignalCard key={signal.id} signal={signal} />
-                    ))}
-                  </div>
+                  {tab.id === "rates" ? (
+                    <RateSignalGroups signals={signals} />
+                  ) : (
+                    <div className="grid gap-5 xl:grid-cols-2">
+                      {signals.map((signal) => (
+                        <SignalCard key={signal.id} signal={signal} />
+                      ))}
+                    </div>
+                  )}
                 </TabsContent>
               );
             })}
@@ -1726,31 +1930,31 @@ export function RegimePage() {
                     <span className="font-medium">기록 {new Date(item.created_at).toLocaleString("ko-KR")}</span>
                     <span className="text-xs text-muted-foreground">거시 기준 {item.as_of_date || "-"}</span>
                     <Badge variant={TONE_STYLES[regimeLevelTone(item.automatic_regime)].badge}>
-                      확정 {item.automatic_regime}
+                      기록 당시 {regimeLevelLabel(item.automatic_regime)}
                     </Badge>
                     {item.review_urgency && (
                       <Badge variant={item.review_urgency === "required" ? "danger" : item.review_urgency === "watch" ? "warning" : "neutral"}>
-                        {urgencyLabel[item.review_urgency]}
+                        {reviewUrgencyLabel(item.review_urgency)}
                       </Badge>
                     )}
                   </div>
                   <div className="mt-4 grid gap-3 rounded-lg bg-muted/20 p-4 text-xs sm:grid-cols-2 lg:grid-cols-5">
-                    <p><span className="text-muted-foreground">사용자 판정</span><span className="mt-1 block font-medium">{item.user_regime || "미입력"}</span></p>
-                    <p><span className="text-muted-foreground">경제환경·최근 방향</span><span className="mt-1 block font-medium">{item.macro_quadrant?.environment_point?.label || "미확인"} / {recordedDirection}</span></p>
-                    <p><span className="text-muted-foreground">활성 임계신호</span><span className="mt-1 block font-medium">{item.triggers?.length || 0}개</span></p>
-                    <p><span className="text-muted-foreground">AI·메모리 보조지표</span><span className="mt-1 block font-medium">CAPEX {item.ai_capex?.state || "미확인"} · DRAM {item.memory_cycle?.state ? memoryStateLabel[item.memory_cycle.state] || item.memory_cycle.state : "미확인"} · NAND {item.memory_cycle?.nand_state || "미확인"}</span></p>
-                    <p><span className="text-muted-foreground">수급·전력 보조지표</span><span className="mt-1 block font-medium">반도체 {item.semiconductor_cycle?.state || "미확인"} · 전력 {item.power_cycle?.state || "미확인"}</span></p>
+                    <p><span className="text-muted-foreground">사용자 판정</span><span className="mt-1 block font-medium">{item.user_regime ? regimeLevelLabel(item.user_regime) : "미입력"}</span></p>
+                    <p><span className="text-muted-foreground">경제환경·최근 방향</span><span className="mt-1 block font-medium">{macroEnvironmentLabel(item.macro_quadrant?.environment_point?.label)} / {momentumDirectionLabel(recordedDirection)}</span></p>
+                    <p><span className="text-muted-foreground">점검 기준 충족</span><span className="mt-1 block font-medium">{item.triggers?.length || 0}개</span></p>
+                    <p><span className="text-muted-foreground">AI·메모리 보조지표</span><span className="mt-1 block font-medium">CAPEX {aiCapexStateLabel(item.ai_capex?.state)} · DRAM {memoryPriceStateLabel(item.memory_cycle?.state)} · NAND {nandPriceStateLabel(item.memory_cycle?.nand_state)}</span></p>
+                    <p><span className="text-muted-foreground">수급·전력 보조지표</span><span className="mt-1 block font-medium">반도체 {semiconductorStateLabel(item.semiconductor_cycle?.state)} · 전력 {powerStateLabel(item.power_cycle?.state)}</span></p>
                   </div>
                   <p className="mt-3 text-sm text-muted-foreground">
-                    {item.reasons?.slice(0, 3).join(" · ") ||
+                    {item.reasons?.slice(0, 3).map(plainLanguageStateText).join(" · ") ||
                       "저장된 주요 판정 사유 없음"}
                   </p>
                   {item.triggers?.length ? (
                     <ul className="mt-4 space-y-2 text-sm">
                       {item.triggers.slice(0, 3).map((trigger) => (
                         <li key={trigger.rule_id} className="rounded-md border bg-muted/10 px-3 py-2">
-                          <span className="mr-2 text-xs text-muted-foreground">당시 활성 임계</span>
-                          {trigger.summary}
+                          <span className="mr-2 text-xs text-muted-foreground">당시 충족한 점검 기준</span>
+                          {plainLanguageStateText(trigger.summary)}
                         </li>
                       ))}
                     </ul>
@@ -1763,7 +1967,7 @@ export function RegimePage() {
                       <div>
                         <p className="text-muted-foreground">영역별 당시 상태</p>
                         <p className="mt-2 leading-6">
-                          {item.domains?.map((domain) => `${domain.name} ${domain.state}`).join(" · ") || "미확인"}
+                          {item.domains?.map((domain) => `${domain.name} ${domainStateLabel(domain.id, domain.state)}`).join(" · ") || "미확인"}
                         </p>
                       </div>
                       <div>

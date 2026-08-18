@@ -13,7 +13,7 @@ from app.services.regime_rates import (
 )
 
 
-RULE_VERSION = "2026-08-p2.0.0-rates-v2"
+RULE_VERSION = "2026-08-p2.0.0-rates-v3"
 SEVERITY_RANK = {"medium": 1, "high": 2, "critical": 3}
 REGIME_RANK = {"유지": 0, "경계": 1, "약화": 2, "전환": 3}
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
@@ -181,6 +181,51 @@ def evaluate_triggers(
             {"tips10y": tips_value, "real_policy_rate": real_policy,
              "tips_threshold": 2.25, "missing_policy_threshold": 2.75,
              "term_premium_role": "decomposition_context"}))
+
+    # Far-end stress is a bounded confirmation of the same rate-level cluster,
+    # not a second independent macro domain. This prevents 10Y and 30Y from
+    # being double-counted while still surfacing a duration/fiscal shock.
+    duration = rate_model.get("duration_stress") or {}
+    duration_score = duration.get("score")
+    if duration_score is not None and duration_score >= 35:
+        triggers.append(_trigger(
+            "tightening.long_end_duration",
+            "rates",
+            "high",
+            "rate_level",
+            (
+                f"30Y 실질금리 {duration.get('real_30y'):.2f}% · "
+                f"20관측일 {duration['change_20d']['changes']['tips30y']:+.2f}%p · "
+                f"30Y-10Y {duration.get('spread_30y10y'):+.2f}%p"
+            ),
+            {
+                "score": duration_score,
+                "label": duration.get("label"),
+                "driver": duration.get("driver"),
+                "nominal_30y": duration.get("nominal_30y"),
+                "real_30y": duration.get("real_30y"),
+                "spread_30y10y": duration.get("spread_30y10y"),
+                "nominal_30y_change_20d": duration["change_20d"]["changes"]["us30y"],
+                "real_30y_change_20d": duration["change_20d"]["changes"]["tips30y"],
+                "confirmation_count_5d": duration.get("confirmation_count_5d"),
+                "role": "bounded_confirmation",
+            },
+        ))
+    elif duration_score is not None and duration_score >= 25:
+        triggers.append(_trigger(
+            "tightening.long_end_duration.watch",
+            "rates",
+            "medium",
+            "rate_level",
+            f"30년 장기금리 상승 관찰 · {duration.get('driver')}",
+            {
+                "score": duration_score,
+                "nominal_30y": duration.get("nominal_30y"),
+                "real_30y": duration.get("real_30y"),
+                "spread_30y10y": duration.get("spread_30y10y"),
+                "role": "bounded_confirmation",
+            },
+        ))
 
     # 10Y-3M is the primary recession-leading curve.  10Y-2Y only confirms
     # the same evidence cluster and therefore never creates a second trigger.

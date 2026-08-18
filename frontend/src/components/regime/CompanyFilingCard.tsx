@@ -24,10 +24,13 @@ export function CompanyFilingCard({
   const priorRatio = priorInventoryRatio(inventory);
   const currentRatio = inventory?.inventory_to_revenue;
   const burdenState = inventoryBurdenLabel(inventory?.state);
-  const compactVerdictLabel = verdict.label
-    .replace("실적 확장", "확장")
-    .replace("상대 재고부담", "상대부담")
-    .replace("상대 재고", "상대재고");
+  const compactVerdictLabel: Record<string, string> = {
+    "실적 둔화·매출 대비 재고 부담 증가": "둔화·재고 부담 증가",
+    "실적 성장·매출 대비 재고 부담 증가": "성장·재고 부담 증가",
+    "실적 성장·매출 대비 재고 부담 감소": "성장·재고 부담 감소",
+    "매출 대비 재고 부담 감소": "재고 부담 감소",
+    "매출·수익성·재고 방향 엇갈림": "실적·재고 방향 엇갈림",
+  };
 
   const metrics = [
     {
@@ -75,8 +78,11 @@ export function CompanyFilingCard({
             실적 기준 {company.latest_period || "미수집"}
           </p>
         </div>
-        <Badge variant={TONE_STYLES[verdict.tone].badge}>
-          {compact ? compactVerdictLabel : verdict.label}
+        <Badge
+          className="max-w-[210px] whitespace-normal text-right leading-4"
+          variant={TONE_STYLES[verdict.tone].badge}
+        >
+          {compact ? compactVerdictLabel[verdict.label] || verdict.label : verdict.label}
         </Badge>
       </div>
 
@@ -112,8 +118,8 @@ export function CompanyFilingCard({
       <div className={`mt-3 rounded-md border bg-background/20 px-3 ${compact ? "py-2" : "py-3"}`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1">
-            <p className="text-[11px] text-muted-foreground">매출 대비 재고부담 · 파생 맥락</p>
-            <InfoTip label="매출 대비 재고부담 설명" className="h-4 w-4">
+            <p className="text-[11px] text-muted-foreground">매출 대비 재고 부담 · 참고값</p>
+            <InfoTip label="매출 대비 재고 부담 설명" className="h-4 w-4">
               분기말 재고를 같은 분기 매출로 나눈 값의 회사 내 전년동기 변화입니다.
               재고일수나 물리적 재고 소진량은 아니며, 매출 가격·제품믹스 상승만으로도
               낮아질 수 있어 독립 판정축으로 중복 합산하지 않습니다.

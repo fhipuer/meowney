@@ -39,11 +39,23 @@ def metric_summary(points: list[dict[str, Any]], *, unit: str) -> dict[str, Any]
     history = history_with_yoy(points)
     latest = history[-1] if history else None
     recent_yoy = [item["yoy"] for item in history[-3:] if item["yoy"] is not None]
+    mom = (
+        (float(history[-1]["value"]) / float(history[-2]["value"]) - 1) * 100
+        if len(history) >= 2 and history[-2]["value"] else None
+    )
+    sequential_3m = (
+        (mean(float(item["value"]) for item in history[-3:])
+         / mean(float(item["value"]) for item in history[-6:-3]) - 1) * 100
+        if len(history) >= 6
+        and mean(float(item["value"]) for item in history[-6:-3]) != 0 else None
+    )
     return {
         "latest": latest["value"] if latest else None,
         "observation_date": latest["date"] if latest else None,
         "yoy": latest["yoy"] if latest else None,
         "yoy_3m_avg": mean(recent_yoy) if len(recent_yoy) == 3 else None,
+        "mom": mom,
+        "sequential_3m": sequential_3m,
         "unit": unit, "history": history,
     }
 
@@ -227,13 +239,15 @@ def classify_dram_export_decomposition(
     value_metric: dict[str, Any],
     weight_metric: dict[str, Any],
     unit_value_metric: dict[str, Any],
+    mcp_metric: dict[str, Any] | None = None,
+    module_metric: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Separate DRAM export growth into value, reported weight, and mix.
+    """Classify DRAM exports without treating customs weight as bit volume.
 
-    Customs weight is not bit shipment volume and USD/kg is not a contract
-    price.  They are still useful together: a large unit-value move without a
-    weight move is treated as price/product-mix pressure rather than physical
-    volume expansion.
+    DRAM-chip export value is the primary demand lane. MCP and DRAM-module
+    exports provide independent downstream confirmation. Customs-declared net
+    weight and USD/kg remain product-mix context and cannot create a negative
+    conflict by themselves.
     """
     averages = {
         "value": value_metric.get("yoy_3m_avg"),
@@ -244,10 +258,12 @@ def classify_dram_export_decomposition(
     if coverage < 1:
         return {
             "state": "판정 불가",
-            "reason": "수출액·수출중량·단위중량당 수출액의 최근 3개월 전년비가 모두 필요합니다.",
+            "reason": "DRAM 칩 수출액·신고중량·단위중량당 수출액의 최근 3개월 전년비가 모두 필요합니다.",
             "coverage": coverage,
             "driver": "unknown",
             "conflicts": [],
+            "confirmations": [],
+            "context": {},
         }
 
     value_yoy = float(averages["value"])
@@ -256,11 +272,8 @@ def classify_dram_export_decomposition(
     value_persistent = len(_recent_yoy(value_metric)) == 2 and all(
         value > 0 for value in _recent_yoy(value_metric)
     )
-    weight_persistent_up = len(_recent_yoy(weight_metric)) == 2 and all(
-        value > 0 for value in _recent_yoy(weight_metric)
-    )
-    weight_persistent_down = len(_recent_yoy(weight_metric)) == 2 and all(
-        value < 0 for value in _recent_yoy(weight_metric)
+    value_persistent_down = len(_recent_yoy(value_metric)) == 2 and all(
+        value < 0 for value in _recent_yoy(value_metric)
     )
     unit_persistent_up = len(_recent_yoy(unit_value_metric)) == 2 and all(
         value > 0 for value in _recent_yoy(unit_value_metric)
@@ -269,35 +282,75 @@ def classify_dram_export_decomposition(
         value < 0 for value in _recent_yoy(unit_value_metric)
     )
     value_expanding = value_yoy >= 15 and value_persistent
-    weight_expanding = weight_yoy >= 5 and weight_persistent_up
     unit_expanding = unit_yoy >= 15 and unit_persistent_up
-    weight_contracting = weight_yoy <= -5 and weight_persistent_down
     unit_contracting = unit_yoy <= -10 and unit_persistent_down
-    conflicts: list[str] = []
-    if weight_contracting:
-        conflicts.append(f"DRAM 수출중량 3개월 평균 YoY {weight_yoy:+.1f}%")
+    recent_sequential = value_metric.get("sequential_3m")
+    recent_weak = recent_sequential is not None and float(recent_sequential) <= -10
 
-    if value_expanding and unit_expanding and weight_expanding:
-        state, driver = "단가·물량 동반 확장", "price_and_volume"
+    def downstream_state(metric: dict[str, Any] | None) -> tuple[bool, bool]:
+        if not metric or metric.get("yoy_3m_avg") is None:
+            return False, False
+        recent = _recent_yoy(metric)
+        average = float(metric["yoy_3m_avg"])
+        return (
+            average >= 15 and len(recent) == 2 and all(value > 0 for value in recent),
+            average <= -10 and len(recent) == 2 and all(value < 0 for value in recent),
+        )
+
+    mcp_positive, mcp_negative = downstream_state(mcp_metric)
+    module_positive, module_negative = downstream_state(module_metric)
+    downstream_positive = mcp_positive or module_positive
+    downstream_negative = mcp_negative or module_negative
+    confirmations: list[str] = []
+    if mcp_positive:
+        confirmations.append("MCP 수출액 증가")
+    if module_positive:
+        confirmations.append("DRAM 모듈 수출액 증가")
+    conflicts: list[str] = []
+    if value_expanding and mcp_negative:
+        conflicts.append("MCP 수출액 감소")
+    if value_expanding and module_negative:
+        conflicts.append("DRAM 모듈 수출액 감소")
+
+    if value_expanding and unit_expanding and downstream_positive:
+        state, driver = "단가·믹스 주도 확장", "unit_value_mix"
     elif value_expanding and unit_expanding:
         state, driver = "단가·믹스 주도 확장", "unit_value_mix"
-    elif value_expanding and weight_expanding:
-        state, driver = "물량 주도 확장", "volume"
-    elif value_yoy < 0 and unit_contracting and weight_contracting:
-        state, driver = "단가·물량 동반 약화", "contraction"
-    elif value_yoy < 0 and (unit_contracting or weight_contracting):
+    elif value_expanding and downstream_positive:
+        state, driver = "수출액·후공정 동반 확장", "value_and_downstream"
+    elif value_expanding:
+        state, driver = "수출액 확장", "export_value"
+    elif value_yoy < 0 and value_persistent_down and recent_weak and (
+        unit_contracting or downstream_negative
+    ):
         state, driver = "수출 약화", "contraction"
     else:
         state, driver = "혼조", "mixed"
+    mcp_yoy = mcp_metric.get("yoy_3m_avg") if mcp_metric else None
+    module_yoy = module_metric.get("yoy_3m_avg") if module_metric else None
     return {
         "state": state,
         "reason": (
-            f"최근 3개월 평균 YoY는 수출액 {value_yoy:+.1f}%, "
-            f"수출중량 {weight_yoy:+.1f}%, 단위중량당 수출액 {unit_yoy:+.1f}%입니다."
+            f"DRAM 칩 수출액 3개월 평균 YoY {value_yoy:+.1f}%, "
+            f"최근 3개월 평균은 직전 3개월 대비 "
+            f"{float(recent_sequential):+.1f}%이며, 단위중량당 수출액은 "
+            f"YoY {unit_yoy:+.1f}%입니다."
+            if recent_sequential is not None else
+            f"DRAM 칩 수출액 3개월 평균 YoY {value_yoy:+.1f}%, "
+            f"단위중량당 수출액은 YoY {unit_yoy:+.1f}%입니다."
         ),
         "coverage": coverage,
         "driver": driver,
         "conflicts": conflicts,
+        "confirmations": confirmations,
+        "context": {
+            "declared_weight_yoy_3m_avg": weight_yoy,
+            "declared_weight_role": "declared_packaging_mass_context",
+            "mcp_export_yoy_3m_avg": mcp_yoy,
+            "dram_module_export_yoy_3m_avg": module_yoy,
+            "export_value_mom": value_metric.get("mom"),
+            "export_value_sequential_3m": recent_sequential,
+        },
     }
 
 
@@ -463,10 +516,10 @@ def classify_hbm_server_proxy(
     rdimm_positive = rdimm.get("state") in {"가격 급등", "가격 상승"}
     rdimm_negative = rdimm.get("state") in {"가격 급락", "가격 하락"}
     export_positive = export_decomposition.get("state") in {
-        "단가·물량 동반 확장", "단가·믹스 주도 확장", "물량 주도 확장",
+        "단가·믹스 주도 확장", "수출액·후공정 동반 확장", "수출액 확장",
     }
     export_negative = export_decomposition.get("state") in {
-        "단가·물량 동반 약화", "수출 약화",
+        "수출 약화",
     }
     supplier_negative = supplier_inventory.get("state") in {
         "상대 재고부담 크게 확대", "상대 재고부담 확대",
@@ -480,7 +533,7 @@ def classify_hbm_server_proxy(
         reason = "서버용 RDIMM 가격 표본이 오래됐거나 없어 수출·공시만으로 HBM 병목을 확정하지 않습니다."
     elif rdimm_positive and export_positive:
         state = "타이트 지속 신호"
-        reason = "서버용 RDIMM 가격 상승과 DRAM 수출 단가·믹스 강세가 서로 다른 시장 자료에서 함께 확인됩니다."
+        reason = "서버용 RDIMM 가격 상승과 DRAM 칩·MCP·모듈 수출 강세가 서로 다른 자료에서 함께 확인됩니다."
     elif rdimm_positive:
         state = "타이트 관찰"
         reason = "서버용 RDIMM 가격은 상승했지만 DRAM 수출 구조의 동반 확인은 충분하지 않습니다."
@@ -508,8 +561,8 @@ def classify_hbm_server_proxy(
             "export_decomposition": export_decomposition,
             "supplier_inventory": supplier_inventory,
         },
-        "methodology": "서버용 DDR5 RDIMM 공개가격과 한국 DRAM 수출 구조를 판정축으로 사용하고, 공급사 매출 대비 재고는 같은 DART 공시의 파생 맥락이라 점수에 중복 반영하지 않음",
-        "limitations": "HBM 계약가격·공급충족률·bit 출하량을 직접 수집하지 않으며 수출 단위중량당 금액에는 제품 믹스 변화가 포함되고 매출 대비 재고 하락은 물리적 출하 증가를 직접 뜻하지 않음",
+        "methodology": "서버용 DDR5 RDIMM 공개가격과 한국 DRAM 칩 수출액을 판정축으로 사용하고 MCP·DRAM 모듈 수출을 확인축으로 둠. 신고중량과 공급사 매출 대비 재고는 맥락이라 점수에 중복 반영하지 않음",
+        "limitations": "HBM 계약가격·공급충족률·bit 출하량을 직접 수집하지 않으며 신고중량은 bit 출하량이 아니고 단위중량당 금액에는 제품 믹스 변화가 포함됨",
     }
 
 
@@ -724,6 +777,8 @@ class RegimeThesisDataService:
             "memory": metric_summary(aggregates["memory"], unit="USD"),
             "dram": metric_summary(aggregates["dram"], unit="USD"),
             "flash": metric_summary(aggregates["flash"], unit="USD"),
+            "mcp": metric_summary(aggregates["mcp"], unit="USD"),
+            "dram_module": metric_summary(aggregates["dram_module"], unit="USD"),
             "dram_weight": metric_summary(aggregates["dram_weight"], unit="kg"),
             "dram_unit_value": metric_summary(
                 aggregates["dram_unit_value"], unit="USD/kg"
@@ -736,6 +791,8 @@ class RegimeThesisDataService:
             export_metrics["dram"],
             export_metrics["dram_weight"],
             export_metrics["dram_unit_value"],
+            export_metrics["mcp"],
+            export_metrics["dram_module"],
         )
         supplier_inventory = build_supplier_inventory_efficiency(
             company_confirmation["companies"]
@@ -781,7 +838,7 @@ class RegimeThesisDataService:
                 "confidence": "부분",
                 "primary_signal": memory_cycle.get("state", "판정 불가"),
                 "conflicts": dram_conflicts,
-                "methodology": "공개 DDR5 계약가격을 주축으로 두고 HBM·서버 DRAM 간접계측을 확인축으로 사용",
+                "methodology": "공개 DDR5 계약가격을 주축으로 두고 서버 RDIMM 및 DRAM 칩·MCP·모듈 수출을 HBM·서버 수요 확인축으로 사용",
                 "limitations": "HBM·Server DRAM 계약가격·공급충족률을 직접 측정하지 않아 수급 타이트 여부는 프록시 판정",
             },
             "demand": {
@@ -802,8 +859,8 @@ class RegimeThesisDataService:
             },
             "company_confirmation": company_confirmation,
             "hbm_server_proxy": hbm_server_proxy,
-            "methodology": "공개 DDR5 가격을 DRAM 주축으로 두고 서버 RDIMM·DRAM 수출 단가/물량·SK하이닉스 재고 효율을 HBM 간접 확인축으로 사용하며 KOSIS 완제품 재고는 광의 보조신호로만 반영",
-            "limitations": "HBM 계약가격·공급충족률·bit 출하 가이던스는 직접 수집하지 않으며 이 판정만으로 자동 거시 레짐을 변경하지 않음",
+            "methodology": "공개 DDR5 가격을 DRAM 주축으로 두고 서버 RDIMM·DRAM 칩·MCP·모듈 수출과 SK하이닉스 재고 효율을 HBM 간접 확인축으로 사용하며 KOSIS 완제품 재고는 광의 보조신호로만 반영",
+            "limitations": "HBM 계약가격·공급충족률·bit 출하 가이던스는 직접 수집하지 않으며 관세청 신고중량을 bit 출하량으로 해석하지 않고 이 판정만으로 자동 거시 레짐을 변경하지 않음",
         }
 
     def power_summary(self) -> dict[str, Any]:

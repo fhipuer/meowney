@@ -14,6 +14,7 @@ class RefreshStub:
 @pytest.mark.asyncio
 async def test_aggregate_refresh_reports_partial_when_one_feed_fails(monkeypatch):
     monkeypatch.setattr(regime_api, "RegimeService", lambda: RefreshStub({"status": "success"}))
+    monkeypatch.setattr(regime_api, "TreasuryYieldService", lambda: RefreshStub({"status": "success"}))
     monkeypatch.setattr(regime_api, "RegimeEventService", lambda: RefreshStub({"status": "failed", "error": "calendar"}))
     monkeypatch.setattr(regime_api, "SecCapexService", lambda: RefreshStub({"status": "success"}))
     monkeypatch.setattr(regime_api, "MemoryPriceService", lambda: RefreshStub({"status": "cached"}))
@@ -27,7 +28,14 @@ async def test_aggregate_refresh_reports_partial_when_one_feed_fails(monkeypatch
 
 @pytest.mark.asyncio
 async def test_aggregate_refresh_reports_success_only_when_all_feeds_are_healthy(monkeypatch):
-    for name in ("RegimeService", "RegimeEventService", "SecCapexService", "MemoryPriceService", "RegimeThesisDataService"):
+    for name in (
+        "RegimeService",
+        "TreasuryYieldService",
+        "RegimeEventService",
+        "SecCapexService",
+        "MemoryPriceService",
+        "RegimeThesisDataService",
+    ):
         monkeypatch.setattr(regime_api, name, lambda: RefreshStub({"status": "success"}))
 
     result = await regime_api.refresh_regime_data()

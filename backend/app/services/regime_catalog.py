@@ -7,7 +7,10 @@ from typing import Any
 
 DISPLAY_POINTS = {"daily": 252, "weekly": 104, "monthly": 60, "quarterly": 40}
 
-RATE_IDS = {"fedfunds", "us3m", "us2y", "us10y", "us30y", "tips10y", "bei10y", "term_premium"}
+RATE_IDS = {
+    "fedfunds", "us3m", "us2y", "us10y", "us30y",
+    "tips10y", "tips30y", "bei10y", "term_premium",
+}
 SPREAD_IDS = {"curve10y3m", "curve2s10s", "hy_oas", "ig_oas"}
 INFLATION_INDEX_IDS = {"cpi", "core_cpi", "pce", "core_pce", "ppi", "wages"}
 
@@ -18,12 +21,13 @@ CORE_IDS = {
 }
 TRIGGER_ONLY_IDS = {
     "market_sp500", "market_nasdaq", "market_vix", "market_usdkrw",
+    "us30y", "tips30y",
 }
 CONTEXT_IDS = {
     "fed_assets", "bank_reserves", "reverse_repo", "market_kospi",
     "market_dollar", "market_wti", "market_copper",
     "market_gold", "market_silver", "market_gold_silver_ratio",
-    "us3m", "us2y", "us30y", "term_premium",
+    "us3m", "us2y", "term_premium",
 }
 
 

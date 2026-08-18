@@ -11,6 +11,7 @@ from app.services.regime_events import RegimeEventService
 from app.services.regime_sec import SecCapexService
 from app.services.regime_memory import MemoryPriceService
 from app.services.regime_thesis import RegimeThesisDataService
+from app.services.regime_treasury import TreasuryYieldService
 
 
 router = APIRouter()
@@ -33,8 +34,9 @@ async def get_current_regime():
 @router.post("/refresh")
 async def refresh_regime_data(force: bool = False):
     try:
-        macro, events, ai_capex, memory_prices, thesis_data = await asyncio.gather(
+        macro, treasury, events, ai_capex, memory_prices, thesis_data = await asyncio.gather(
             RegimeService().refresh(force=force),
+            TreasuryYieldService().refresh(force=force),
             RegimeEventService().refresh(),
             SecCapexService().refresh(force=force),
             MemoryPriceService().refresh(force=force),
@@ -43,8 +45,8 @@ async def refresh_regime_data(force: bool = False):
         )
         def outcome(value):
             return {"status": "failed", "error": str(value)} if isinstance(value, Exception) else value
-        macro, events, ai_capex, memory_prices, thesis_data = map(
-            outcome, (macro, events, ai_capex, memory_prices, thesis_data)
+        macro, treasury, events, ai_capex, memory_prices, thesis_data = map(
+            outcome, (macro, treasury, events, ai_capex, memory_prices, thesis_data)
         )
         # Both feeds refresh concurrently. Rebuild the composite once with the
         # memory result from this same request so the response cannot mix a new
@@ -55,7 +57,7 @@ async def refresh_regime_data(force: bool = False):
                     memory_prices["memory_cycle"]
                 )
             )
-        outcomes = (macro, events, ai_capex, memory_prices, thesis_data)
+        outcomes = (macro, treasury, events, ai_capex, memory_prices, thesis_data)
         statuses = [item.get("status", "failed") for item in outcomes]
         healthy = {"success", "cached"}
         overall = (
@@ -64,7 +66,7 @@ async def refresh_regime_data(force: bool = False):
             else "partial"
         )
         return {
-            "macro": macro, "events": events, "ai_capex": ai_capex,
+            "macro": macro, "treasury": treasury, "events": events, "ai_capex": ai_capex,
             "memory_prices": memory_prices, "thesis_data": thesis_data, "status": overall,
         }
     except Exception as exc:

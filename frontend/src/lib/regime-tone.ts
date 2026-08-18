@@ -147,10 +147,14 @@ export function memoryPriceTone(state?: string | null): SemanticTone {
 
 export function financialConditionTone(label?: string | null): SemanticTone {
   if (label === "완화적" || label === "완화 방향" || label === "선행위험 낮음") return "positive";
-  if (label === "매우 제한적" || label === "급격한 긴축 충격" || label === "선행위험 높음") return "negative";
+  if (
+    label === "매우 제한적" || label === "급격한 긴축 충격" ||
+    label === "장기 듀레이션 충격" || label === "선행위험 높음"
+  ) return "negative";
   if (
     label === "제한적" || label === "다소 제한적" ||
     label === "긴축 충격" || label === "상승 압력" ||
+    label === "장기 듀레이션 부담 경계" || label === "장기금리 상승 관찰" ||
     label === "선행위험 경계"
   ) return "caution";
   return "neutral";
@@ -224,8 +228,8 @@ export function thesisSignalTone(state?: string | null): SemanticTone {
     state && [
       "확장 확인", "수출 확장 강함", "수출 증가", "수급 개선",
       "수요 확장", "타이트 신호", "가격 상승 확인",
-      "타이트 지속 신호", "단가·물량 동반 확장",
-      "단가·믹스 주도 확장", "물량 주도 확장", "재고 소화 강함",
+      "타이트 지속 신호", "단가·믹스 주도 확장",
+      "수출액·후공정 동반 확장", "수출액 확장", "재고 소화 강함",
       "재고 효율 개선", "상대 재고부담 크게 완화", "상대 재고부담 완화",
       "가격 급등", "가격 상승",
     ].includes(state)
@@ -234,7 +238,7 @@ export function thesisSignalTone(state?: string | null): SemanticTone {
     state && [
       "수출 감소 지속", "생산·출하 둔화", "재고 부담",
       "실적 둔화", "수요 둔화", "병목 완화 경계", "수급 약화 경계",
-      "완화 관찰", "단가·물량 동반 약화", "수출 약화",
+      "완화 관찰", "수출 약화",
       "재고 부담 확대", "재고 효율 악화", "상대 재고부담 크게 확대",
       "상대 재고부담 확대", "가격 급락", "가격 하락",
     ].includes(state)

@@ -106,6 +106,25 @@ def test_high_tips_and_nonnegative_real_policy_create_one_level_trigger():
     assert "tightening.restrictive_level" in trigger_ids(triggers)
 
 
+def test_long_end_duration_alert_shares_the_rate_level_evidence_cluster():
+    triggers, _ = evaluate_triggers([
+        signal("us10y", [4.55] * 70 + [4.72] * 20),
+        signal("us30y", [5.06] * 70 + [5.31] * 20),
+        signal("tips10y", [2.80] * 90),
+        signal("tips30y", [2.87] * 70 + [3.06] * 20),
+        signal("bei10y", [2.27] * 90),
+    ])
+
+    assert "tightening.restrictive_level" in trigger_ids(triggers)
+    assert "tightening.long_end_duration" in trigger_ids(triggers)
+    rate_level = [
+        item for item in triggers
+        if item["severity"] == "high" and item["evidence_cluster"] == "rate_level"
+    ]
+    assert len(rate_level) == 2
+    assert {item["evidence_cluster"] for item in rate_level} == {"rate_level"}
+
+
 def test_persistent_10y3m_inversion_creates_only_one_curve_cluster():
     triggers, _ = evaluate_triggers([
         signal("curve10y3m", [-0.50] * 50),

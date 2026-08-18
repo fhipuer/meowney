@@ -17,6 +17,7 @@ from app.services.regime_events import RegimeEventService
 from app.services.regime_sec import SecCapexService
 from app.services.regime_memory import MemoryPriceService
 from app.services.regime_thesis import RegimeThesisDataService
+from app.services.regime_treasury import TreasuryYieldService
 
 
 # 벤치마크 티커 목록 냥~
@@ -183,6 +184,7 @@ async def refresh_regime_sources():
     """Refresh each regime feed independently and return every outcome."""
     jobs = {
         "거시": RegimeService().refresh(),
+        "미 재무부 금리곡선": TreasuryYieldService().refresh(),
         "일정": RegimeEventService().refresh(),
         "SEC CAPEX": SecCapexService().refresh(),
         "메모리": MemoryPriceService().refresh(),

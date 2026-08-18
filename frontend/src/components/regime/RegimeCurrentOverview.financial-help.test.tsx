@@ -71,6 +71,10 @@ describe("FinancialTransmission help", () => {
     expect(html).toContain('aria-label="최근 금리 충격 설명"');
     expect(html).toContain('aria-label="수익률곡선 선행위험 설명"');
     expect(html).toContain('aria-label="신용·금융여건 설명"');
+    expect(html).toContain("단기금리가 수요를 약하게 억제");
+    expect(html).toContain("투자·차입에 뚜렷한 부담");
+    expect(html).toContain("최근 추가 금리 충격 거의 없음");
+    expect(html).toContain("회사채·금융 자금조달 여건 양호");
     expect(FINANCIAL_TRANSMISSION_HELP["정책 긴축"]).toContain("실질 정책금리");
     expect(FINANCIAL_TRANSMISSION_HELP["장기금리 전달"]).toContain("기간 프리미엄");
     expect(FINANCIAL_TRANSMISSION_HELP["최근 금리 충격"]).toContain("공통 관측일");

@@ -15,7 +15,7 @@ from typing import Any, Callable
 from app.services.regime_rates import calculate_rate_model
 
 
-QUADRANT_VERSION = "2026-08-us-macro-q4-rates-v2"
+QUADRANT_VERSION = "2026-08-us-macro-q4-rates-v3"
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
 
 
@@ -225,6 +225,7 @@ def _financial_conditions(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
         "policy": rate_model["policy"],
         "long_rates": rate_model["long_rates"],
         "recent_shock": rate_model["recent_shock"],
+        "duration_stress": rate_model["duration_stress"],
         "yield_curve": rate_model["yield_curve"],
         "credit": {"score": credit_score, "label": state(credit_score), "hy_oas": hy, "ig_oas": ig, "nfci": nfci},
     }

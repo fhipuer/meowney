@@ -36,15 +36,17 @@ export function priorInventoryRatio(
 }
 
 export function inventoryBurdenLabel(state?: string | null): string {
-  if (state === "재고 소화 강함") return "매출 대비 재고부담 크게 완화";
-  if (state === "재고 효율 개선") return "매출 대비 재고부담 완화";
-  if (state === "재고 효율 악화") return "매출 대비 재고부담 확대";
-  if (state === "재고 부담 확대") return "매출 대비 재고부담 크게 확대";
-  if (state === "상대 재고부담 크게 완화") return "매출 대비 재고부담 크게 완화";
-  if (state === "상대 재고부담 완화") return "매출 대비 재고부담 완화";
-  if (state === "상대 재고부담 확대") return "매출 대비 재고부담 확대";
-  if (state === "상대 재고부담 크게 확대") return "매출 대비 재고부담 크게 확대";
-  return state || "판정 제한";
+  if (state === "판정 불가" || state === "판정 제한") return "매출 대비 재고 비교자료 부족";
+  if (state === "안정") return "매출 대비 재고 부담 변화 작음";
+  if (state === "재고 소화 강함") return "매출 대비 재고 부담 크게 감소";
+  if (state === "재고 효율 개선") return "매출 대비 재고 부담 감소";
+  if (state === "재고 효율 악화") return "매출 대비 재고 부담 증가";
+  if (state === "재고 부담 확대") return "매출 대비 재고 부담 크게 증가";
+  if (state === "상대 재고부담 크게 완화") return "매출 대비 재고 부담 크게 감소";
+  if (state === "상대 재고부담 완화") return "매출 대비 재고 부담 감소";
+  if (state === "상대 재고부담 확대") return "매출 대비 재고 부담 증가";
+  if (state === "상대 재고부담 크게 확대") return "매출 대비 재고 부담 크게 증가";
+  return state || "비교자료 부족";
 }
 
 export function companyFilingVerdict(
@@ -57,7 +59,7 @@ export function companyFilingVerdict(
     || company.operating_margin == null
   ) {
     return {
-      label: "판정 제한",
+      label: "실적 판단자료 부족",
       tone: "neutral",
       explanation: "최신 매출과 영업이익 공시를 함께 확인하지 못했습니다.",
     };
@@ -79,28 +81,28 @@ export function companyFilingVerdict(
 
   if (weakening && burdenWorsening) {
     return {
-      label: "실적 둔화 · 상대 재고부담 확대",
+      label: "실적 둔화·매출 대비 재고 부담 증가",
       tone: "negative",
       explanation: "실적 약화와 매출 대비 재고비율 상승이 함께 확인됩니다.",
     };
   }
   if (weakening) {
     return {
-      label: "실적 둔화",
+      label: "실적 둔화 확인",
       tone: "negative",
       explanation: "매출 감소·영업손실·이익률 급락 중 하나의 조건에 해당합니다.",
     };
   }
   if (expanding && burdenWorsening) {
     return {
-      label: "실적 확장 · 상대 재고 경계",
+      label: "실적 성장·매출 대비 재고 부담 증가",
       tone: "caution",
       explanation: "실적은 확장 방향이지만 매출 대비 재고비율은 높아졌습니다.",
     };
   }
   if (expanding && burdenImproving) {
     return {
-      label: "실적 확장 · 상대 재고부담 완화",
+      label: "실적 성장·매출 대비 재고 부담 감소",
       tone: "positive",
       explanation: company.inventory_yoy != null && company.inventory_yoy > 0
         ? "재고 절대액은 증가했지만 매출이 더 빠르게 늘어 상대 부담은 낮아졌습니다."
@@ -109,22 +111,22 @@ export function companyFilingVerdict(
   }
   if (expanding) {
     return {
-      label: "실적 확장",
+      label: "실적 성장 확인",
       tone: "positive",
       explanation: "매출 증가와 영업흑자가 확인됐습니다.",
     };
   }
   if (burdenImproving) {
     return {
-      label: "상대 재고부담 완화",
+      label: "매출 대비 재고 부담 감소",
       tone: "info",
-      explanation: "매출 대비 재고비율은 낮아졌지만 실적 확장 조건은 충족하지 않았습니다.",
+      explanation: "매출 대비 재고비율은 낮아졌지만 뚜렷한 실적 성장 조건은 충족하지 않았습니다.",
     };
   }
   return {
-    label: "혼조",
+    label: "매출·수익성·재고 방향 엇갈림",
     tone: "neutral",
-    explanation: "매출·수익성·상대 재고부담이 한 방향으로 정렬되지 않았습니다.",
+    explanation: "매출·수익성·매출 대비 재고 부담이 한 방향으로 움직이지 않았습니다.",
   };
 }
 

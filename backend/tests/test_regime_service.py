@@ -150,7 +150,8 @@ def test_rate_model_is_connected_to_canonical_rate_domain(tmp_path):
     conditions = evaluation["macro_quadrant"]["financial_conditions"]
     rates_domain = next(item for item in evaluation["domains"] if item["id"] == "rates")
 
-    assert conditions["rates"]["version"] == "2026-08-rates-v2"
+    assert conditions["rates"]["version"] == "2026-08-rates-v3"
+    assert conditions["duration_stress"]["label"] == "판정 불가"
     assert conditions["rates"]["score"] == pytest.approx(53.4)
     assert conditions["long_rates"]["term_premium_role"] == "decomposition_context"
     assert conditions["yield_curve"]["evidence_cluster"] == "yield_curve"

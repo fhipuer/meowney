@@ -46,6 +46,25 @@ def rates_fixture(*, curve: list[float] | None = None) -> list[dict]:
     ]
 
 
+def with_long_end(
+    fixture: list[dict],
+    *,
+    us10y: list[float],
+    us30y: list[float],
+    tips10y: list[float],
+    tips30y: list[float],
+) -> list[dict]:
+    replacements = {
+        "us10y": daily_signal("us10y", us10y),
+        "tips10y": daily_signal("tips10y", tips10y),
+    }
+    result = [replacements.get(item["id"], item) for item in fixture]
+    return result + [
+        daily_signal("us30y", us30y),
+        daily_signal("tips30y", tips30y),
+    ]
+
+
 def test_ny_fed_probability_matches_published_chart_example() -> None:
     # NY Fed's published parameters map a 0.62615%p spread to 17.6275%.
     assert recession_probability_12m(0.62615) == pytest.approx(17.6275, abs=0.0001)
@@ -193,6 +212,53 @@ def test_real_rate_and_inflation_shocks_have_distinct_thresholds() -> None:
     ]
     assert calculate_rate_model(real_shock)["recent_shock"]["score"] == 80
     assert calculate_rate_model(inflation_shock)["recent_shock"]["score"] == 70
+
+
+def test_long_end_duration_stress_confirms_a_bounded_rate_shock() -> None:
+    fixture = with_long_end(
+        rates_fixture(),
+        us10y=[4.55] * 70 + [4.72] * 20,
+        us30y=[5.06] * 70 + [5.31] * 20,
+        tips10y=[2.31] * 70 + [2.44] * 20,
+        tips30y=[2.87] * 70 + [3.06] * 20,
+    )
+
+    model = calculate_rate_model(fixture)
+    duration = model["duration_stress"]
+
+    assert duration["label"] == "장기 듀레이션 부담 경계"
+    assert duration["score"] == 35
+    assert duration["bounded_shock_floor"] == 35
+    assert duration["spread_30y10y"] == pytest.approx(.59)
+    assert duration["driver"] == "30Y 실질금리 주도"
+    assert duration["confirmation_count_5d"] == 5
+    assert model["recent_shock"]["duration_floor"] == 35
+    assert model["recent_shock"]["direction"] == "긴축"
+
+
+def test_extreme_long_end_stress_cannot_force_more_than_a_40_point_shock_floor() -> None:
+    fixture = with_long_end(
+        rates_fixture(),
+        us10y=[4.40] * 70 + [4.70] * 20,
+        us30y=[4.90] * 70 + [5.35] * 20,
+        tips10y=[2.20] * 70 + [2.35] * 20,
+        tips30y=[2.75] * 70 + [3.10] * 20,
+    )
+
+    model = calculate_rate_model(fixture)
+
+    assert model["duration_stress"]["score"] == 60
+    assert model["duration_stress"]["bounded_shock_floor"] == 40
+    assert model["recent_shock"]["duration_floor"] == 40
+    assert model["recent_shock"]["score"] == 40
+
+
+def test_missing_optional_30y_data_does_not_reduce_primary_rate_coverage() -> None:
+    model = calculate_rate_model(rates_fixture())
+
+    assert model["duration_stress"]["label"] == "판정 불가"
+    assert model["duration_stress"]["score"] is None
+    assert model["coverage"] == .75
 
 
 def test_curve_alone_cannot_create_severe_rate_domain_pressure() -> None:
