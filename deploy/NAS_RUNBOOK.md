@@ -58,21 +58,20 @@ powershell -ExecutionPolicy Bypass -File deploy/deploy-to-nas.ps1 -DeployEnv
 
 ## Docker 권한
 
-Synology Docker 소켓은 기본적으로 `root:root 660`이며 `fhipuer`는 직접 접근할 수 없다.
-배포 직전에 사용자가 NAS에서 다음 명령을 실행해야 할 수 있다.
+현재 이 개인 NAS의 운영 정책은 Docker 소켓을 `root:root 666`으로 유지하는 것이다.
+사용자가 반복 배포 편의를 위해 이 정책을 명시적으로 확정했으므로, 배포 완료 후 `660`으로
+자동 복원하거나 사용자에게 복원을 요청하지 않는다.
+
+NAS 재부팅이나 Docker 패키지 업데이트로 권한이 초기화되어 배포 계정이 접근하지 못할 때만
+다음 명령을 다시 실행한다.
 
 ```bash
 sudo chmod 666 /var/run/docker.sock
 ```
 
-배포 완료 직후 반드시 복원한다.
-
-```bash
-sudo chmod 660 /var/run/docker.sock
-```
-
-권한을 열어둔 채 방치하지 않는다. 향후 무인 배포가 필요하면 Synology 작업 스케줄러 또는
-제한된 sudo 정책을 별도로 설계한다.
+`666`은 NAS의 모든 로컬 사용자가 Docker 데몬에 접근할 수 있게 하는 보안상 완화된 설정이다.
+현재의 단일 사용자·신뢰된 내부망 환경을 전제로 한 예외이며, 다중 사용자 운영이나 외부 노출로
+환경이 바뀌면 Docker 그룹, Synology 작업 스케줄러 또는 제한된 sudo 정책으로 재설계한다.
 
 ## 수동 검증
 

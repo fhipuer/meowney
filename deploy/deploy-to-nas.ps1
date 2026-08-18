@@ -26,7 +26,7 @@ if (-not $AllowDirty -and (git status --porcelain)) {
 ssh -o BatchMode=yes -p $NasPort "$NasUser@$NasHostName" `
     "export PATH=/usr/local/bin:`$PATH; docker ps >/dev/null" | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    throw "NAS Docker access failed. Temporarily run: sudo chmod 666 /var/run/docker.sock"
+    throw "NAS Docker access failed. Current NAS policy expects: sudo chmod 666 /var/run/docker.sock"
 }
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "meowney-deploy"
