@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { HelpCircle, Database, RefreshCw } from "lucide-react";
+import { ArrowRight, HelpCircle, Database, RefreshCw } from "lucide-react";
 import {
   CartesianGrid,
   Bar,
@@ -135,8 +135,10 @@ const signed = (value: number | null | undefined, digits = 1) =>
   value == null ? "-" : `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
 
 export function signalRuleHelp(signal: RegimeSignal) {
-  if (["us_unemployment", "us_claims"].includes(signal.id))
-    return "최근 3개월 노동시장 변화로 판정합니다. 실업률·실업수당 상승은 악화 방향, 하락은 개선 방향입니다.";
+  if (signal.id === "us_unemployment")
+    return "최근 3개월 실업률 변화로 판정합니다. 실업률 상승은 악화 방향, 하락은 개선 방향입니다.";
+  if (signal.id === "us_claims")
+    return "미국 신규실업수당의 4주 평균입니다. 성장·고용 영역은 최근 13주 변화율을 사용하고, 조기경보는 전년 대비 52주 변화가 +15% 이상인지 별도로 확인합니다. 상승은 악화 방향입니다.";
   if (
     ["cpi", "core_cpi", "pce", "core_pce", "ppi", "wages"].includes(signal.id)
   )
@@ -153,6 +155,8 @@ export function signalRuleHelp(signal: RegimeSignal) {
     return "핵심 침체 선행축입니다. 최근 21관측일 평균을 뉴욕 연은 공개 probit 식에 넣어 향후 12개월 침체확률을 계산하며, 역전 해소 뒤에도 위험 기억을 단계적으로 유지합니다.";
   if (signal.id === "curve2s10s")
     return "10Y-3M 침체 선행신호의 확인축입니다. 동반 역전 여부만 보조하며 같은 수익률곡선 근거를 별도 경보로 중복 합산하지 않습니다.";
+  if (signal.id === "us3m")
+    return "FRED 미국 3개월 국채금리(DGS3MO)입니다. SGOV가 보유한 0~3개월 단기국채의 금리환경을 참고하는 값이며 SGOV ETF 자체의 분배수익률·SEC yield·총수익률은 아닙니다. 금리곡선 해석에만 사용하고 단독 레짐 점수로 쓰지 않습니다.";
   if (["us10y", "bei10y"].includes(signal.id))
     return "TIPS와 공통 관측일을 맞춘 20·63관측일 변화로 최근 금리 충격의 원인을 분해합니다. 명목금리와 BEI의 동반 급등은 인플레이션 기대 충격으로 판정합니다.";
   if (["us3m", "us2y"].includes(signal.id))
@@ -172,6 +176,24 @@ export function signalRuleHelp(signal: RegimeSignal) {
     return "주로 12개월 변화율을 사용합니다. 성장·고용·생산·유동성 증가는 개선 방향, 감소는 악화 방향입니다.";
   return "판정 기간과 개선·악화 방향은 지표별 규칙을 따릅니다. 아래 판정 근거에서 이번 계산에 사용된 기간과 값을 확인할 수 있습니다.";
 }
+
+const FEED_DISPLAY_NAMES: Record<string, string> = {
+  macro: "미국 거시지표",
+  treasury: "미국 국채금리",
+  ai_capex: "하이퍼스케일러 CAPEX",
+  memory: "메모리 공개가격",
+  kosis: "한국 산업지표",
+  customs: "한국 수출입",
+  opendart: "국내 기업 공시",
+  eia: "미국 전력지표",
+};
+
+const FEED_STATUS_LABELS: Record<string, string> = {
+  failed: "최근 갱신 실패",
+  partial: "일부 항목만 갱신",
+  configuration_required: "연결 설정 필요",
+};
+
 const formatDate = (value: string) => value.slice(2, 7).replace("-", ".");
 const formatNumber = (value: number) =>
   Math.abs(value) >= 1000
@@ -250,6 +272,11 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
               <Badge variant="outline" className="whitespace-normal text-center text-[10px] font-normal leading-4">
                 {role}
               </Badge>
+              {signal.proxy_for && (
+                <Badge variant="neutral" className="whitespace-normal text-center text-[10px] font-normal leading-4">
+                  SGOV 금리환경 참고
+                </Badge>
+              )}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {signal.source.toUpperCase()} · 관측{" "}
@@ -566,7 +593,15 @@ function RateSignalGroups({ signals }: { signals: RegimeSignal[] }) {
         return (
           <section key={group.id} data-rate-group={group.id}>
             <div className="mb-4 border-l-2 border-primary/60 pl-3">
-              <h3 className="font-semibold">{group.title}</h3>
+              <div className="flex items-center gap-1">
+                <h3 className="font-semibold">{group.title}</h3>
+                <InfoTip label={`${group.title} 증감값 읽는 법`}>
+                  원시 금리의 상승·하락만으로 투자환경의 긍정·부정을 정하지
+                  않습니다. 숫자는 방향 그대로 중립색으로 표시하고, 현재 제약
+                  수준·최근 충격·수익률곡선처럼 경제적 맥락이 계산된 판정에만
+                  의미 색상을 사용합니다.
+                </InfoTip>
+              </div>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">{group.description}</p>
             </div>
             <div className={`grid gap-5 ${columns}`}>
@@ -610,6 +645,17 @@ export function RateModelOverview({
   );
   const shock20 = shock?.change_20d?.changes;
   const tone = financialConditionTone(rates?.label);
+  const durationLevelTone: SemanticTone =
+    duration?.level_label === "장기채 부담 높음"
+      ? "negative"
+      : duration?.level_label === "장기채 부담 관찰"
+        ? "caution"
+        : duration?.level_label === "장기채 부담 낮음"
+          ? "positive"
+          : "neutral";
+  const durationRecentTone = financialConditionTone(
+    duration?.recent_label || duration?.label,
+  );
 
   return (
     <Card className={`mb-6 ${TONE_STYLES[tone].panel}`}>
@@ -621,12 +667,12 @@ export function RateModelOverview({
               <InfoTip label="금리 환경 판단 방법">
                 현재 금리 수준이 수요와 차입을 얼마나 누르는지, 최근 금리가 추가로
                 얼마나 움직였는지, 과거 장단기 금리 역전의 침체 선행 신호가 남아
-                있는지와 30년물 장기채 부담을 따로 계산합니다. 네 결과 중 투자환경에 가장 큰 부담을
+                있는지와 30년물의 현재 수준·최근 추가 충격을 따로 계산합니다. 네 결과 중 투자환경에 가장 큰 부담을
                 금리 영역 판정에 반영하며 같은 경제적 근거는 중복 합산하지 않습니다.
               </InfoTip>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              현재 금리 부담 · 최근 추가 충격 · 30년물 부담 · 수익률곡선 선행 신호를 분리해 매일 재계산
+              현재 금리 부담 · 최근 추가 충격 · 30년물 수준과 방향 · 수익률곡선 선행 신호를 분리해 매일 재계산
             </p>
           </div>
           <div className="text-right">
@@ -667,19 +713,30 @@ export function RateModelOverview({
                 : "공통 관측일 자료 부족"}
             </p>
           </div>
-          <div className={`rounded-lg border bg-muted/10 p-4 ${TONE_STYLES[financialConditionTone(duration?.label)].panel}`}>
-            <p className="text-xs font-medium text-muted-foreground">3 · 30년물 장기채 부담</p>
+          <div className={`rounded-lg border bg-muted/10 p-4 ${TONE_STYLES[durationLevelTone].panel}`}>
+            <p className="text-xs font-medium text-muted-foreground">3 · 30년물 현재 부담과 최근 충격</p>
             <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2">
-              <strong className={`min-w-0 leading-6 ${TONE_STYLES[financialConditionTone(duration?.label)].text}`}>
-                {durationStressLabel(duration?.label)}
+              <strong className={`min-w-0 leading-6 ${TONE_STYLES[durationLevelTone].text}`}>
+                {duration?.level_label || "판정 불가"}
               </strong>
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                실질 30Y {duration?.real_30y?.toFixed(2) ?? "-"}%
+                기준 {duration?.as_of_date || conditions?.as_of_date || "-"}
               </span>
             </div>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              30Y-10Y {signed(duration?.spread_30y10y, 2)}%p · {durationStressDriverLabel(duration?.driver)} · 최근 5회 중 {duration?.confirmation_count_5d ?? 0}회
+              명목 30Y {duration?.nominal_30y?.toFixed(2) ?? "-"}% · 실질 30Y {duration?.real_30y?.toFixed(2) ?? "-"}% · 30Y-10Y {signed(duration?.spread_30y10y, 2)}%p
             </p>
+            <div className="mt-3 border-t pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">최근 20관측일 추가 충격</span>
+                <strong className={`text-sm ${TONE_STYLES[durationRecentTone].text}`}>
+                  {durationStressLabel(duration?.recent_label || duration?.label)}
+                </strong>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                명목 {signed(duration?.change_20d?.changes.us30y, 2)}%p · 실질 {signed(duration?.change_20d?.changes.tips30y, 2)}%p · 최근 3회 중 {duration?.recent_confirmation_count_3d ?? 0}회 · {durationStressDriverLabel(duration?.driver)}
+              </p>
+            </div>
           </div>
           <div className="rounded-lg border bg-muted/10 p-4">
             <p className="text-xs font-medium text-muted-foreground">4 · 수익률곡선의 침체 선행 신호</p>
@@ -742,27 +799,57 @@ export function RateModelOverview({
   );
 }
 
-function AiCapexDashboard({
+type AiCapexCompany = RegimeCurrent["ai_capex"]["companies"][number];
+
+export type AiCapexChartPoint = {
+  period: string;
+  total: number | null;
+  coverage: number;
+  [key: string]: string | number | null;
+};
+
+export function buildAiCapexChartData(
+  companies: AiCapexCompany[],
+  aggregateHistory: NonNullable<RegimeCurrent["ai_capex"]["aggregate"]>["history"] = [],
+  limit = 8,
+): AiCapexChartPoint[] {
+  const periods = Array.from(
+    new Set([
+      ...aggregateHistory.map((point) => point.period),
+      ...companies.flatMap((company) => company.history.map((point) => point.period)),
+    ]),
+  ).sort();
+  const aggregateByPeriod = new Map(
+    aggregateHistory.map((point) => [point.period, point]),
+  );
+
+  return periods.slice(-limit).map((period) => {
+    const companyValues = Object.fromEntries(
+      companies.map((company) => {
+        const point = company.history.find((item) => item.period === period);
+        return [company.id, point?.value == null ? null : point.value / 1e9];
+      }),
+    ) as Record<string, number | null>;
+    const aggregate = aggregateByPeriod.get(period);
+    return {
+      period,
+      ...companyValues,
+      coverage: aggregate?.coverage_count ?? 0,
+      total: aggregate?.value_billion ?? null,
+    };
+  });
+}
+
+export function AiCapexDashboard({
   data,
 }: {
   data: NonNullable<RegimeCurrent["ai_capex"]>;
 }) {
-  const chartData = Array.from(
-    new Set(data.companies.flatMap((company) => company.history.map((point) => point.period))),
-  )
-    .sort()
-    .slice(-8)
-    .map((period) => ({
-      period,
-      ...Object.fromEntries(
-        data.companies.map((company) => [
-          company.id,
-          company.history.find((point) => point.period === period)?.value == null
-            ? null
-            : (company.history.find((point) => point.period === period)?.value as number) / 1e9,
-        ]),
-      ),
-    }));
+  const aggregate = data.aggregate;
+  const chartData = buildAiCapexChartData(data.companies, aggregate?.history);
+  const aggregateQoq = aggregate?.qoq;
+  const aggregateYoy = aggregate?.yoy;
+  const completeCoverage = Boolean(aggregate?.complete && !aggregate.is_stale);
   const colors: Record<string, string> = {
     microsoft: REGIME_SERIES_COLORS.blue,
     alphabet: REGIME_SERIES_COLORS.violet,
@@ -787,36 +874,138 @@ function AiCapexDashboard({
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>기업별 분기 총 현금 CAPEX</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            SEC 공시 기준 · 십억 달러
-          </p>
-        </CardHeader>
-        <CardContent>
-          {chartData.length ? (
-            <div className="h-96">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={chartData}
-                  barCategoryGap="18%"
-                  barGap={2}
-                  margin={{ top: 12, right: 12, bottom: 8, left: 4 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
-                  <XAxis dataKey="period" tickFormatter={formatDate} tick={{ fontSize: 11 }} />
-                  <YAxis width={48} tick={{ fontSize: 11 }} unit="B" />
-                  <Tooltip
-                    formatter={(value: number, name: string) => [`$${Number(value).toFixed(1)}B`, data.companies.find((item) => item.id === name)?.name || name]}
-                    labelFormatter={(label) => `회계기간 종료 ${label}`}
-                    contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }}
-                  />
-                  <Legend formatter={(value) => data.companies.find((item) => item.id === value)?.name || value} />
-                  {data.companies.map((company) => (
-                    <Bar key={company.id} dataKey={company.id} fill={colors[company.id]} maxBarSize={24} isAnimationActive={false} />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>하이퍼스케일러 분기 CAPEX 추이</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                4사 합산 투자 강도와 기업별 투자금액을 분리해 표시 · 십억 달러
+              </p>
             </div>
+            {aggregate?.latest_period && (
+              <Badge variant="outline">
+                최신 합계 {aggregate.coverage_count}/{aggregate.expected_count}개사
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-8">
+          {chartData.length ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-lg border bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground">최신 4사 합산</p>
+                  <p className="mt-2 text-2xl font-semibold text-primary">
+                    {aggregate?.latest_value_billion == null ? "-" : `$${aggregate.latest_value_billion.toFixed(1)}B`}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {aggregate?.latest_period
+                      ? `판정 기준 ${aggregate.latest_period} · ${aggregate.coverage_count}/${aggregate.expected_count}개사`
+                      : "완전 집계 분기 없음"}
+                  </p>
+                </div>
+                <div className="rounded-lg border bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground">직전 분기 대비</p>
+                  <p className={`mt-2 text-2xl font-semibold ${TONE_STYLES[aiCapexDeltaTone(aggregateQoq, completeCoverage)].text}`}>
+                    {aggregateQoq == null ? "-" : `${signed(aggregateQoq, 1)}%`}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    합산 투자 속도의 단기 변화
+                  </p>
+                </div>
+                <div className="rounded-lg border bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground">전년 동기 대비</p>
+                  <p className={`mt-2 text-2xl font-semibold ${TONE_STYLES[aiCapexDeltaTone(aggregateYoy, completeCoverage)].text}`}>
+                    {aggregateYoy == null ? "-" : `${signed(aggregateYoy, 1)}%`}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    합산 투자의 구조적 확장 속도
+                  </p>
+                </div>
+                <div className="rounded-lg border bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground">최근 4분기 합계</p>
+                  <p className="mt-2 text-2xl font-semibold">
+                    {aggregate?.ttm_billion == null ? "-" : `$${aggregate.ttm_billion.toFixed(1)}B`}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    TTM YoY {aggregate?.ttm_yoy == null ? "-" : `${signed(aggregate.ttm_yoy, 1)}%`}
+                  </p>
+                </div>
+              </div>
+
+              <section aria-labelledby="aggregate-capex-title">
+                <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <h3 id="aggregate-capex-title" className="text-sm font-semibold">4사 합산 CAPEX</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      정확히 같은 분기말에 4개사 자료가 모두 있을 때만 합계를 연결합니다.
+                    </p>
+                  </div>
+                  <span className="text-xs text-muted-foreground">선의 기울기 = 합산 투자 속도 변화</span>
+                </div>
+                <div className="h-56 rounded-lg border bg-muted/[0.04] p-3">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={chartData}
+                      syncId="ai-capex-quarter"
+                      margin={{ top: 12, right: 18, bottom: 4, left: 4 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                      <XAxis dataKey="period" tickFormatter={formatDate} tick={{ fontSize: 11 }} />
+                      <YAxis width={52} tick={{ fontSize: 11 }} unit="B" domain={[0, "auto"]} />
+                      <Tooltip
+                        formatter={(value: number) => [`$${Number(value).toFixed(1)}B`, "4사 합산"]}
+                        labelFormatter={(label) => `회계기간 종료 ${label}`}
+                        contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }}
+                      />
+                      <Line
+                        type="linear"
+                        dataKey="total"
+                        name="4사 합산"
+                        stroke={REGIME_SERIES_COLORS.cyan}
+                        strokeWidth={3}
+                        dot={{ r: 3, fill: REGIME_SERIES_COLORS.cyan }}
+                        activeDot={{ r: 5 }}
+                        connectNulls={false}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </section>
+
+              <section className="border-t pt-6" aria-labelledby="company-capex-title">
+                <div className="mb-3">
+                  <h3 id="company-capex-title" className="text-sm font-semibold">기업별 분기 CAPEX</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    같은 분기의 기업별 절대 투자금액을 비교합니다.
+                  </p>
+                </div>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={chartData}
+                      syncId="ai-capex-quarter"
+                      barCategoryGap="18%"
+                      barGap={2}
+                      margin={{ top: 12, right: 12, bottom: 8, left: 4 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                      <XAxis dataKey="period" tickFormatter={formatDate} tick={{ fontSize: 11 }} />
+                      <YAxis width={48} tick={{ fontSize: 11 }} unit="B" />
+                      <Tooltip
+                        formatter={(value: number, name: string) => [`$${Number(value).toFixed(1)}B`, data.companies.find((item) => item.id === name)?.name || name]}
+                        labelFormatter={(label) => `회계기간 종료 ${label}`}
+                        contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }}
+                      />
+                      <Legend formatter={(value) => data.companies.find((item) => item.id === value)?.name || value} />
+                      {data.companies.map((company) => (
+                        <Bar key={company.id} dataKey={company.id} fill={colors[company.id]} maxBarSize={24} isAnimationActive={false} />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </section>
+            </>
           ) : (
             <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
               데이터 새로고침으로 SEC 공시를 수집해주세요.
@@ -847,7 +1036,7 @@ function AiCapexDashboard({
       </div>
       <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
         <span>
-          산출 방식 · 회사별 회계분기 기준
+          산출 방식 · 동일 분기말 4개사 완전 집계
           {data.as_of_range?.from && data.as_of_range?.to
             ? ` · 최신 분기 범위 ${data.as_of_range.from}~${data.as_of_range.to}`
             : ""}
@@ -858,7 +1047,22 @@ function AiCapexDashboard({
   );
 }
 
-function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
+type MemoryPriceSeries = RegimeCurrent["memory_cycle"]["series"][number];
+
+export function splitMemoryPriceSeries(series: MemoryPriceSeries[]) {
+  return {
+    dram: series.filter((item) => !item.market_type.startsWith("nand_")),
+    nand: series.filter((item) => item.market_type.startsWith("nand_")),
+  };
+}
+
+export function memoryHistoryMode(item: MemoryPriceSeries) {
+  if (item.history.length >= 4) return "trend" as const;
+  if (item.history.length >= 2) return "sparse" as const;
+  return "waiting" as const;
+}
+
+export function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
   const seriesPriority: Record<string, number> = {
     dram_contract_ddr5_sodimm_8gb: 0,
     dram_spot_ddr5_16gb: 1,
@@ -874,31 +1078,9 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
   const ordered = [...data.series].sort((a, b) => {
     return (seriesPriority[a.series_id] ?? 99) - (seriesPriority[b.series_id] ?? 99);
   });
-  const dramSeries = ordered.filter((item) => !item.market_type.startsWith("nand_"));
-  const nandSeries = ordered.filter((item) => item.market_type.startsWith("nand_"));
-  const historySeries = ordered.filter((item) => item.history.length > 1).slice(0, 6);
-  const historyByDate = new Map<string, Record<string, string | number>>();
-  historySeries.forEach((item) => {
-    const base = item.history[0]?.price_average;
-    if (!base) return;
-    item.history.forEach((point) => {
-      historyByDate.set(point.observation_date, {
-        ...(historyByDate.get(point.observation_date) || { date: point.observation_date }),
-        [item.series_id]: Number(((point.price_average / base) * 100).toFixed(2)),
-      });
-    });
-  });
-  const memoryHistory = [...historyByDate.values()].sort((a, b) =>
-    String(a.date).localeCompare(String(b.date)),
-  );
-  const memoryColors = [
-    REGIME_SERIES_COLORS.blue,
-    REGIME_SERIES_COLORS.violet,
-    REGIME_SERIES_COLORS.cyan,
-    REGIME_SERIES_COLORS.pink,
-    REGIME_SERIES_COLORS.indigo,
-    REGIME_SERIES_COLORS.sky,
-  ];
+  const grouped = splitMemoryPriceSeries(ordered);
+  const dramSeries = grouped.dram;
+  const nandSeries = grouped.nand;
   const priceCard = (item: (typeof ordered)[number]) => {
     const role = item.market_type === "contract"
       ? "direct"
@@ -918,8 +1100,26 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
       role,
       aggregateState,
     );
+    const history = [...item.history].sort((a, b) =>
+      a.observation_date.localeCompare(b.observation_date),
+    );
+    const first = history.at(0);
+    const latest = history.at(-1);
+    const observedChange = first && latest && first.price_average
+      ? (latest.price_average / first.price_average - 1) * 100
+      : null;
+    const historyMode = memoryHistoryMode(item);
+    const historyData = history.map((point) => ({
+      ...point,
+      timestamp: Date.parse(`${point.observation_date}T00:00:00Z`),
+    }));
     return (
-      <div key={item.series_id} className="rounded-lg border bg-muted/20 p-4">
+      <div
+        key={item.series_id}
+        className="rounded-lg border bg-muted/20 p-4"
+        data-memory-series={item.series_id}
+        data-memory-history-mode={historyMode}
+      >
         <div className="flex items-start justify-between gap-3">
           <p className="text-sm font-medium leading-5">{item.product_name}</p>
           <Badge variant="outline" className="shrink-0 text-[10px]">
@@ -942,6 +1142,80 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
           기준 {item.observation_date}{item.period_label ? ` · ${item.period_label}` : ""}
           {item.price_basis ? ` · ${item.price_basis}` : ""}
         </p>
+        {historyMode === "trend" ? (
+          <div className="mt-4 border-t pt-3">
+            <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <span>수집 가격 이력</span>
+              <span>관측 {history.length}회</span>
+            </div>
+            <div className="h-32">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={historyData} margin={{ top: 4, right: 6, bottom: 2, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.16} vertical={false} />
+                  <XAxis
+                    dataKey="timestamp"
+                    type="number"
+                    scale="time"
+                    domain={["dataMin", "dataMax"]}
+                    tickFormatter={(value) => new Date(Number(value)).toISOString().slice(5, 10).replace("-", ".")}
+                    minTickGap={28}
+                    tick={{ fontSize: 9 }}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    width={42}
+                    domain={["auto", "auto"]}
+                    tick={{ fontSize: 9 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) => Number(value).toLocaleString("en-US", { maximumFractionDigits: 2 })}
+                  />
+                  <Tooltip
+                    labelFormatter={(value) => `관측일 ${new Date(Number(value)).toISOString().slice(0, 10)}`}
+                    formatter={(value: number) => [Number(value).toLocaleString("en-US", { maximumFractionDigits: 3 }), item.product_name]}
+                    contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }}
+                  />
+                  <Line
+                    type="linear"
+                    dataKey="price_average"
+                    stroke={item.market_type.startsWith("nand_") ? REGIME_SERIES_COLORS.violet : REGIME_SERIES_COLORS.blue}
+                    strokeWidth={2}
+                    dot={{ r: 2.5 }}
+                    activeDot={{ r: 4 }}
+                    connectNulls={false}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ) : historyMode === "sparse" && first && latest ? (
+          <div className="mt-4 border-t pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] text-muted-foreground">수집 첫값 → 최신값</p>
+              <Badge variant="outline" className="text-[10px]">관측 {history.length}회 · 추세 판단 유보</Badge>
+            </div>
+            <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-sm tabular-nums">
+              <div>
+                <p className="font-medium">{first.price_average.toLocaleString("en-US", { maximumFractionDigits: 3 })}</p>
+                <p className="mt-1 text-[10px] text-muted-foreground">{first.observation_date.slice(5).replace("-", ".")}</p>
+              </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              <div className="text-right">
+                <p className="font-medium">{latest.price_average.toLocaleString("en-US", { maximumFractionDigits: 3 })}</p>
+                <p className="mt-1 text-[10px] text-muted-foreground">{latest.observation_date.slice(5).replace("-", ".")}</p>
+              </div>
+            </div>
+            <p className="mt-2 text-right text-xs text-muted-foreground">
+              수집 이력 변화 {observedChange == null ? "-" : `${observedChange > 0 ? "+" : ""}${observedChange.toFixed(2)}%`}
+            </p>
+          </div>
+        ) : (
+          <div className="mt-4 border-t pt-3 text-xs text-muted-foreground">
+            이력 1회 · 다음 관측 후 변화 비교
+          </div>
+        )}
       </div>
     );
   };
@@ -964,46 +1238,8 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
         <p className="text-sm text-muted-foreground">{data.reason}</p>
       </CardHeader>
       <CardContent>
-        {memoryHistory.length > 1 && (
-          <div className="mb-6 rounded-lg border bg-muted/10 p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">수집 이후 가격 방향 비교</p>
-              <p className="text-xs text-muted-foreground">각 표본의 첫 관측값=100</p>
-            </div>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={memoryHistory} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
-                  <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={36} tick={{ fontSize: 11 }} />
-                  <YAxis width={48} tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
-                  <Tooltip
-                    labelFormatter={(label) => `관측일 ${label}`}
-                    formatter={(value: number, name: string) => [
-                      Number(value).toFixed(1),
-                      historySeries.find((item) => item.series_id === name)?.product_name || name,
-                    ]}
-                    contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }}
-                  />
-                  <Legend formatter={(value) => historySeries.find((item) => item.series_id === value)?.product_name || value} />
-                  {historySeries.map((item, index) => (
-                    <Line
-                      key={item.series_id}
-                      type="monotone"
-                      dataKey={item.series_id}
-                      stroke={memoryColors[index % memoryColors.length]}
-                      dot={false}
-                      connectNulls
-                      strokeWidth={2}
-                      isAnimationActive={false}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
         {dramSeries.length ? (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-memory-group="dram">
             {dramSeries.map(priceCard)}
           </div>
         ) : (
@@ -1023,7 +1259,7 @@ function MemoryCyclePanel({ data }: { data: RegimeCurrent["memory_cycle"] }) {
           </div>
           <p className="mb-4 text-sm text-muted-foreground">{data.nand_reason}</p>
           {nandSeries.length ? (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{nandSeries.map(priceCard)}</div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-memory-group="nand">{nandSeries.map(priceCard)}</div>
           ) : (
             <p className="text-sm text-muted-foreground">NAND 공개 가격표를 아직 수집하지 않았습니다.</p>
           )}
@@ -1677,6 +1913,7 @@ export function RegimePage() {
   const client = useQueryClient();
   const [judgment, setJudgment] = useState<RegimeLevel | "">("");
   const [note, setNote] = useState("");
+  const [snapshotSavedAt, setSnapshotSavedAt] = useState<string | null>(null);
   const current = useQuery({
     queryKey: ["regime", "current"],
     queryFn: regimeApi.getCurrent,
@@ -1697,13 +1934,16 @@ export function RegimePage() {
       }),
     onSuccess: () => {
       setNote("");
+      setSnapshotSavedAt(new Date().toISOString());
       client.invalidateQueries({ queryKey: ["regime"] });
     },
   });
   const data = current.data;
   const unhealthyFeeds = data
-    ? Object.entries(data.feed_health || {}).filter(([, feed]) =>
-        feed && ["failed", "partial", "configuration_required"].includes(feed.status),
+    ? Object.entries(data.feed_health || {}).filter(([name, feed]) =>
+        name !== "events"
+        && feed
+        && ["failed", "partial", "configuration_required"].includes(feed.status),
       )
     : [];
 
@@ -1750,12 +1990,14 @@ export function RegimePage() {
       {unhealthyFeeds.length > 0 && (
         <Alert>
           <Database className="h-4 w-4" />
-          <AlertTitle>일부 외부 데이터 연결 제한</AlertTitle>
+          <AlertTitle>일부 데이터 원본 갱신 지연</AlertTitle>
           <AlertDescription>
             {unhealthyFeeds
-              .map(([name, feed]) => `${name}: ${feed?.status}`)
+              .map(([name, feed]) =>
+                `${FEED_DISPLAY_NAMES[name] || name} · ${FEED_STATUS_LABELS[feed?.status || ""] || "상태 확인 필요"}`,
+              )
               .join(" · ")}
-            . 정상 캐시는 유지되며 각 영역의 최신성을 별도로 표시합니다.
+            . 기존 정상 수집분을 표시하며, 기준일과 최신성은 해당 영역에서 확인할 수 있습니다.
           </AlertDescription>
         </Alert>
       )}
@@ -1782,6 +2024,7 @@ export function RegimePage() {
               judgment={judgment}
               note={note}
               snapshotPending={snapshot.isPending}
+              snapshotSavedAt={snapshotSavedAt}
               onJudgment={setJudgment}
               onNote={setNote}
               onSnapshot={() => snapshot.mutate()}
@@ -1834,6 +2077,7 @@ export function RegimePage() {
                   ) || []
                 }
                 fetchedAt={data?.data_quality.last_fetched_at}
+                triggers={data?.triggers || []}
               />
             </TabsContent>
             {DOMAIN_TABS.filter((tab) => tab.id !== "market").map((tab) => {
@@ -1934,7 +2178,7 @@ export function RegimePage() {
                   <div className="mt-4 grid gap-3 rounded-lg bg-muted/20 p-4 text-xs sm:grid-cols-2 lg:grid-cols-5">
                     <p><span className="text-muted-foreground">사용자 판정</span><span className="mt-1 block font-medium">{item.user_regime ? regimeLevelLabel(item.user_regime) : "미입력"}</span></p>
                     <p><span className="text-muted-foreground">경제환경·최근 방향</span><span className="mt-1 block font-medium">{macroEnvironmentLabel(item.macro_quadrant?.environment_point?.label)} / {momentumDirectionLabel(recordedDirection)}</span></p>
-                    <p><span className="text-muted-foreground">점검 기준 충족</span><span className="mt-1 block font-medium">{item.triggers?.length || 0}개</span></p>
+                    <p><span className="text-muted-foreground">활성 위험 신호</span><span className="mt-1 block font-medium">{item.triggers?.length || 0}개</span></p>
                     <p><span className="text-muted-foreground">AI·메모리 보조지표</span><span className="mt-1 block font-medium">CAPEX {aiCapexStateLabel(item.ai_capex?.state)} · DRAM {memoryPriceStateLabel(item.memory_cycle?.state)} · NAND {nandPriceStateLabel(item.memory_cycle?.nand_state)}</span></p>
                     <p><span className="text-muted-foreground">수급·전력 보조지표</span><span className="mt-1 block font-medium">반도체 {semiconductorStateLabel(item.semiconductor_cycle?.state)} · 전력 {powerStateLabel(item.power_cycle?.state)}</span></p>
                   </div>

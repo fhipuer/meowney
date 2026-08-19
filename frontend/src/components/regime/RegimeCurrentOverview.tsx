@@ -70,8 +70,8 @@ export const FINANCIAL_TRANSMISSION_HELP: Record<string, string> = {
     "10년 명목금리를 실질금리(TIPS)와 기대인플레이션(BEI)으로 나눠 기업 투자·주택·성장주 할인율에 주는 부담을 봅니다. 판정은 TIPS 절대수준을 사용합니다. 기간 프리미엄(TP)은 금리 상승 원인을 설명하는 보조 추정치이며 점수에 중복 합산하지 않습니다.",
   "최근 금리 충격":
     "명목 10년·TIPS·BEI의 공통 관측일을 맞춘 뒤 최근 20관측일과 63관측일 변화를 비교합니다. ‘추가 금리 충격 거의 없음’은 최근 상승폭이 작다는 뜻이며, 현재 금리 수준 자체가 낮다는 의미는 아닙니다.",
-  "30년물 장기채 부담":
-    "30년 명목금리·30년 실질금리와 30Y-10Y 금리차를 함께 봅니다. 30년 실질금리 3.0% 이상, 20관측일 +0.15%p 이상, 30Y-10Y +0.50%p 이상이 최근 5회 중 3회 확인되면 장기 듀레이션 경보를 냅니다. 실질금리 상승에는 기대 실질단기금리와 실질 기간 프리미엄이 함께 들어가므로 이 화면이 둘을 직접 분리하지는 않습니다. 10년 실질금리와 같은 금리 부담이므로 별도 거시영역으로 중복 합산하지 않습니다.",
+  "30년물 현재 부담·추가 충격":
+    "현재 절대수준과 최근 상승 충격을 분리합니다. 절대수준은 30년 실질금리 3.0% 이상과 30Y-10Y +0.50%p 이상이 최근 5회 중 3회 확인됐는지 봅니다. 최근 충격은 공통 관측일 기준 20관측일 상승폭을 계산하고 최근 3회 중 2회 확인해야 진입·유지합니다. 실질금리 상승에는 기대 실질단기금리와 실질 기간 프리미엄이 함께 들어가므로 이 화면이 둘을 직접 분리하지는 않습니다. 10년 실질금리와 같은 금리 부담이므로 별도 거시영역으로 중복 합산하지 않습니다.",
   "수익률곡선 선행위험":
     "10Y-3M 스프레드의 최근 21관측일 평균으로 향후 12개월 침체확률을 계산합니다. 10Y-2Y는 확인자료로만 사용합니다. 현재 역전이 끝났더라도 과거 역전 뒤 침체가 나타나는 시차를 고려해 최대 252관측일 동안 영향을 관찰합니다.",
   "신용·금융여건":
@@ -82,12 +82,32 @@ export type CurrentOverviewProps = {
   judgment: RegimeLevel | "";
   note: string;
   snapshotPending: boolean;
+  snapshotSavedAt?: string | null;
   onJudgment: (value: RegimeLevel | "") => void;
   onNote: (value: string) => void;
   onSnapshot: () => void;
 };
 const signed = (value: number | null | undefined, digits = 1) =>
   value == null ? "-" : `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
+const billions = (value: number | null | undefined) =>
+  value == null ? "-" : `$${value.toFixed(value >= 100 ? 1 : 2)}B`;
+
+function eventDate(event: RegimeCurrent["upcoming_events"][number]) {
+  return event.scheduled_date || event.scheduled_at?.slice(0, 10) || null;
+}
+
+function eventCountdown(dateValue: string | null) {
+  if (!dateValue) return "일정 확인 필요";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue);
+  if (!match) return "일정 확인 필요";
+  const now = new Date();
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const days = Math.round((target - today) / 86_400_000);
+  if (days < 0) return "발표 후 새로고침 필요";
+  if (days === 0) return "오늘 발표 · 발표 후 새로고침";
+  return `D-${days}`;
+}
 
 function aiThesisOverview(data: RegimeCurrent): {
   label: string;
@@ -151,7 +171,7 @@ function aiThesisOverview(data: RegimeCurrent): {
   };
 }
 
-function DecisionHeader({ data }: { data: RegimeCurrent }) {
+export function DecisionHeader({ data }: { data: RegimeCurrent }) {
   const limited = data.data_quality.status !== "충분";
   const eventFeedAvailable = ["success", "partial"].includes(
     data.feed_health?.events?.status || "",
@@ -160,8 +180,8 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
     ? "지금 다시 상세점검하세요"
     : data.review_urgency === "watch"
       ? eventFeedAvailable
-        ? "다음 발표까지 관찰하세요"
-        : "관찰을 유지하세요"
+        ? "다음 발표까지 관찰"
+        : "관찰 유지"
       : "새 상세점검 사유 없음";
   const detail = data.needs_new_review
     ? plainLanguageStateText(data.review_reasons[0] || "즉시 점검 기준이 충족됐습니다.")
@@ -193,88 +213,120 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
   const candidateTone = regimeLevelTone(data.candidate_regime);
   const qualityTone = dataQualityTone(data.data_quality.status);
   const thesis = aiThesisOverview(data);
+  const aggregate = data.ai_capex.aggregate;
+  const breadth = data.ai_capex.breadth;
+  const upcomingEvents = data.upcoming_events || [];
+  const firstEvent = upcomingEvents[0];
+  const nearestDate = firstEvent ? eventDate(firstEvent) : null;
+  const nearestEvents = nearestDate
+    ? upcomingEvents.filter((event) => eventDate(event) === nearestDate)
+    : [];
+  const eventSchedule = firstEvent ? formatRegimeEventSchedule(firstEvent) : null;
+  const showCandidate = data.candidate_regime !== data.automatic_regime;
   return (
     <Card className={data.needs_new_review ? "border-red-400/50" : ""}>
       <CardContent className="p-5 sm:p-7">
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(330px,1.65fr)_repeat(4,minmax(130px,1fr))]">
-          <div className="flex gap-3 sm:gap-4">
-            {calm ? (
-              <CheckCircle2 className="mt-1 h-7 w-7 shrink-0 text-emerald-400" />
-            ) : (
-              <AlertTriangle
-                className={`mt-1 h-7 w-7 shrink-0 ${data.needs_new_review ? "text-red-400" : "text-amber-400"}`}
-              />
-            )}
-            <div>
-              <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-                <span>포트폴리오 점검</span>
-                <InfoTip label="상세점검 판단의 범위">
-                  상세 포트폴리오 분석을 다시 실행할 시점을 알립니다. 이 판단이
-                  포트폴리오 비중을 자동으로 변경하지는 않습니다.
-                </InfoTip>
+        <div className="grid overflow-hidden rounded-xl border border-border/80 bg-border/80 lg:grid-cols-[1.2fr_0.94fr_1fr]">
+          <section className="bg-card p-5 sm:p-6" data-current-summary="action">
+            <div className="flex gap-3 sm:gap-4">
+              {calm ? (
+                <CheckCircle2 className="mt-1 h-7 w-7 shrink-0 text-emerald-400" />
+              ) : (
+                <AlertTriangle
+                  className={`mt-1 h-7 w-7 shrink-0 ${data.needs_new_review ? "text-red-400" : "text-amber-400"}`}
+                />
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                  <span>지금 할 일</span>
+                  <InfoTip label="포트폴리오 상세점검 시점">
+                    현재 활성 신호, 마지막 상태 기록 이후 변화와 가까운 공식 발표를
+                    함께 보고 상세 포트폴리오 분석을 다시 실행할 시점을 알립니다.
+                  </InfoTip>
+                </div>
+                <h2 className="mt-1 text-xl font-bold leading-7 sm:text-2xl">{title}</h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>
               </div>
-              <h2 className="mt-1 text-xl font-bold leading-7 sm:text-2xl">{title}</h2>
-              <p className="mt-2 text-sm font-medium">{environment}</p>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                {detail}
-              </p>
             </div>
-          </div>
-          <div className="rounded-lg bg-muted/25 p-4">
+            <div className="mt-5 border-t border-border/70 pt-4">
+              {firstEvent && eventSchedule ? (
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">가장 가까운 공식 발표</p>
+                    <p className="mt-1 text-sm font-semibold leading-5">
+                      {nearestEvents.map((event) => event.event_type).join(" · ")}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {eventSchedule.primary} · {eventSchedule.secondary}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="shrink-0">
+                    {eventCountdown(nearestDate)}
+                  </Badge>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">예정된 공식 발표를 확인하는 중입니다.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="border-t border-border/80 bg-card p-5 sm:p-6 lg:border-l lg:border-t-0" data-current-summary="macro">
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <span>AI 투자 가설</span>
-              <InfoTip label="AI 투자 가설 상태의 범위">
-                하이퍼스케일러 투자, 메모리 가격·수요, 국내 수급과 기업
-                확인을 분리해 요약합니다. 거시 자동 레짐에는 합산하지 않습니다.
+              <span>미국 거시 판단</span>
+              <InfoTip label="미국 거시 판단의 범위">
+                성장·물가·금리·유동성의 결정 입력으로 계산한 레짐과 현재 경제
+                수준을 함께 보여줍니다. 최신 후보가 확정 레짐과 다를 때만 후보를 표시합니다.
               </InfoTip>
             </div>
-            <p className={`mt-2 text-lg font-semibold ${TONE_STYLES[thesis.tone].text}`}>
-              {thesis.label}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <p className={`text-2xl font-semibold ${TONE_STYLES[automaticTone].text}`}>
+                {regimeLevelLabel(data.automatic_regime)}
+              </p>
+              {showCandidate && (
+                <Badge variant={TONE_STYLES[candidateTone].badge}>
+                  후보 {regimeCandidateLabel(data.candidate_regime)}
+                </Badge>
+              )}
+            </div>
+            <p className="mt-4 text-sm font-semibold">
+              {macroEnvironmentLabel(rawEnvironment)}
             </p>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              {thesis.detail}
+              최근 압력 · {momentumDirectionLabel(pressure?.direction || legacyDirection)}
             </p>
-          </div>
-          <div className="rounded-lg bg-muted/25 p-4">
-            <p className="text-xs text-muted-foreground">현재 투자 가설 판정</p>
-            <p className={`mt-2 text-xl font-semibold ${TONE_STYLES[automaticTone].text}`}>
-              {regimeLevelLabel(data.automatic_regime)}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              즉시 계산{" "}
-              <span className={TONE_STYLES[candidateTone].text}>
-                {regimeCandidateLabel(data.candidate_regime)}
-              </span>{" "}
-              · 자동 매매 아님
-            </p>
-          </div>
-          <div className="rounded-lg bg-muted/25 p-4">
-            <p className="text-xs text-muted-foreground">현재 경제상태</p>
-            <p className="mt-2 text-xl font-semibold">
-              {macroEnvironmentLabel(
-                data.macro_quadrant.environment_point?.label ||
-                  data.macro_quadrant.environment_label,
-              )}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              점=현재 수준 · 화살표=최근 상대 방향
-            </p>
-          </div>
-          <div className="rounded-lg bg-muted/25 p-4">
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">{environment}</p>
+          </section>
+
+          <section className="border-t border-border/80 bg-card p-5 sm:p-6 lg:border-l lg:border-t-0" data-current-summary="ai">
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <span>자료 상태</span>
-              <InfoTip label="핵심지표 사용 가능 비율">
-                등록된 핵심지표 중 현재 계산에 사용할 수 있고 허용된 최신성
-                범위 안에 있는 비율입니다. 예측 정확도나 빈티지 완결도는 아닙니다.
+              <span>AI 인프라 가설</span>
+              <InfoTip label="AI 인프라 가설 판단 범위">
+                4사 전체 현금 CAPEX 프록시와 광의 DRAM 수급을 핵심축으로 보고,
+                HBM은 서버 DRAM·수출·공시로 간접 확인합니다. 거시 레짐과는 별도입니다.
               </InfoTip>
             </div>
-            <p className={`mt-2 text-xl font-semibold ${TONE_STYLES[qualityTone].text}`}>
-              {dataQualityLabel(data.data_quality.status)}
+            <p className={`mt-3 text-lg font-semibold leading-7 ${TONE_STYLES[thesis.tone].text}`}>
+              {thesis.label}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              미국 판정입력 {macroCoverage.usable}/{macroCoverage.total}
-            </p>
-          </div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{thesis.detail}</p>
+            <div className="mt-4 rounded-lg bg-muted/25 px-3 py-3">
+              <p className="text-[11px] text-muted-foreground">4사 전체 현금 CAPEX 프록시</p>
+              <p className="mt-1 text-sm font-semibold tabular-nums">
+                {billions(aggregate?.latest_value_billion)} · YoY {signed(aggregate?.yoy)}%
+              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {breadth?.positive_count ?? 0}/{breadth?.expected_count ?? data.ai_capex.companies?.length ?? 0}개사 증가 · 기준 {data.ai_capex.decision_as_of || aggregate?.latest_period || "미수집"}
+              </p>
+            </div>
+          </section>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 border-t pt-4 text-xs text-muted-foreground">
+          <span>
+            자료 <strong className={TONE_STYLES[qualityTone].text}>{dataQualityLabel(data.data_quality.status)}</strong>
+          </span>
+          <span>판정입력 {macroCoverage.usable}/{macroCoverage.total}</span>
+          <span>핵심 관측 최신 {data.data_quality.observation_range?.to || "-"}</span>
+          <span>계산 {data.evaluated_at ? new Date(data.evaluated_at).toLocaleString("ko-KR") : "-"}</span>
         </div>
         {data.review_acknowledged && (
           <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">
@@ -287,27 +339,47 @@ function DecisionHeader({ data }: { data: RegimeCurrent }) {
   );
 }
 
-function ChangeInbox({ data }: { data: RegimeCurrent }) {
+export function ChangeInbox({ data }: { data: RegimeCurrent }) {
+  const lifecycleLabel = (lifecycle?: RegimeCurrent["triggers"][number]["lifecycle"]) =>
+    lifecycle === "new"
+      ? "새로 활성"
+      : lifecycle === "worsened"
+        ? "심각도 상승"
+        : lifecycle === "acknowledged"
+          ? "상태 기록에서 확인"
+          : "계속 활성";
   const items = [
     ...data.triggers.map((trigger) => ({
       key: trigger.rule_id,
-      label: trigger.severity === "critical" ? "즉시 점검 기준" : "점검 기준 충족",
+      label:
+        trigger.severity === "critical"
+          ? "즉시 상세점검 사유"
+          : data.review_urgency === "required" && trigger.severity === "high"
+            ? "상세점검 사유"
+            : trigger.severity === "high"
+              ? "활성 위험 신호"
+              : "관찰 신호",
       text: plainLanguageStateText(trigger.summary),
+      meta: lifecycleLabel(trigger.lifecycle),
       tone:
         trigger.severity === "critical"
           ? ("destructive" as const)
-          : ("warning" as const),
+          : trigger.severity === "high"
+            ? ("warning" as const)
+            : ("neutral" as const),
     })),
     ...(data.changes_since_snapshot || []).map((text, index) => ({
       key: `change-${index}`,
       label: "상태 변화",
       text: plainLanguageStateText(text),
+      meta: "마지막 상태 기록 이후",
       tone: "info" as const,
     })),
     ...(data.thesis_changes_since_snapshot || []).map((text, index) => ({
       key: `thesis-change-${index}`,
       label: "AI 가설 변화",
       text: plainLanguageStateText(text),
+      meta: "마지막 상태 기록 이후",
       tone: "info" as const,
     })),
     ...(data.data_quality.status !== "충분"
@@ -315,15 +387,10 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
           key: `quality-${index}`,
           label: "핵심자료 부족",
           text,
+          meta: "자동 판정 범위 제한",
           tone: "warning" as const,
         }))
       : []),
-    ...(data.data_quality.auxiliary_stale || []).map((item) => ({
-      key: `aux-stale-${item.id}`,
-      label: "보조자료 갱신 필요",
-      text: `${item.name}: 최신 관측 ${item.observation_date || "미확인"}`,
-      tone: "warning" as const,
-    })),
   ];
   const visible = items.slice(0, 5);
   const remaining = items.slice(5);
@@ -331,19 +398,24 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center gap-1">
-          <CardTitle>현재 점검 항목</CardTitle>
-          <InfoTip label="현재 점검 항목 구성">
-            규칙상 점검 기준을 충족한 신호, 마지막 공식 상태 기록 이후의 판정
-            변화, 현재 데이터 공백을 함께 표시합니다. ‘점검 기준 충족’은 현재
-            조건이 기준선을 넘었다는 뜻이며 반드시 새로 발생한 신호라는 뜻은
-            아닙니다.
+          <CardTitle>현재 판단 근거</CardTitle>
+          <InfoTip label="현재 판단 근거 구성">
+            현재 활성화된 위험 신호와 마지막 공식 상태 기록 이후의 판정 변화를
+            보여줍니다. 개별 신호 하나가 활성됐다고 곧바로 상세점검을 실행하는
+            것은 아니며, 실제 행동은 페이지 최상단의 포트폴리오 점검 판단을
+            따릅니다.
           </InfoTip>
         </div>
         <p className="text-sm text-muted-foreground">
-          거시 점검 기준 · AI 가설 변화 · 마지막 기록 이후 데이터 공백
+          활성 위험 신호 · AI 가설 변화 · 마지막 기록 이후 변화
         </p>
       </CardHeader>
       <CardContent>
+        {!data.previous_snapshot && (
+          <p className="mb-4 rounded-lg border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            비교할 이전 기록이 없습니다. 현재 상태를 처음 기록한 뒤부터 변화를 비교합니다.
+          </p>
+        )}
         {items.length ? (
           <ul className="divide-y">
             {visible.map((item) => (
@@ -357,7 +429,10 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
                 >
                   {item.label}
                 </Badge>
-                <p className="text-sm leading-5">{item.text}</p>
+                <div className="min-w-0">
+                  <p className="text-sm leading-5">{item.text}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{item.meta}</p>
+                </div>
               </li>
             ))}
             {remaining.length > 0 && (
@@ -375,7 +450,10 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
                         >
                           {item.label}
                         </Badge>
-                        <p className="text-sm leading-5">{item.text}</p>
+                        <div className="min-w-0">
+                          <p className="text-sm leading-5">{item.text}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{item.meta}</p>
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -385,11 +463,61 @@ function ChangeInbox({ data }: { data: RegimeCurrent }) {
           </ul>
         ) : (
           <p className="text-sm text-muted-foreground">
-            현재 충족된 점검 기준, 영역 변화 또는 주요 데이터 공백이 없습니다.
+            현재 활성 위험 신호나 마지막 상태 기록 이후의 주요 변화가 없습니다.
           </p>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+export function DataConnectionStatus({ data }: { data: RegimeCurrent }) {
+  const staleReferences = data.data_quality.auxiliary_stale || [];
+  if (!staleReferences.length) return null;
+  return (
+    <details className="group rounded-lg border bg-card/50">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 [&::-webkit-details-marker]:hidden">
+        <div className="flex min-w-0 items-start gap-3">
+          <Database className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1">
+              <p className="text-sm font-medium">판정 미사용 참고자료</p>
+              <InfoTip label="판정 미사용 참고자료의 범위">
+                자동 레짐 계산에는 쓰지 않지만 상세 지표 화면에서 참고할 수 있는
+                자료입니다. 오래됐다는 표시는 프로그램을 수정하라는 뜻이 아니며
+                상단의 핵심자료 상태와도 구분됩니다.
+              </InfoTip>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              자동 판정에 쓰지 않는 참고자료 {staleReferences.length}건의 기준일이 오래됐습니다.
+            </p>
+          </div>
+        </div>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="border-t px-5 py-4">
+        <ul className="divide-y">
+          {staleReferences.map((item) => (
+            <li key={item.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium">{item.name}</p>
+                  <Badge variant="neutral">참고자료 오래됨</Badge>
+                  <Badge variant="outline">자동 레짐 판정 미사용</Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {item.source?.toUpperCase() || "출처 미확인"} · 최신 관측 {item.observation_date || "미확인"}
+                </p>
+              </div>
+              <p className="shrink-0 text-xs text-muted-foreground">
+                {item.age_days != null ? `${item.age_days}일 경과` : "경과일 미확인"}
+                {item.max_age_days != null ? ` · 표시 기준 ${item.max_age_days}일` : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
   );
 }
 
@@ -400,8 +528,35 @@ export function UpcomingEvents({ data }: { data: RegimeCurrent }) {
     rates: "금리",
   };
   const feed = data.feed_health?.events;
-  const degraded =
-    feed && ["failed", "partial", "configuration_required"].includes(feed.status);
+  const firstDate = data.upcoming_events[0]?.scheduled_date || data.upcoming_events[0]?.scheduled_at?.slice(0, 10);
+  const nearestEvents = data.upcoming_events.filter(
+    (event) => (event.scheduled_date || event.scheduled_at?.slice(0, 10)) === firstDate,
+  );
+  const laterEvents = data.upcoming_events.filter(
+    (event) => (event.scheduled_date || event.scheduled_at?.slice(0, 10)) !== firstDate,
+  );
+  const eventCard = (event: RegimeCurrent["upcoming_events"][number]) => {
+    const schedule = formatRegimeEventSchedule(event);
+    return (
+      <a
+        key={event.id}
+        href={event.source_url}
+        target="_blank"
+        rel="noreferrer"
+        className="rounded-lg border bg-muted/20 p-4 transition-colors hover:border-primary/40"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <p className="font-medium">{event.event_type}</p>
+          <Badge variant="neutral">{event.source}</Badge>
+        </div>
+        <p className="mt-2 text-sm text-primary">{schedule.primary}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{schedule.secondary}</p>
+        <p className="mt-3 text-xs text-muted-foreground">
+          {event.affected_domains.map((item) => domainName[item] || item).join(" · ")}
+        </p>
+      </a>
+    );
+  };
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -409,52 +564,41 @@ export function UpcomingEvents({ data }: { data: RegimeCurrent }) {
           <CalendarClock className="h-5 w-5 text-primary" />
           <CardTitle>다음 미국 주요 발표</CardTitle>
           <InfoTip label="발표 일정 출처">
-            세인트루이스 연은 FRED가 제공하는 미래 발표일을 사용합니다. API가
-            시각을 제공하지 않은 일정에는 임의의 시간을 붙이지 않습니다. 발표
-            직후 새로고침하면 관련 지표와 판정을 다시 계산합니다.
+            CPI·고용·GDP·PCE 등은 FRED 발표일을, FOMC 금리결정은 연준의 공식
+            회의 일정을 사용합니다. 원본이 시각을 제공하지 않으면 임의의 시간을
+            붙이지 않으며 발표 직후 새로고침하면 관련 판정을 다시 계산합니다.
           </InfoTip>
+          {data.upcoming_events.length > 0 && (
+            <Badge variant="outline" className="ml-auto">향후 {data.upcoming_events.length}건</Badge>
+          )}
         </div>
+        {feed?.last_success_at && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            일정 갱신 {new Date(feed.last_success_at).toLocaleString("ko-KR")}
+          </p>
+        )}
       </CardHeader>
       <CardContent className="space-y-3">
-        {degraded && (
-          <div className="rounded-lg border border-amber-400/25 bg-amber-400/[0.06] p-4">
-            <p className="text-sm font-medium text-amber-200">
-              {feed.status === "partial" ? "일부 일정만 갱신됨" : "발표 일정 갱신 지연"}
-            </p>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              {feed.status === "partial"
-                ? "확인된 일정과 마지막 정상 캐시를 함께 표시합니다."
-                : "마지막으로 정상 수집한 일정이 있으면 계속 표시합니다."}
-            </p>
-          </div>
-        )}
         {data.upcoming_events.length ? (
-          <div className="grid gap-3 md:grid-cols-2">
-            {data.upcoming_events.slice(0, 2).map((event) => {
-              const schedule = formatRegimeEventSchedule(event);
-              return (
-                <a
-                  key={event.id}
-                  href={event.source_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-lg border bg-muted/20 p-4 transition-colors hover:border-primary/40"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="font-medium">{event.event_type}</p>
-                    <Badge variant="neutral">{event.source}</Badge>
-                  </div>
-                  <p className="mt-2 text-sm text-primary">{schedule.primary}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {schedule.secondary}
-                  </p>
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    {event.affected_domains.map((item) => domainName[item] || item).join(" · ")}
-                  </p>
-                </a>
-              );
-            })}
-          </div>
+          <>
+            <div>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                가장 가까운 발표일 · {nearestEvents.length}건
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">{nearestEvents.map(eventCard)}</div>
+            </div>
+            {laterEvents.length > 0 && (
+              <details className="group rounded-lg border bg-muted/10">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                  <span>이후 일정 {laterEvents.length}건 전체 보기</span>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="grid gap-3 border-t p-4 md:grid-cols-2">
+                  {laterEvents.map(eventCard)}
+                </div>
+              </details>
+            )}
+          </>
         ) : (
           <p className="text-sm text-muted-foreground">
             {feed?.status === "success"
@@ -585,6 +729,14 @@ export function FinancialTransmission({ data }: { data: RegimeCurrent }) {
   const curve = conditions?.yield_curve;
   const duration = conditions?.duration_stress;
   const duration20 = duration?.change_20d?.changes;
+  const durationLevelTone: SemanticTone =
+    duration?.level_label === "장기채 부담 높음"
+      ? "negative"
+      : duration?.level_label === "장기채 부담 관찰"
+        ? "caution"
+        : duration?.level_label === "장기채 부담 낮음"
+          ? "positive"
+          : "neutral";
   const cards = [
     [
       "정책 긴축",
@@ -617,16 +769,16 @@ export function FinancialTransmission({ data }: { data: RegimeCurrent }) {
       financialConditionTone(conditions?.recent_shock?.label),
     ],
     [
-      "30년물 장기채 부담",
-      durationStressLabel(duration?.label),
+      "30년물 현재 부담·추가 충격",
+      duration?.level_label || "판정 불가",
       duration
         ? `30Y 명목 ${duration.nominal_30y?.toFixed(2) ?? "-"}% / 실질 ${duration.real_30y?.toFixed(2) ?? "-"}% / 30Y-10Y ${signed(duration.spread_30y10y, 2)}%p`
         : "30년 명목·실질금리 자료 부족",
       duration20
-        ? `20관측일: 명목 ${signed(duration20.us30y, 2)}%p / 실질 ${signed(duration20.tips30y, 2)}%p · ${durationStressDriverLabel(duration?.driver)} · 최근 5회 중 ${duration?.confirmation_count_5d ?? 0}회 확인`
+        ? `최근 20관측일: ${durationStressLabel(duration?.recent_label || duration?.label)} · 명목 ${signed(duration20.us30y, 2)}%p / 실질 ${signed(duration20.tips30y, 2)}%p · 최근 3회 중 ${duration?.recent_confirmation_count_3d ?? 0}회 · ${durationStressDriverLabel(duration?.driver)} · 기준 ${duration?.change_20d?.start_date || "-"}→${duration?.as_of_date || duration?.change_20d?.end_date || "-"}`
         : "장기 구간 변화자료 부족",
       countRateRules("duration"),
-      financialConditionTone(duration?.label),
+      durationLevelTone,
     ],
     [
       "수익률곡선 선행위험",
@@ -649,6 +801,40 @@ export function FinancialTransmission({ data }: { data: RegimeCurrent }) {
       financialConditionTone(conditions?.credit.label),
     ],
   ] as Array<[string, string, string, string, number, SemanticTone]>;
+  const tonePriority: Record<SemanticTone, number> = {
+    negative: 5,
+    caution: 4,
+    neutral: 2,
+    info: 2,
+    positive: 1,
+  };
+  const importantCards = cards
+    .filter((card) => card[4] > 0 || ["negative", "caution"].includes(card[5]))
+    .sort((left, right) => right[4] - left[4] || tonePriority[right[5]] - tonePriority[left[5]]);
+  const primaryCards = importantCards.length ? importantCards : cards.slice(0, 3);
+  const secondaryCards = cards.filter((card) => !primaryCards.includes(card));
+  const renderCards = (items: typeof cards) => items.map((card) => (
+    <div
+      key={card[0]}
+      className={`min-w-0 rounded-lg border bg-muted/15 p-5 ${TONE_STYLES[card[5]].panel}`}
+      data-financial-card={card[0]}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1">
+            <p className="text-xs font-medium text-muted-foreground">{card[0]}</p>
+            <InfoTip label={`${card[0]} 설명`} className="h-4 w-4">
+              {FINANCIAL_TRANSMISSION_HELP[card[0]]}
+            </InfoTip>
+          </div>
+          <p className={`mt-2 min-h-12 text-lg font-semibold leading-6 ${TONE_STYLES[card[5]].text}`}>{card[1]}</p>
+        </div>
+        {card[4] > 0 && <Badge className="max-w-[92px] shrink-0 whitespace-normal text-center leading-4" variant="danger">점검 {card[4]}</Badge>}
+      </div>
+      <p className="mt-4 text-sm leading-6">{card[2]}</p>
+      <p className="mt-4 border-t pt-3 text-xs leading-5 text-muted-foreground">{card[3]}</p>
+    </div>
+  ));
   return (
     <Card>
       <CardHeader>
@@ -662,31 +848,21 @@ export function FinancialTransmission({ data }: { data: RegimeCurrent }) {
           </InfoTip>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-          {cards.map((card) => (
-            <div
-              key={card[0]}
-              className={`min-w-0 rounded-lg border bg-muted/15 p-5 ${TONE_STYLES[card[5]].panel}`}
-              data-financial-card={card[0]}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1">
-                    <p className="text-xs font-medium text-muted-foreground">{card[0]}</p>
-                    <InfoTip label={`${card[0]} 설명`} className="h-4 w-4">
-                      {FINANCIAL_TRANSMISSION_HELP[card[0]]}
-                    </InfoTip>
-                  </div>
-                  <p className={`mt-2 min-h-12 text-lg font-semibold leading-6 ${TONE_STYLES[card[5]].text}`}>{card[1]}</p>
-                </div>
-                {card[4] > 0 && <Badge className="max-w-[92px] shrink-0 whitespace-normal text-center leading-4" variant="danger">점검 {card[4]}</Badge>}
-              </div>
-              <p className="mt-4 text-sm leading-6">{card[2]}</p>
-              <p className="mt-4 border-t pt-3 text-xs leading-5 text-muted-foreground">{card[3]}</p>
-            </div>
-          ))}
+          {renderCards(primaryCards)}
         </div>
+        {secondaryCards.length > 0 && (
+          <details className="group rounded-lg border bg-muted/10">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+              <span>그 밖의 전달경로 {secondaryCards.length}개</span>
+              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="grid gap-4 border-t p-4 lg:grid-cols-2 xl:grid-cols-3">
+              {renderCards(secondaryCards)}
+            </div>
+          </details>
+        )}
       </CardContent>
     </Card>
   );
@@ -741,7 +917,13 @@ function ThesisPipelineStep({
         </div>
         <span className="mt-3 text-sm font-semibold">{title}</span>
         <p className="mt-2 flex-1 text-xs leading-5 text-muted-foreground">{detail}</p>
-        <p className="mt-3 text-[10px] text-muted-foreground">기준 {asOf || "미수집"}</p>
+        <span className="mt-3 flex w-full items-center justify-between gap-2 text-[10px] text-muted-foreground">
+          <span>기준 {asOf || "미수집"}</span>
+          <span className="inline-flex items-center gap-1 text-primary">
+            {active ? "상세 닫기" : "상세 보기"}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${active ? "rotate-180" : ""}`} />
+          </span>
+        </span>
       </button>
       {step < 4 && (
         <ArrowRight
@@ -866,6 +1048,8 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
     "capex" | "dram" | "confirmation" | "power" | null
   >(null);
   const ai = data.ai_capex;
+  const aggregate = ai.aggregate;
+  const breadth = ai.breadth;
   const memory = data.memory_cycle;
   const semiconductor = data.semiconductor_cycle;
   const power = data.power_cycle;
@@ -892,16 +1076,16 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
     .filter(Boolean)
     .sort();
   const observationScopes = [
-    { name: "하이퍼스케일러 총 CAPEX", status: ai.coverage ? "연결" : "제한", role: "AI 투자강도" },
-    { name: "공개 DRAM 가격 표본", status: memory.state === "판정 불가" ? "제한" : "연결", role: "DRAM 주 판정 프록시" },
+    { name: "하이퍼스케일러 총 CAPEX", status: aggregate?.complete && !aggregate.is_stale ? "연결" : "제한", role: "AI 투자강도" },
+    { name: "공개 DRAM 가격 표본", status: memory.series.some((item) => item.market_type === "contract" && !item.is_stale) ? "연결" : "제한", role: "DRAM 주 판정 프록시" },
     { name: "한국 DRAM 수출", status: semiconductor.demand.state === "판정 불가" ? "제한" : "연결", role: "DRAM 수요 확인" },
     { name: "공개 NAND 가격 표본", status: memory.nand_state === "판정 불가" ? "제한" : "연결", role: "메모리 보조축" },
     { name: "한국 반도체 완제품 재고", status: semiconductor.supply.state === "판정 불가" ? "제한" : "연결", role: "광의 보조지표" },
-    { name: "국내 2사 실적", status: semiconductor.company_confirmation.state === "판정 불가" ? "제한" : "연결", role: "기업 보조축" },
-    { name: "미국 전력 수요", status: power.state === "판정 불가" ? "제한" : "연결", role: "후속 인프라 맥락" },
+    { name: "국내 2사 실적", status: semiconductor.company_confirmation.companies.some((item) => !item.is_stale) ? "연결" : "제한", role: "기업 보조축" },
+    { name: "미국 상업용 전력판매", status: power.state !== "판정 불가" && !power.is_stale ? "연결" : "제한", role: "후행 인프라 맥락" },
     {
       name: "HBM·서버 DRAM",
-      status: hbmProxy.state === "판정 제한" ? "제한" : "간접 관측",
+      status: hbmProxy.state === "판정 제한" || rdimm.is_stale ? "제한" : "간접 관측",
       role: "RDIMM·수출 구조 판정 + 공시 파생 맥락",
     },
   ];
@@ -921,9 +1105,10 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
     ]),
   );
   const displayedConflicts = thesisConflicts.map(plainLanguageStateText);
-  const aiIncreasingCount = ai.companies.filter(
-    (item) => (item.yoy || 0) > 0,
+  const aiIncreasingCount = breadth?.positive_count ?? ai.companies.filter(
+    (item) => !item.is_stale && item.yoy != null && item.yoy > 0,
   ).length;
+  const aiExpectedCount = breadth?.expected_count ?? ai.companies.length;
   const confirmationAsOf = [
     companyAsOf,
     semiconductor.supply.metrics.inventory.observation_date,
@@ -972,16 +1157,18 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
               투자 확대가 메모리 병목과 실적 확인을 거쳐 전력 수요로 이어지는지를 단계별로 봅니다.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 xl:gap-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 xl:gap-4">
             <ThesisPipelineStep
               id="capex"
               step={1}
-              title="하이퍼스케일러 투자"
-              role="AI 투자"
+              title="4사 전체 현금 CAPEX"
+              role="AI 투자 프록시"
               state={aiCapexStateLabel(ai.state)}
-              detail={`전년 대비 CAPEX 증가 기업 ${aiIncreasingCount}/${ai.companies.length}`}
+              detail={aggregate?.complete
+                ? `${billions(aggregate.latest_value_billion)} · YoY ${signed(aggregate.yoy)}% · ${aiIncreasingCount}/${aiExpectedCount}개사 증가`
+                : ai.reason}
               tone={aiCapexTone(ai.state)}
-              asOf={ai.as_of_range?.to}
+              asOf={ai.decision_as_of || aggregate?.latest_period}
               active={activeStage === "capex"}
               panelId="ai-thesis-capex-panel"
               onToggle={() => toggleStage("capex")}
@@ -989,12 +1176,12 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
             <ThesisPipelineStep
               id="dram"
               step={2}
-              title="DRAM·HBM 병목"
+              title="광의 DRAM 수급"
               role="메모리 수급"
               state={dramBottleneckStateLabel(semiconductor.dram_bottleneck.state)}
-              detail={`${memoryPriceStateLabel(memory.state)} · ${hbmProxyStateLabel(hbmProxy.state)}`}
+              detail={`${memoryPriceStateLabel(memory.state)} · ${hbmProxyStateLabel(hbmProxy.state)}(간접 확인)`}
               tone={dramTone}
-              asOf={semiconductor.demand.metrics.dram.observation_date || memoryDates.at(-1)}
+              asOf={semiconductor.dram_bottleneck.decision_as_of_date || memory.decision_as_of || memoryDates.at(-1)}
               active={activeStage === "dram"}
               panelId="ai-thesis-dram-panel"
               onToggle={() => toggleStage("dram")}
@@ -1015,12 +1202,12 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
             <ThesisPipelineStep
               id="power"
               step={4}
-              title="전력 후속 수요"
-              role="후속 인프라"
+              title="상업용 전력판매"
+              role="후행 인프라 맥락"
               state={powerStateLabel(power.state)}
-              detail={`상업용 판매 ${signed(power.metrics.commercial_sales.yoy_3m_avg)}% · 3개월 평균 YoY`}
+              detail={`${signed(power.metrics.commercial_sales.yoy_3m_avg)}% · 3개월 평균 YoY · 데이터센터 전용 아님`}
               tone={powerTone}
-              asOf={power.metrics.total_sales.observation_date}
+              asOf={power.decision_as_of_date || power.metrics.commercial_sales.observation_date}
               active={activeStage === "power"}
               panelId="ai-thesis-power-panel"
               onToggle={() => toggleStage("power")}
@@ -1053,18 +1240,41 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
           </div>
           <ThesisEvidenceCard
             id="capex-detail"
-            title="하이퍼스케일러 CAPEX"
+            title="하이퍼스케일러 4사 전체 현금 CAPEX"
             role="핵심축 · 투자 강도"
             state={aiCapexStateLabel(ai.state)}
             tone={aiCapexTone(ai.state)}
             detail={ai.reason}
-            asOf={ai.as_of_range?.to}
+            asOf={ai.decision_as_of || aggregate?.latest_period}
             className="w-full"
             help={<>SEC 공시의 기업 전체 현금 CAPEX를 회사별 회계분기로 비교합니다. AI 전용 금액은 분리되지 않으므로 투자 강도의 프록시입니다. {ai.methodology}</>}
           >
-            <p className="text-lg font-semibold">
-              증가 기업 {aiIncreasingCount}/{ai.companies.length}
-            </p>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <ProxyMetricTile
+                label="동일 분기 합계"
+                value={billions(aggregate?.latest_value_billion)}
+                detail={`${aggregate?.coverage_count ?? 0}/${aggregate?.expected_count ?? aiExpectedCount}개사 완전 집계`}
+                tone={aiCapexTone(ai.state)}
+              />
+              <ProxyMetricTile
+                label="직전 분기 대비"
+                value={`${signed(aggregate?.qoq)}%`}
+                detail="같은 4사 합계 QoQ"
+                tone={aiCapexDeltaTone(aggregate?.qoq, Boolean(aggregate?.complete && !aggregate?.is_stale))}
+              />
+              <ProxyMetricTile
+                label="전년 동기 대비"
+                value={`${signed(aggregate?.yoy)}%`}
+                detail={`증가 기업 ${aiIncreasingCount}/${aiExpectedCount}`}
+                tone={aiCapexDeltaTone(aggregate?.yoy, Boolean(aggregate?.complete && !aggregate?.is_stale))}
+              />
+              <ProxyMetricTile
+                label="최근 4분기 합계"
+                value={billions(aggregate?.ttm_billion)}
+                detail={`TTM YoY ${signed(aggregate?.ttm_yoy)}%`}
+                tone={aiCapexDeltaTone(aggregate?.ttm_yoy, Boolean(aggregate?.complete && !aggregate?.is_stale))}
+              />
+            </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
               {ai.companies.map((company) => (
                 <div key={company.id} className="rounded-md bg-background/35 px-3 py-2 text-xs">
@@ -1084,9 +1294,9 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
           hidden={activeStage !== "dram"}
         >
           <div className="mb-3">
-            <h3 id="ai-thesis-dram-title" className="text-sm font-semibold">메모리 병목 상세</h3>
+            <h3 id="ai-thesis-dram-title" className="text-sm font-semibold">광의 DRAM 수급과 HBM 간접 확인</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              공개 DRAM 가격과 HBM·서버 DRAM 간접계측을 함께 확인합니다.
+              공개 DRAM 가격을 주축으로 보고, 직접 HBM 자료가 없어 서버 DRAM·수출·공시를 별도 확인축으로 사용합니다.
             </p>
           </div>
           <div className="grid items-start gap-4 xl:grid-cols-12">
@@ -1098,7 +1308,7 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
             state={dramBottleneckStateLabel(semiconductor.dram_bottleneck.state)}
             tone={dramTone}
             detail={semiconductor.dram_bottleneck.reason}
-            asOf={semiconductor.demand.metrics.dram.observation_date || memoryDates.at(-1)}
+            asOf={semiconductor.dram_bottleneck.decision_as_of_date || memory.decision_as_of || memoryDates.at(-1)}
             className="xl:col-span-5"
             help={<>{semiconductor.dram_bottleneck.methodology} 공개 가격은 DDR5 모듈 표본이며 HBM·Server DRAM을 직접 대표하지 않습니다. 수출액에는 가격과 물량 효과가 함께 포함됩니다.</>}
           >
@@ -1335,21 +1545,21 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
           hidden={activeStage !== "power"}
         >
           <div className="mb-3">
-            <h3 id="ai-thesis-power-title" className="text-sm font-semibold">후속 인프라</h3>
+            <h3 id="ai-thesis-power-title" className="text-sm font-semibold">후행 전력 수요 맥락</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              전력 수요는 AI·DRAM 판정에 합산하지 않고 병목이 후속 산업으로 확장되는지 봅니다.
+              EIA 상업용 전력판매는 데이터센터 전용 수요가 아니며, AI·DRAM 판정 뒤에 확인하는 후행 맥락입니다.
             </p>
           </div>
           <ThesisEvidenceCard
             id="power-detail"
-            title="미국 전력 수요"
-            role="후속 인프라 맥락"
+            title="미국 상업용 전력판매"
+            role="후행 인프라 맥락 · 데이터센터 전용 아님"
             state={powerStateLabel(power.state)}
             tone={powerTone}
             detail={power.reason}
-            asOf={power.metrics.total_sales.observation_date}
+            asOf={power.decision_as_of_date || power.metrics.commercial_sales.observation_date}
             className="w-full"
-            help={<>{power.methodology} {power.limitations} 전력 수요는 AI 투자와 별개의 맥락 지표이며 데이터센터 계통 병목을 직접 판정하지 않습니다.</>}
+            help={<>{power.methodology} {power.limitations} 상업용 판매에는 사무실·상점 등도 포함됩니다. 데이터센터 계통 병목이나 AI 전력수요를 직접 판정하지 않습니다.</>}
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-md bg-background/35 px-3 py-3">
@@ -1458,7 +1668,9 @@ function SnapshotPanel(props: CurrentOverviewProps) {
               현재 판정과 계산 입력을 기록합니다.
             </p>
           </div>
-          <span className="text-sm text-primary">기록 열기</span>
+          <span className={props.snapshotSavedAt ? "text-sm text-success" : "text-sm text-primary"}>
+            {props.snapshotSavedAt ? "기록 완료" : "기록 열기"}
+          </span>
         </div>
       </summary>
       <div className="border-t p-6">
@@ -1491,6 +1703,12 @@ function SnapshotPanel(props: CurrentOverviewProps) {
             </p>
           </div>
         </div>
+        <p className="mt-4 text-xs text-muted-foreground">
+          저장하면 현재 활성 신호를 확인 처리하며, 같은 신호는 변화가 생길 때 다시 알립니다.
+          {props.snapshotSavedAt
+            ? ` · 최근 저장 ${new Date(props.snapshotSavedAt).toLocaleString("ko-KR")}`
+            : ""}
+        </p>
         <div className="mt-5 grid gap-3 lg:grid-cols-[260px_1fr_auto]">
           <select
             className="h-10 rounded-md border bg-background px-3 text-sm"
@@ -1527,10 +1745,11 @@ export function RegimeCurrentOverview(props: CurrentOverviewProps) {
         <MacroQuadrant data={props.data.macro_quadrant} />
         <EvidencePanel data={props.data} />
       </div>
-      <AiThesisMonitor data={props.data} />
       <FinancialTransmission data={props.data} />
+      <AiThesisMonitor data={props.data} />
       <UpcomingEvents data={props.data} />
       <SnapshotPanel {...props} />
+      <DataConnectionStatus data={props.data} />
     </div>
   );
 }

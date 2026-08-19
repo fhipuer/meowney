@@ -36,6 +36,15 @@ describe('MarketIndicators cached market view', () => {
         signal('market_wti', 'WTI 유가', 78, false),
         signal('market_copper', '구리 가격', 9900, false),
       ]}
+      triggers={[{
+        rule_id: 'market.market_nasdaq.drawdown',
+        rule_version: 'test',
+        domain: 'market',
+        severity: 'high',
+        evidence_cluster: 'market_price',
+        summary: 'NASDAQ 급락',
+        evidence: {},
+      }]}
     />)
 
     expect(html).toContain('aria-label="시장 환경 지표 사용법"')
@@ -45,5 +54,7 @@ describe('MarketIndicators cached market view', () => {
     expect(html).toContain('aria-label="위험자산 상대 흐름 계산 방식"')
     expect(html).not.toContain('지수 간 절대 수준 비교가 아닙니다')
     expect(html).toContain('경보 전용')
+    expect(html).toContain('위험회피 경보')
+    expect(html).toContain('aria-label="시장 환경 지표 사용법"')
   })
 })

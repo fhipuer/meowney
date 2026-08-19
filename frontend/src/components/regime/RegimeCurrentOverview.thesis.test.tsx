@@ -215,11 +215,11 @@ describe("AiThesisMonitor", () => {
     const html = renderToStaticMarkup(<AiThesisMonitor data={data} />);
 
     expect(html).toContain("AI 인프라 투자 가설");
-    expect(html).toContain("하이퍼스케일러 CAPEX");
+    expect(html).toContain("하이퍼스케일러 4사 전체 현금 CAPEX");
     expect(html).toContain("DRAM 수급 핵심축");
     expect(html).toContain("한국 반도체 완제품 재고");
     expect(html).toContain("국내 2사 실적 확인");
-    expect(html).toContain("미국 전력 수요");
+    expect(html).toContain("미국 상업용 전력판매");
     expect(html).toContain("서로 엇갈리는 근거");
     expect(html).toContain("재고 부담");
     expect(html).toContain("90백분위");
@@ -234,10 +234,10 @@ describe("AiThesisMonitor", () => {
     expect(html).toContain("재고 절대액은 증가했지만");
     expect(html).toContain("판정 미사용");
     expect(html).toContain("서로 엇갈리는 근거");
-    expect(html).toContain("전력 후속 수요");
+    expect(html).toContain("후행 전력 수요 맥락");
     expect(html).toContain("가설 전달 단계");
     expect(html).toContain("AI 투자 상세");
-    expect(html).toContain("메모리 병목 상세");
+    expect(html).toContain("광의 DRAM 수급과 HBM 간접 확인");
     expect(html).toContain("실적·재고 확인 상세");
     expect(html).toContain("보조 지표·원자료");
     expect(html).toContain('data-thesis-evidence="hbm"');

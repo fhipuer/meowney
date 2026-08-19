@@ -26,7 +26,7 @@ describe("rate regime presentation", () => {
             label: "제한적",
             driver: "현재 제약 수준",
             coverage: 1,
-            version: "2026-08-rates-v3",
+            version: "2026-08-rates-v4",
           },
           policy: {
             label: "다소 제한적",
@@ -47,6 +47,8 @@ describe("rate regime presentation", () => {
             score: 35,
             bounded_shock_floor: 35,
             label: "장기 듀레이션 부담 경계",
+            recent_label: "장기 듀레이션 부담 경계",
+            level_label: "장기채 부담 높음",
             driver: "30Y 실질금리 주도",
             nominal_10y: 4.72,
             nominal_30y: 5.31,
@@ -55,6 +57,8 @@ describe("rate regime presentation", () => {
             change_20d: null,
             change_63d: null,
             confirmation_count_5d: 5,
+            recent_confirmation_count_3d: 3,
+            as_of_date: "2026-08-18",
             confirmed: true,
             persistent: false,
             role: "bounded_confirmation",
@@ -76,7 +80,8 @@ describe("rate regime presentation", () => {
 
     expect(html).toContain("1 · 현재 금리 부담");
     expect(html).toContain("2 · 최근 추가 금리 충격");
-    expect(html).toContain("3 · 30년물 장기채 부담");
+    expect(html).toContain("3 · 30년물 현재 부담과 최근 충격");
+    expect(html).toContain("장기채 부담 높음");
     expect(html).toContain("4 · 수익률곡선의 침체 선행 신호");
     expect(html).toContain("30년 실질금리 상승이 주도");
     expect(html).toContain("단기금리가 수요를 약하게 억제");

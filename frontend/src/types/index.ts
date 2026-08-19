@@ -518,6 +518,10 @@ export interface RegimeSignal {
   age_days?: number | null;
   max_age_days?: number;
   usable_for_decision?: boolean;
+  country?: "미국" | "한국" | "글로벌";
+  interpretation_lens?: "macro" | "macro_context" | "market_context";
+  tone_policy?: "higher_supportive" | "higher_adverse" | "semantic_only";
+  proxy_for?: string | null;
 }
 
 export type ReviewUrgency = "required" | "watch" | "not_needed";
@@ -530,6 +534,9 @@ export interface RegimeTrigger {
   evidence_cluster: string;
   summary: string;
   evidence: Record<string, number | string | null>;
+  lifecycle?: "new" | "worsened" | "acknowledged" | "active";
+  activated_at?: string | null;
+  last_seen_at?: string | null;
 }
 
 export interface RegimeCoverageDomain {
@@ -567,12 +574,15 @@ export interface SemiconductorCycle {
   coverage: number;
   role: "corroborative";
   as_of_date: string | null;
+  decision_as_of_date?: string | null;
+  supporting_as_of_range?: { from: string | null; to: string | null };
   dram_bottleneck: {
     state: string;
     reason: string;
     coverage: number;
     confidence: "부분" | "충분";
     primary_signal: string;
+    decision_as_of_date?: string | null;
     conflicts: string[];
     methodology: string;
     limitations: string;
@@ -737,6 +747,7 @@ export interface PowerCycle {
   coverage: number;
   role: "context";
   as_of_date: string | null;
+  decision_as_of_date?: string | null;
   age_days: number | null;
   is_stale: boolean;
   metrics: Record<
@@ -818,8 +829,46 @@ export interface RegimeCurrent {
     reason: string;
     coverage: number;
     methodology: string;
+    decision_as_of?: string | null;
     as_of_range?: { from: string | null; to: string | null };
-    period_alignment?: "company_fiscal_quarter";
+    period_alignment?: "company_fiscal_quarter" | "exact_period_end";
+    aggregate?: {
+      latest_period: string | null;
+      last_complete_period: string | null;
+      latest_value: number | null;
+      latest_value_billion: number | null;
+      qoq: number | null;
+      yoy: number | null;
+      ttm: number | null;
+      ttm_billion: number | null;
+      ttm_yoy: number | null;
+      coverage_count: number;
+      expected_count: number;
+      coverage: number;
+      complete: boolean;
+      age_days: number | null;
+      is_stale: boolean;
+      history: Array<{
+        period: string;
+        value: number | null;
+        value_billion: number | null;
+        coverage_count: number;
+        expected_count: number;
+        complete: boolean;
+        qoq: number | null;
+        yoy: number | null;
+        ttm: number | null;
+        ttm_billion: number | null;
+        ttm_yoy: number | null;
+      }>;
+    };
+    breadth?: {
+      positive_count: number;
+      negative_count: number;
+      comparable_count: number;
+      expected_count: number;
+      company_yoy: number[];
+    };
     companies: Array<{
       id: string;
       name: string;
@@ -843,6 +892,7 @@ export interface RegimeCurrent {
     reason: string;
     nand_state: string;
     nand_reason: string;
+    decision_as_of?: string | null;
     source: string;
     source_url: string;
     nand_source_url: string;
@@ -919,7 +969,21 @@ export interface RegimeCurrent {
     };
     momentum_vector?: MacroPressureVector;
     pressure_vector?: MacroPressureVector;
+    recession_confirmation?: {
+      status: "confirmed" | "watch" | "leading_only" | "limited" | "clear";
+      label: string;
+      as_of_date: string | null;
+      coincident_risk_count: number;
+      methodology: string;
+      channels: Array<{
+        id: "yield_curve" | "labor" | "real_activity" | "credit";
+        name: string;
+        status: "confirmed" | "elevated" | "watch" | "leading_only" | "limited" | "clear" | "unavailable";
+        state: string;
+      }>;
+    };
     financial_conditions?: {
+      as_of_date?: string | null;
       rates?: {
         score: number | null;
         label: string;
@@ -973,6 +1037,12 @@ export interface RegimeCurrent {
         spread_30y10y: number | null;
         change_20d: LongEndRateChangeWindow | null;
         change_63d: LongEndRateChangeWindow | null;
+        as_of_date?: string | null;
+        level_label?: string;
+        recent_label?: string;
+        raw_score?: number | null;
+        recent_confirmation_count_3d?: number;
+        recent_confirmed?: boolean;
         breakeven_10y_change_20d?: number | null;
         confirmation_count_5d: number;
         confirmed: boolean;
@@ -1037,6 +1107,12 @@ export interface RegimeCurrent {
       id: string;
       name: string;
       observation_date?: string;
+      source?: string | null;
+      frequency?: string | null;
+      age_days?: number | null;
+      max_age_days?: number | null;
+      reason_code?: "reference_stale";
+      used_in_decision?: false;
     }>;
     unavailable: string[];
     scope: "us_macro_decision_inputs";

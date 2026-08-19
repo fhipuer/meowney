@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Meowney API",
     description="🐱 고양이 집사의 자산 관리 API - 냥이와 함께하는 포트폴리오 관리",
-    version="1.13.0",
+    version="1.15.0",
     lifespan=lifespan,
     docs_url="/docs" if settings.debug else None,
     redoc_url="/redoc" if settings.debug else None,

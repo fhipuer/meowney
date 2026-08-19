@@ -253,6 +253,35 @@ def test_extreme_long_end_stress_cannot_force_more_than_a_40_point_shock_floor()
     assert model["recent_shock"]["score"] == 40
 
 
+def test_long_end_recent_shock_requires_two_of_three_observations() -> None:
+    one_hit = with_long_end(
+        rates_fixture(),
+        us10y=[4.50] * 90,
+        us30y=[4.90] * 85 + [5.05] * 5,
+        tips10y=[2.30] * 90,
+        tips30y=[2.90] * 85 + [3.04] * 4 + [3.06],
+    )
+    two_hits = with_long_end(
+        rates_fixture(),
+        us10y=[4.50] * 90,
+        us30y=[4.90] * 85 + [5.05] * 5,
+        tips10y=[2.30] * 90,
+        tips30y=[2.90] * 85 + [3.04] * 3 + [3.06] * 2,
+    )
+
+    one = calculate_rate_model(one_hit)["duration_stress"]
+    two = calculate_rate_model(two_hits)["duration_stress"]
+
+    assert one["level_label"] == "장기채 부담 높음"
+    assert one["raw_score"] == 35
+    assert one["recent_confirmation_count_3d"] == 1
+    assert one["recent_confirmed"] is False
+    assert one["score"] == 0
+    assert two["recent_confirmation_count_3d"] == 2
+    assert two["recent_confirmed"] is True
+    assert two["score"] == 35
+
+
 def test_missing_optional_30y_data_does_not_reduce_primary_rate_coverage() -> None:
     model = calculate_rate_model(rates_fixture())
 

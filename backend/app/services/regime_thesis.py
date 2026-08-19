@@ -828,15 +828,22 @@ class RegimeThesisDataService:
             if item.get("observation_date") and not item.get("is_stale")
         ]
         dates += [company["latest_period"] for company in company_confirmation["companies"] if company.get("latest_period")]
+        decision_as_of = memory_cycle.get("decision_as_of")
         return {
             "state": state, "reason": reason, "coverage": lane_coverage,
             "role": "corroborative", "as_of_date": max(dates) if dates else None,
+            "decision_as_of_date": decision_as_of,
+            "supporting_as_of_range": {
+                "from": min(dates) if dates else None,
+                "to": max(dates) if dates else None,
+            },
             "dram_bottleneck": {
                 "state": dram_state,
                 "reason": dram_reason,
                 "coverage": dram_coverage,
                 "confidence": "부분",
                 "primary_signal": memory_cycle.get("state", "판정 불가"),
+                "decision_as_of_date": decision_as_of,
                 "conflicts": dram_conflicts,
                 "methodology": "공개 DDR5 계약가격을 주축으로 두고 서버 RDIMM 및 DRAM 칩·MCP·모듈 수출을 HBM·서버 수요 확인축으로 사용",
                 "limitations": "HBM·Server DRAM 계약가격·공급충족률을 직접 측정하지 않아 수급 타이트 여부는 프록시 판정",
@@ -883,6 +890,7 @@ class RegimeThesisDataService:
                 sum(metrics[key]["latest"] is not None for key in ("total_sales", "commercial_sales", "generation")) / 3
             ),
             "role": "context", "as_of_date": max(dates) if dates else None,
+            "decision_as_of_date": latest_monthly,
             "age_days": age_days, "is_stale": age_days is None or age_days > 150,
             "metrics": metrics, "source": "U.S. EIA Electricity Data", "source_url": EIA_DOC_URL,
             "fetch_status": self.repo.status("eia_power"),

@@ -15,7 +15,7 @@ from typing import Any, Callable
 from app.services.regime_rates import calculate_rate_model
 
 
-QUADRANT_VERSION = "2026-08-us-macro-q4-rates-v3"
+QUADRANT_VERSION = "2026-08-us-macro-q4-rates-v4"
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
 
 
@@ -217,6 +217,7 @@ def _financial_conditions(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
             return "판정 불가"
         return "매우 제한적" if score >= 65 else "제한적" if score >= 25 else "중립" if score >= -20 else "완화적"
     return {
+        "as_of_date": rate_model["as_of_date"],
         "rates": {
             "score": rate_model["score"], "label": rate_model["label"],
             "driver": rate_model["driver"], "coverage": rate_model["coverage"],

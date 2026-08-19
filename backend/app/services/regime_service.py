@@ -30,6 +30,7 @@ from app.services.regime_catalog import (
     display_metrics,
     display_period,
     indicator_role,
+    indicator_semantics,
 )
 from app.services.regime_fred import fetch_all_pages, history_start
 from app.services.regime_vintage import (
@@ -307,6 +308,7 @@ class RegimeService:
         observations = indicator["observations"]
         values = [float(row["value"]) for row in observations]
         role = indicator_role(indicator["id"])
+        semantics = indicator_semantics(indicator["id"])
         if not values:
             return {
                 **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "frequency", "direction")},
@@ -315,7 +317,7 @@ class RegimeService:
                 "display_metrics": [], "decision_chart": None,
                 "is_stale": False, "age_days": None,
                 "max_age_days": signal_freshness(indicator, now)["max_age_days"],
-                "usable_for_decision": False, **role,
+                "usable_for_decision": False, **role, **semantics,
             }
         p1, p3, p12 = FREQUENCY_PERIODS[indicator["frequency"]]
         latest, change1, change3, change12 = values[-1], _change(values, p1), _change(values, p3), _change(values, p12)
@@ -351,6 +353,7 @@ class RegimeService:
             "age_days": freshness["age_days"],
             "max_age_days": freshness["max_age_days"],
             **role,
+            **semantics,
         }
         signal["usable_for_decision"] = decision_usable(signal, now)
         return signal
@@ -712,6 +715,10 @@ class RegimeService:
         acknowledged = self._acknowledges(
             latest_ack, triggers, assessment_fingerprint, urgency
         )
+        evaluation["macro_quadrant"]["recession_confirmation"] = (
+            self._recession_confirmation(evaluation, triggers)
+        )
+        triggers = self._attach_trigger_lifecycle(triggers, latest_ack)
         evaluation.update({
             "rule_version": RULE_VERSION,
             "review_urgency": urgency,
@@ -793,7 +800,17 @@ class RegimeService:
             for item in signals if item["id"] in stale_ids
         ]
         auxiliary_stale = [
-            {"id": item["id"], "name": item["name"], "observation_date": item.get("observation_date")}
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "observation_date": item.get("observation_date"),
+                "source": item.get("source"),
+                "frequency": item.get("frequency"),
+                "age_days": item.get("age_days"),
+                "max_age_days": item.get("max_age_days"),
+                "reason_code": "reference_stale",
+                "used_in_decision": False,
+            }
             for item in signals
             if item.get("usage") == "display" and item.get("is_stale")
         ]
@@ -816,6 +833,145 @@ class RegimeService:
                                   "to": max(observation_dates) if observation_dates else None},
             "last_fetched_at": max(fetched_at) if fetched_at else None,
         }
+
+    @staticmethod
+    def _recession_confirmation(
+        evaluation: dict[str, Any], triggers: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Cross-check leading curve risk with coincident recession evidence."""
+
+        conditions = evaluation.get("macro_quadrant", {}).get("financial_conditions", {})
+        curve = conditions.get("yield_curve") or {}
+        curve_score = curve.get("score")
+        if curve_score is None:
+            curve_status, curve_state = "unavailable", "판정자료 부족"
+        elif curve_score >= 50:
+            curve_status, curve_state = "elevated", "선행위험 높음"
+        elif curve_score >= 25:
+            curve_status, curve_state = "watch", "선행위험 경계"
+        else:
+            curve_status, curve_state = "clear", "선행위험 낮음"
+
+        labor_triggers = [
+            item for item in triggers
+            if item.get("evidence_cluster") == "labor"
+            or item.get("rule_id", "").startswith("recession.")
+            and "yield_curve" not in item.get("rule_id", "")
+        ]
+        labor_rank = max(
+            (SEVERITY_RANK.get(item.get("severity", ""), 0) for item in labor_triggers),
+            default=0,
+        )
+        labor_status = "confirmed" if labor_rank >= 3 else "watch" if labor_rank >= 2 else "clear"
+        labor_state = (
+            "노동시장 악화 확인" if labor_status == "confirmed"
+            else "노동시장 악화 관찰" if labor_status == "watch"
+            else "현재 노동시장 악화 근거 없음"
+        )
+
+        activity_inputs = [
+            item for item in evaluation.get("signals", [])
+            if item.get("id") in {"us_gdp", "us_indpro", "us_retail"}
+            and item.get("usable_for_decision")
+        ]
+        weak_activity = [
+            item for item in activity_inputs if item.get("status") in {"둔화", "약화"}
+        ]
+        activity_status = (
+            "confirmed" if len(weak_activity) >= 2
+            else "watch" if len(weak_activity) == 1
+            else "clear" if activity_inputs
+            else "unavailable"
+        )
+        activity_state = (
+            "복수 실물지표 약화" if activity_status == "confirmed"
+            else "일부 실물지표 약화" if activity_status == "watch"
+            else "현재 실물경제 악화 근거 없음" if activity_status == "clear"
+            else "판정자료 부족"
+        )
+
+        credit = conditions.get("credit") or {}
+        credit_score = credit.get("score")
+        if credit_score is None:
+            credit_status, credit_state = "unavailable", "판정자료 부족"
+        elif credit_score >= 65:
+            credit_status, credit_state = "confirmed", "신용여건 악화 확인"
+        elif credit_score >= 25:
+            credit_status, credit_state = "watch", "신용여건 악화 관찰"
+        else:
+            credit_status, credit_state = "clear", "현재 신용여건 악화 근거 없음"
+
+        coincident_statuses = (labor_status, activity_status, credit_status)
+        coincident_count = sum(status in {"watch", "confirmed"} for status in coincident_statuses)
+        confirmed_count = sum(status == "confirmed" for status in coincident_statuses)
+        if coincident_count >= 2 or confirmed_count >= 1 and coincident_count >= 1:
+            status, label = "confirmed", "노동·실물·신용 중 복수 축 악화 확인"
+        elif coincident_count == 1:
+            status, label = "watch", "노동·실물·신용 중 1개 축 악화 관찰"
+        elif curve_status in {"watch", "elevated"}:
+            status, label = (
+                "leading_only",
+                "노동·실물·신용 3축의 악화 확인 없음 · 수익률곡선 선행 경고 관찰",
+            )
+        elif any(item == "unavailable" for item in coincident_statuses):
+            status, label = "limited", "노동·실물·신용 3축 중 일부 자료 부족"
+        else:
+            status, label = "clear", "노동·실물·신용 3축에서 악화 확인 없음"
+
+        return {
+            "status": status,
+            "label": label,
+            "as_of_date": (
+                curve.get("as_of_date")
+                or conditions.get("as_of_date")
+                or evaluation.get("macro_quadrant", {}).get("as_of_date")
+            ),
+            "coincident_risk_count": coincident_count,
+            "methodology": "수익률곡선의 선행 경고와 노동·실물경제·신용의 현재 악화 여부를 함께 확인",
+            "channels": [
+                {"id": "yield_curve", "name": "수익률곡선", "status": curve_status, "state": curve_state},
+                {"id": "labor", "name": "노동", "status": labor_status, "state": labor_state},
+                {"id": "real_activity", "name": "실질활동", "status": activity_status, "state": activity_state},
+                {"id": "credit", "name": "신용", "status": credit_status, "state": credit_state},
+            ],
+        }
+
+    def _attach_trigger_lifecycle(
+        self,
+        triggers: list[dict[str, Any]],
+        acknowledgment: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        with self.db.connect() as conn:
+            rows = {
+                row["rule_id"]: dict(row)
+                for row in conn.execute("SELECT * FROM regime_triggers").fetchall()
+            }
+        acknowledged = acknowledgment.get("trigger_state", {}) if acknowledgment else {}
+        acknowledged_at = acknowledgment.get("completed_at") if acknowledgment else None
+        result: list[dict[str, Any]] = []
+        for trigger in triggers:
+            row = rows.get(trigger["rule_id"])
+            prior_rank = SEVERITY_RANK.get(acknowledged.get(trigger["rule_id"], ""), 0)
+            current_rank = SEVERITY_RANK.get(trigger.get("severity", ""), 0)
+            activated_at = (
+                row.get("current_fired_at") or row.get("first_fired_at")
+                if row else None
+            )
+            if prior_rank and current_rank > prior_rank:
+                lifecycle = "worsened"
+            elif prior_rank >= current_rank:
+                lifecycle = "acknowledged"
+            elif acknowledged_at and activated_at and activated_at > acknowledged_at:
+                lifecycle = "new"
+            else:
+                lifecycle = "active"
+            result.append({
+                **trigger,
+                "lifecycle": lifecycle,
+                "activated_at": activated_at,
+                "last_seen_at": row.get("last_fired_at") if row else None,
+            })
+        return result
 
     def _feed_health(self) -> dict[str, Any]:
         from app.services.regime_thesis import RegimeThesisDataService
@@ -891,25 +1047,23 @@ class RegimeService:
                     "last_fired_at": fired_at, "active": 1, "resolved_at": None,
                 }
                 if old:
-                    unchanged = (
-                        bool(old["active"])
-                        and old["rule_version"] == item["rule_version"]
-                        and old["severity"] == item["severity"]
-                        and old["evidence_json"] == payload["evidence_json"]
+                    payload["current_fired_at"] = (
+                        old.get("current_fired_at") or old["first_fired_at"]
+                        if old["active"] else fired_at
                     )
-                    if not unchanged:
-                        assignments = ",".join(f"{key}=?" for key in payload)
-                        conn.execute(
-                            f"UPDATE regime_triggers SET {assignments} WHERE rule_id=?",
-                            (*payload.values(), item["rule_id"]),
-                        )
+                    assignments = ",".join(f"{key}=?" for key in payload)
+                    conn.execute(
+                        f"UPDATE regime_triggers SET {assignments} WHERE rule_id=?",
+                        (*payload.values(), item["rule_id"]),
+                    )
                 else:
                     conn.execute(
                         "INSERT INTO regime_triggers(id,rule_id,rule_version,domain,severity,direction,evidence_cluster,"
-                        "summary,evidence_json,first_fired_at,last_fired_at,active,resolved_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        "summary,evidence_json,first_fired_at,last_fired_at,active,resolved_at,current_fired_at) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (str(uuid4()), item["rule_id"], item["rule_version"], item["domain"], item["severity"],
                          item["direction"], item["evidence_cluster"], item["summary"],
-                         json.dumps(item["evidence"], ensure_ascii=False), fired_at, fired_at, 1, None),
+                         json.dumps(item["evidence"], ensure_ascii=False), fired_at, fired_at, 1, None, fired_at),
                     )
             for rule_id, old in existing.items():
                 if old["active"] and rule_id not in active_ids:

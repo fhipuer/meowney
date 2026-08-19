@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from calendar import monthrange
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -89,24 +90,166 @@ def normalize_quarters(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(deduped.values(), key=lambda row: row["period_end"])
 
 
-def classify_ai_capex(companies: list[dict[str, Any]], expected: int = 4) -> tuple[str, str, float]:
-    available = [
-        item for item in companies
-        if item.get("latest_capex") is not None and not item.get("is_stale", False)
-    ]
-    coverage = len(available) / expected
-    yoy_values = [float(item["yoy"]) for item in available if item.get("yoy") is not None]
-    positive = sum(value > 0 for value in yoy_values)
-    negative = sum(value < 0 for value in yoy_values)
-    if coverage < .75 or len(yoy_values) < 3:
-        return "판정 불가", "4개사 중 3개사 이상의 최신·전년동기 분기 CAPEX가 필요합니다.", coverage
-    if negative >= 2:
-        return "감속 관찰", f"전년 대비 CAPEX 감소 기업이 {negative}개입니다.", coverage
-    if positive >= 3 and sum(yoy_values) / len(yoy_values) >= 25:
-        return "확대 강함", f"전년 대비 CAPEX 증가 기업이 {positive}개이고 평균 증가율이 25% 이상입니다.", coverage
-    if positive >= 3:
-        return "높은 투자 지속", f"전년 대비 CAPEX 증가 기업이 {positive}개입니다.", coverage
-    return "혼조", "기업별 증가·감속 신호가 혼재해 다음 공시 확인이 필요합니다.", coverage
+def _shift_quarter(period: str, quarters: int) -> str:
+    """분기말 문자열을 실제 달력 기준으로 이동한다."""
+
+    current = date.fromisoformat(period)
+    month_index = current.year * 12 + current.month - 1 + quarters * 3
+    year, month_zero = divmod(month_index, 12)
+    month = month_zero + 1
+    day = monthrange(year, month)[1]
+    return date(year, month, day).isoformat()
+
+
+def build_capex_aggregate(
+    companies: list[dict[str, Any]],
+    *,
+    expected: int = 4,
+    today: date | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """동일 분기 4개사 현금 CAPEX의 단일 집계 계약을 만든다.
+
+    부분 합계를 실제 총액처럼 보이지 않도록 완전한 동일 분기만 값을
+    제공한다. YoY·QoQ·TTM도 배열 위치가 아니라 실제 분기말 날짜로 찾는다.
+    """
+
+    today = today or date.today()
+    period_values: dict[str, dict[str, float]] = defaultdict(dict)
+    company_history: dict[str, dict[str, float]] = {}
+    for company in companies:
+        history = {
+            item["period"]: float(item["value"])
+            for item in company.get("history", [])
+            if item.get("period") and item.get("value") is not None
+        }
+        company_history[company["id"]] = history
+        for period, value in history.items():
+            period_values[period][company["id"]] = value
+
+    periods = sorted(period_values)
+    totals = {
+        period: sum(values.values())
+        for period, values in period_values.items()
+        if len(values) == expected
+    }
+
+    def ttm_for(period: str) -> float | None:
+        required = [_shift_quarter(period, offset) for offset in (0, -1, -2, -3)]
+        if any(item not in totals for item in required):
+            return None
+        return sum(totals[item] for item in required)
+
+    rows: list[dict[str, Any]] = []
+    for period in periods:
+        value = totals.get(period)
+        prior_quarter = totals.get(_shift_quarter(period, -1))
+        prior_year = totals.get(_shift_quarter(period, -4))
+        ttm = ttm_for(period) if value is not None else None
+        prior_ttm = ttm_for(_shift_quarter(period, -4)) if ttm is not None else None
+        rows.append({
+            "period": period,
+            "value": value,
+            "value_billion": value / 1_000_000_000 if value is not None else None,
+            "coverage_count": len(period_values[period]),
+            "expected_count": expected,
+            "complete": value is not None,
+            "qoq": (value / prior_quarter - 1) * 100
+            if value is not None and prior_quarter not in (None, 0) else None,
+            "yoy": (value / prior_year - 1) * 100
+            if value is not None and prior_year not in (None, 0) else None,
+            "ttm": ttm,
+            "ttm_billion": ttm / 1_000_000_000 if ttm is not None else None,
+            "ttm_yoy": (ttm / prior_ttm - 1) * 100
+            if ttm is not None and prior_ttm not in (None, 0) else None,
+        })
+
+    reporting_period = max(
+        (company.get("latest_period") for company in companies if company.get("latest_period")),
+        default=None,
+    )
+    current = next((row for row in rows if row["period"] == reporting_period), None)
+    last_complete = next((row for row in reversed(rows) if row["complete"]), None)
+    age_days = (today - date.fromisoformat(reporting_period)).days if reporting_period else None
+    complete = bool(current and current["complete"])
+    aggregate = {
+        "latest_period": reporting_period,
+        "last_complete_period": last_complete["period"] if last_complete else None,
+        "latest_value": current.get("value") if current else None,
+        "latest_value_billion": current.get("value_billion") if current else None,
+        "qoq": current.get("qoq") if current else None,
+        "yoy": current.get("yoy") if current else None,
+        "ttm": current.get("ttm") if current else None,
+        "ttm_billion": current.get("ttm_billion") if current else None,
+        "ttm_yoy": current.get("ttm_yoy") if current else None,
+        "coverage_count": current.get("coverage_count", 0) if current else 0,
+        "expected_count": expected,
+        "coverage": (current.get("coverage_count", 0) / expected) if current else 0,
+        "complete": complete,
+        "age_days": age_days,
+        "is_stale": not complete or age_days is None or age_days > 200,
+        "history": rows,
+    }
+
+    company_yoy: list[float] = []
+    if reporting_period:
+        prior_period = _shift_quarter(reporting_period, -4)
+        for history in company_history.values():
+            latest, prior = history.get(reporting_period), history.get(prior_period)
+            if latest is not None and prior not in (None, 0):
+                company_yoy.append((latest / prior - 1) * 100)
+    breadth = {
+        "positive_count": sum(value > 0 for value in company_yoy),
+        "negative_count": sum(value < 0 for value in company_yoy),
+        "comparable_count": len(company_yoy),
+        "expected_count": expected,
+        "company_yoy": company_yoy,
+    }
+    return aggregate, breadth
+
+
+def classify_ai_capex(
+    aggregate: dict[str, Any], breadth: dict[str, Any]
+) -> tuple[str, str, float]:
+    """합계 YoY를 주축, TTM과 기업 확산도를 확인축으로 판정한다."""
+
+    coverage = float(aggregate.get("coverage") or 0)
+    yoy = aggregate.get("yoy")
+    ttm_yoy = aggregate.get("ttm_yoy")
+    positive = int(breadth.get("positive_count") or 0)
+    negative = int(breadth.get("negative_count") or 0)
+    comparable = int(breadth.get("comparable_count") or 0)
+    expected = int(breadth.get("expected_count") or 4)
+    if (
+        not aggregate.get("complete")
+        or aggregate.get("is_stale")
+        or coverage < 1
+        or yoy is None
+        or comparable < expected
+    ):
+        return (
+            "판정 불가",
+            f"동일 분기 {expected}개사 전체의 최신·전년동기 현금 CAPEX가 필요합니다.",
+            coverage,
+        )
+    if yoy < 0 or (ttm_yoy is not None and ttm_yoy < 0) or negative >= 2:
+        return (
+            "감속 관찰",
+            f"4사 합산 CAPEX가 전년동기 대비 {yoy:+.1f}%이고 감소 기업은 {negative}개입니다.",
+            coverage,
+        )
+    if yoy >= 25 and (ttm_yoy is None or ttm_yoy >= 15) and positive >= 3:
+        return (
+            "확대 강함",
+            f"4사 합산 CAPEX가 전년동기 대비 {yoy:+.1f}%이고 {positive}/{expected}개사가 증가했습니다.",
+            coverage,
+        )
+    if yoy >= 0 and (ttm_yoy is None or ttm_yoy >= 0) and positive >= 3:
+        return (
+            "높은 투자 지속",
+            f"4사 합산 CAPEX가 전년동기 대비 {yoy:+.1f}%이고 {positive}/{expected}개사가 증가했습니다.",
+            coverage,
+        )
+    return "혼조", "합계 증가율과 기업별 투자 방향이 같은 신호를 주지 않습니다.", coverage
 
 
 class SecCapexService:
@@ -214,7 +357,7 @@ class SecCapexService:
         with self.db.connect() as conn:
             for company_id, (name, _cik) in COMPANIES.items():
                 rows = [dict(row) for row in conn.execute(
-                    "SELECT * FROM company_metrics WHERE company_id=? AND metric='capex' ORDER BY period_end DESC LIMIT 12",
+                    "SELECT * FROM company_metrics WHERE company_id=? AND metric='capex' ORDER BY period_end DESC LIMIT 16",
                     (company_id,),
                 ).fetchall()][::-1]
                 status = conn.execute("SELECT * FROM company_fetch_status WHERE company_id=?", (company_id,)).fetchone()
@@ -235,9 +378,12 @@ class SecCapexService:
                                                "derivation": row["derivation"],
                                                "source_accessions": json.loads(row["source_accessions_json"])} for row in rows],
                                   "fetch_status": dict(status) if status else None})
-        state, reason, coverage = classify_ai_capex(companies, len(COMPANIES))
+        aggregate, breadth = build_capex_aggregate(companies, expected=len(COMPANIES))
+        state, reason, coverage = classify_ai_capex(aggregate, breadth)
         periods = [item["latest_period"] for item in companies if item.get("latest_period")]
         return {"state": state, "reason": reason, "coverage": coverage, "companies": companies,
+                "aggregate": aggregate, "breadth": breadth,
+                "decision_as_of": aggregate.get("latest_period"),
                 "as_of_range": {"from": min(periods) if periods else None, "to": max(periods) if periods else None},
-                "period_alignment": "company_fiscal_quarter",
-                "methodology": "SEC 공시 기업 전체 현금 CAPEX · 기업별 회계분기 YoY·TTM · 누적 공시는 직전 누적값 차감 · 증가율 둔화만으로 종료 판정하지 않음"}
+                "period_alignment": "exact_period_end",
+                "methodology": "SEC 공시 4사 전체 현금 CAPEX · 동일 분기 완전 집계의 합계 YoY가 주판정 · 합산 TTM과 증가 기업 수는 확인축 · 누적 공시는 직전 누적값 차감 · AI 전용 금액이나 비현금 리스는 분리하지 않음"}

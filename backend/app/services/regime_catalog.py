@@ -27,8 +27,20 @@ CONTEXT_IDS = {
     "fed_assets", "bank_reserves", "reverse_repo", "market_kospi",
     "market_dollar", "market_wti", "market_copper",
     "market_gold", "market_silver", "market_gold_silver_ratio",
-    "us3m", "us2y", "term_premium",
+    "us3m", "us2y", "term_premium", "pce",
 }
+
+US_INDICATOR_IDS = {
+    "us_gdp", "us_unemployment", "us_claims", "us_payrolls", "us_retail",
+    "us_indpro", "cpi", "core_cpi", "pce", "core_pce", "ppi", "wages",
+    "fedfunds", "us3m", "us2y", "us10y", "us30y", "tips10y", "tips30y",
+    "bei10y", "term_premium", "curve10y3m", "curve2s10s", "hy_oas",
+    "ig_oas", "nfci", "fed_assets", "bank_reserves", "reverse_repo",
+    "market_sp500", "market_nasdaq", "market_vix",
+}
+
+HIGHER_SUPPORTIVE_IDS = {"us_gdp", "us_indpro", "kr_gdp", "kr_indpro"}
+HIGHER_ADVERSE_IDS = {"us_unemployment", "us_claims", "hy_oas", "ig_oas"}
 
 
 def indicator_role(indicator_id: str) -> dict[str, str]:
@@ -39,6 +51,44 @@ def indicator_role(indicator_id: str) -> dict[str, str]:
     if indicator_id in CONTEXT_IDS or indicator_id.startswith("kr_"):
         return {"decision_role": "context", "usage": "display"}
     return {"decision_role": "corroborative", "usage": "regime"}
+
+
+def indicator_semantics(indicator_id: str) -> dict[str, str | None]:
+    """Return presentation metadata without encoding it in a display name.
+
+    Raw direction and economic meaning are deliberately separate.  Market
+    prices and rates need context before an increase can be called supportive
+    or adverse, while a small group of growth/labor metrics is monotonic enough
+    to receive a semantic tone directly.
+    """
+
+    if indicator_id.startswith("kr_") or indicator_id == "market_kospi":
+        country = "한국"
+    elif indicator_id in US_INDICATOR_IDS:
+        country = "미국"
+    else:
+        country = "글로벌"
+
+    if indicator_id.startswith("market_"):
+        lens = "market_context"
+    elif indicator_id in RATE_IDS | SPREAD_IDS | {"nfci"}:
+        lens = "macro_context"
+    else:
+        lens = "macro"
+
+    if indicator_id in HIGHER_SUPPORTIVE_IDS:
+        tone_policy = "higher_supportive"
+    elif indicator_id in HIGHER_ADVERSE_IDS:
+        tone_policy = "higher_adverse"
+    else:
+        tone_policy = "semantic_only"
+
+    return {
+        "country": country,
+        "interpretation_lens": lens,
+        "tone_policy": tone_policy,
+        "proxy_for": "SGOV 단기국채 금리환경" if indicator_id == "us3m" else None,
+    }
 
 
 def display_history(observations: list[dict[str, Any]], frequency: str) -> list[dict[str, Any]]:

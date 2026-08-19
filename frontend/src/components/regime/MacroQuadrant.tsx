@@ -104,6 +104,15 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
   const environment = macroEnvironmentLabel(rawEnvironment);
   const direction = momentumDirectionLabel(vector?.direction);
   const strength = momentumStrengthLabel(vector?.strength);
+  const recession = data.recession_confirmation;
+  const recessionTone =
+    recession?.status === "confirmed"
+      ? "text-danger"
+      : recession?.status === "watch" || recession?.status === "leading_only"
+        ? "text-warning"
+        : recession?.status === "clear"
+          ? "text-success"
+          : "text-muted-foreground";
 
   return (
     <Card className="overflow-hidden">
@@ -202,7 +211,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   </g>
                 ))}
                 <text x={PAD + 12} y={PAD + 24} fontSize="13" fontWeight="600">
-                  성장 취약 · 물가 압력
+                  성장 취약 · 물가 높음
                 </text>
                 <text
                   x={SIZE - PAD - 12}
@@ -211,7 +220,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   fontSize="13"
                   fontWeight="600"
                 >
-                  성장 확장 · 물가 압력
+                  성장 확장 · 물가 높음
                 </text>
                 <text
                   x={PAD + 12}
@@ -219,7 +228,7 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   fontSize="13"
                   fontWeight="600"
                 >
-                  성장 취약 · 물가 목표 부근
+                  성장 취약 · 물가 안정
                 </text>
                 <text
                   x={SIZE - PAD - 12}
@@ -228,13 +237,14 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   fontSize="13"
                   fontWeight="600"
                 >
-                  성장 확장 · 물가 목표 부근
+                  성장 확장 · 물가 안정
                 </text>
                 <text
                   x={SIZE / 2}
                   y={SIZE - 17}
                   textAnchor="middle"
                   fontSize="12"
+                  className="hidden sm:block"
                 >
                   성장 수준 · 취약 ← → 확장
                 </text>
@@ -243,28 +253,56 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   y={SIZE / 2}
                   textAnchor="middle"
                   fontSize="12"
+                  className="hidden sm:block"
                   transform={`rotate(-90 18 ${SIZE / 2})`}
                 >
                   물가 압력 수준 · 목표 부근 ← → 높음
                 </text>
                 {endpoint && (
-                  <line
-                    x1={startX}
-                    y1={startY}
-                    x2={endpoint.x}
-                    y2={endpoint.y}
-                    stroke="hsl(var(--info))"
-                    strokeWidth="5"
-                    strokeDasharray="7 5"
-                    opacity="0.72"
-                    markerEnd="url(#pressure-arrow)"
-                  />
+                  <g>
+                    <line
+                      x1={startX}
+                      y1={startY}
+                      x2={endpoint.x}
+                      y2={endpoint.y}
+                      stroke="hsl(var(--info))"
+                      strokeWidth="9"
+                      opacity="0.14"
+                    />
+                    <line
+                      x1={startX}
+                      y1={startY}
+                      x2={endpoint.x}
+                      y2={endpoint.y}
+                      stroke="hsl(var(--info))"
+                      strokeWidth="4"
+                      opacity="0.95"
+                      markerEnd="url(#pressure-arrow)"
+                    />
+                    <text
+                      x={endpoint.x + (endpoint.x >= startX ? 12 : -12)}
+                      y={endpoint.y - 10}
+                      textAnchor={endpoint.x >= startX ? "start" : "end"}
+                      fontSize="11"
+                      fontWeight="600"
+                      fill="hsl(var(--info))"
+                    >
+                      최근 압력
+                    </text>
+                  </g>
                 )}
                 <circle
                   cx={startX}
                   cy={startY}
-                  r="10"
-                  fill="hsl(var(--foreground))"
+                  r="16"
+                  fill="hsl(var(--primary))"
+                  opacity="0.18"
+                />
+                <circle
+                  cx={startX}
+                  cy={startY}
+                  r="9"
+                  fill="hsl(var(--primary))"
                   stroke="hsl(var(--background))"
                   strokeWidth="3"
                 />
@@ -274,9 +312,13 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   fontSize="12"
                   fontWeight="700"
                 >
-                  현재 환경 위치
+                  현재 수준
                 </text>
               </svg>
+              <div className="flex items-center justify-between border-t border-border/70 px-3 py-2 text-[10px] text-muted-foreground sm:hidden">
+                <span>가로 · 성장 취약 → 확장</span>
+                <span>세로 · 물가 안정 → 높음</span>
+              </div>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border p-4">
@@ -298,13 +340,25 @@ export function MacroQuadrant({ data }: { data: Quadrant }) {
                   {strength} · 성장 {signed(vector?.dx)} / 물가 {signed(vector?.dy)}
                 </p>
               </div>
-              <div className="rounded-lg border p-4">
-                <p className="text-xs text-muted-foreground">침체 확인 기준</p>
-                <p className="mt-1 font-semibold">노동·실질활동·신용 종합</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  상세점검 신호에서 교차 확인
-                </p>
-              </div>
+              {recession && (
+                <div className="rounded-lg border p-4" data-recession-confirmation={recession.status}>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <span>현재 경기악화 확인</span>
+                    <InfoTip label="현재 경기악화 확인 방법">
+                      수익률곡선은 향후 침체 가능성을 미리 알리는 지표이고,
+                      노동·실물경제·신용은 현재 악화 여부를 확인하는 세 축입니다.
+                      이 카드는 세 축에서 확인된 범위만 말하며 경제 전체의 침체 여부를
+                      단정하지 않습니다. 4분면의 위치나 화살표만으로도 침체를 판정하지
+                      않습니다. {recession.channels.map((channel) => `${channel.name}: ${channel.state}`).join(" · ")}
+                    </InfoTip>
+                  </div>
+                  <p className={`mt-1 font-semibold ${recessionTone}`}>{recession.label}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    현재 악화 영역 {recession.coincident_risk_count}/3
+                    {recession.as_of_date ? ` · 기준 ${recession.as_of_date}` : ""}
+                  </p>
+                </div>
+              )}
             </div>
           </>
         ) : (

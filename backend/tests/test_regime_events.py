@@ -7,9 +7,11 @@ import pytest
 from app.config import settings
 from app.db.sqlite_client import SQLiteClient
 from app.services.regime_events import (
+    FEDERAL_RESERVE_CALENDAR_URL,
     FRED_RELEASES,
     FredRelease,
     RegimeEventService,
+    official_policy_events,
     parse_fred_release_dates,
 )
 
@@ -94,11 +96,12 @@ async def test_refresh_uses_fred_future_dates_and_replaces_legacy_bls_event(tmp_
         )
 
     result = await service.refresh()
+    policy_count = len(official_policy_events(_today(), _today() + timedelta(days=370)))
 
     assert result == {
         "status": "success",
-        "saved": len(FRED_RELEASES),
-        "source": "FRED",
+        "saved": len(FRED_RELEASES) + policy_count,
+        "source": "FRED+Federal Reserve",
         "error": None,
     }
     assert len(requests) == len(FRED_RELEASES)
@@ -107,10 +110,13 @@ async def test_refresh_uses_fred_future_dates_and_replaces_legacy_bls_event(tmp_
         for request in requests
     )
     events = service.upcoming(limit=20)
-    assert len(events) == len(FRED_RELEASES)
-    assert all(event["source"] == "FRED" for event in events)
+    assert len(events) == len(FRED_RELEASES) + policy_count
+    assert {event["source"] for event in events} == {"FRED", "Federal Reserve"}
     assert all(event["scheduled_at"] is None for event in events)
-    assert all(event["scheduled_date"] == future.isoformat() for event in events)
+    assert all(
+        event["scheduled_date"] == future.isoformat()
+        for event in events if event["source"] == "FRED"
+    )
     assert all(event["time_precision"] == "date" for event in events)
     assert len([event for event in events if event["event_type"] == "CPI"]) == 1
     assert service.health()["status"] == "success"
@@ -136,16 +142,17 @@ async def test_partial_refresh_keeps_cached_events_for_failed_releases(tmp_path)
         transport=httpx.MockTransport(partial_handler), **kwargs
     )
     result = await service.refresh()
+    policy_count = len(official_policy_events(_today(), _today() + timedelta(days=370)))
 
     assert result["status"] == "partial"
-    assert result["saved"] == 1
-    assert len(service.upcoming(limit=20)) == len(FRED_RELEASES)
+    assert result["saved"] == 1 + policy_count
+    assert len(service.upcoming(limit=20)) == len(FRED_RELEASES) + policy_count
     assert service.health()["status"] == "partial"
     assert service.health()["last_success_at"] is not None
 
 
 @pytest.mark.asyncio
-async def test_failed_refresh_preserves_last_successful_calendar_cache(tmp_path):
+async def test_failed_fred_refresh_preserves_cache_and_refreshes_official_policy_events(tmp_path):
     future = _today() + timedelta(days=20)
     service = _service(tmp_path, _success_handler(future))
     await service.refresh()
@@ -158,13 +165,15 @@ async def test_failed_refresh_preserves_last_successful_calendar_cache(tmp_path)
         **kwargs,
     )
     result = await service.refresh()
+    policy_count = len(official_policy_events(_today(), _today() + timedelta(days=370)))
 
-    assert result["status"] == "failed"
-    assert result["saved"] == 0
+    assert result["status"] == "partial"
+    assert result["saved"] == policy_count
+    assert result["source"] == "Federal Reserve"
     assert "a" * 32 not in result["error"]
-    assert len(service.upcoming(limit=20)) == len(FRED_RELEASES)
-    assert service.health()["status"] == "failed"
-    assert service.health()["last_success_at"] == last_success
+    assert len(service.upcoming(limit=20)) == len(FRED_RELEASES) + policy_count
+    assert service.health()["status"] == "partial"
+    assert service.health()["last_success_at"] >= last_success
 
 
 @pytest.mark.asyncio
@@ -177,6 +186,21 @@ async def test_missing_fred_key_is_explicit_and_does_not_call_network(tmp_path):
 
     result = await service.refresh()
 
-    assert result["status"] == "configuration_required"
-    assert result["saved"] == 0
-    assert service.health()["status"] == "configuration_required"
+    policy_count = len(official_policy_events(_today(), _today() + timedelta(days=370)))
+    assert result["status"] == "partial"
+    assert result["saved"] == policy_count
+    assert result["source"] == "Federal Reserve"
+    assert service.health()["status"] == "partial"
+    assert all(event["source"] == "Federal Reserve" for event in service.upcoming(limit=20))
+
+
+def test_official_policy_events_include_fomc_decision_without_api_key():
+    events = official_policy_events(
+        datetime(2026, 8, 19).date(), datetime(2026, 12, 31).date()
+    )
+
+    assert [event["scheduled_date"] for event in events] == [
+        "2026-09-16", "2026-10-28", "2026-12-09"
+    ]
+    assert all(event["title"] == "FOMC 금리결정" for event in events)
+    assert all(event["source_url"] == FEDERAL_RESERVE_CALENDAR_URL for event in events)

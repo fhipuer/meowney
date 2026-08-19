@@ -291,7 +291,16 @@ class MemoryPriceService:
             item["history"] = histories[item["series_id"]]
         state, reason = classify_memory_cycle(latest)
         nand_state, nand_reason = classify_nand_prices(latest)
+        primary_dram = next(
+            (
+                item for item in latest
+                if item["series_id"] == "dram_contract_ddr5_sodimm_8gb"
+                and not item.get("is_stale", False)
+            ),
+            None,
+        )
         return {"state": state, "reason": reason, "nand_state": nand_state, "nand_reason": nand_reason,
+                "decision_as_of": primary_dram.get("observation_date") if primary_dram else None,
                 "source": "TrendForce 공개 가격표",
                 "source_url": SOURCE_URL, "series": latest, "fetch_status": dict(status) if status else None,
                 "nand_source_url": NAND_SOURCE_URL,

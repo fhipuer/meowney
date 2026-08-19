@@ -1,5 +1,10 @@
+from datetime import date, timedelta
+from uuid import uuid4
+
+from app.db.sqlite_client import SQLiteClient
 from app.services.regime_memory import (
-    classify_memory_cycle, classify_nand_prices, parse_memory_price_page, parse_nand_price_page,
+    MemoryPriceService, classify_memory_cycle, classify_nand_prices,
+    parse_memory_price_page, parse_nand_price_page,
 )
 
 
@@ -104,3 +109,28 @@ def test_nand_classification_uses_512gb_tlc_wafer_spot():
     ])
     assert state == "관측가격 하락"
     assert "-1.3%" in reason
+
+
+def test_memory_decision_date_uses_primary_contract_sample_not_newer_spot_context(tmp_path):
+    service = MemoryPriceService.__new__(MemoryPriceService)
+    service.db = SQLiteClient(tmp_path / "memory.db")
+    contract_date = (date.today() - timedelta(days=30)).isoformat()
+    spot_date = date.today().isoformat()
+    rows = [
+        ("dram_contract_ddr5_sodimm_8gb", "contract", "DDR5 8GB SO-DIMM", contract_date, 2.7),
+        ("dram_spot_ddr5_16gb", "spot", "DDR5 16Gb", spot_date, 1.2),
+    ]
+    with service.db.connect() as conn:
+        for series_id, market_type, product, observed, change in rows:
+            conn.execute(
+                "INSERT INTO memory_price_observations VALUES(?,?,?,?,?,NULL,NULL,NULL,100,?,?,?,?)",
+                (
+                    str(uuid4()), series_id, market_type, product, observed, change,
+                    "https://example.com", f"{spot_date}T00:00:00+00:00", str(uuid4()),
+                ),
+            )
+
+    summary = service.summary()
+
+    assert summary["decision_as_of"] == contract_date
+    assert max(item["observation_date"] for item in summary["series"]) == spot_date

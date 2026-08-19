@@ -18,7 +18,7 @@ import math
 from typing import Any, Iterable
 
 
-RATE_MODEL_VERSION = "2026-08-rates-v3"
+RATE_MODEL_VERSION = "2026-08-rates-v4"
 NYFED_PROBIT_INTERCEPT = -0.5333
 NYFED_PROBIT_SLOPE = -0.6330
 MONTHLY_TRADING_DAYS = 21
@@ -135,6 +135,46 @@ def aligned_long_end_changes(
     )
 
 
+def _aligned_window_at(
+    histories: dict[str, dict[str, float]],
+    common_dates: list[str],
+    periods: int,
+    end_index: int,
+) -> dict[str, Any] | None:
+    if not common_dates or end_index < periods:
+        return None
+    start, end = common_dates[end_index - periods], common_dates[end_index]
+    return {
+        "periods": periods,
+        "start_date": start,
+        "end_date": end,
+        "changes": {
+            key: round(values[end] - values[start], 4)
+            for key, values in histories.items()
+        },
+    }
+
+
+def _duration_candidate_score(
+    *,
+    real_level: float,
+    spread: float,
+    nominal_change: float,
+    real_change: float,
+    level_confirmed: bool,
+) -> float:
+    if level_confirmed and (
+        real_change >= .25
+        or (nominal_change >= .35 and real_change >= .15)
+    ):
+        return 55.0
+    if level_confirmed and real_level >= 3.0 and real_change >= .15 and spread >= .50:
+        return 35.0
+    if level_confirmed and nominal_change >= .25 and spread >= .50:
+        return 25.0
+    return 0.0
+
+
 def _percentile_rank(values: list[float], current: float | None) -> float | None:
     if current is None or len(values) < 60:
         return None
@@ -244,6 +284,14 @@ def _duration_stress_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]
         for when in confirmation_dates
     )
     confirmed = len(confirmation_dates) >= 3 and confirmation_count >= 3
+    level_label = (
+        "장기채 부담 높음" if confirmed
+        else "장기채 부담 관찰" if (
+            real_30y is not None and real_30y >= 2.5
+            or spread is not None and spread >= .35
+        )
+        else "장기채 부담 낮음"
+    )
 
     if not change20 or real_30y is None or spread is None:
         return {
@@ -257,6 +305,12 @@ def _duration_stress_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]
             "spread_30y10y": round(spread, 3) if spread is not None else None,
             "change_20d": change20,
             "change_63d": change63,
+            "as_of_date": change20.get("end_date") if change20 else None,
+            "level_label": "판정 불가" if real_30y is None or spread is None else level_label,
+            "recent_label": "판정 불가",
+            "raw_score": None,
+            "recent_confirmation_count_3d": 0,
+            "recent_confirmed": False,
             "confirmation_count_5d": confirmation_count,
             "confirmed": False,
             "persistent": False,
@@ -267,16 +321,39 @@ def _duration_stress_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]
     nominal_change = changes20["us30y"]
     real_change = changes20["tips30y"]
     bei_change = _delta(signals.get("bei10y"), 20)
-    score = 0.0
-    if confirmed and (
-        real_change >= .25
-        or (nominal_change >= .35 and real_change >= .15)
-    ):
-        score = 55.0
-    elif confirmed and real_30y >= 3.0 and real_change >= .15 and spread >= .50:
-        score = 35.0
-    elif confirmed and nominal_change >= .25 and spread >= .50:
-        score = 25.0
+    candidate_scores: list[float] = []
+    for end_index in range(max(20, len(common_dates) - 3), len(common_dates)):
+        window = _aligned_window_at(histories, common_dates, 20, end_index)
+        if not window:
+            continue
+        end_date = common_dates[end_index]
+        level_dates = common_dates[max(0, end_index - 4):end_index + 1]
+        level_count = sum(
+            histories["tips30y"][when] >= 3.0
+            and histories["us30y"][when] - histories["us10y"][when] >= .50
+            for when in level_dates
+        )
+        level_confirmed = len(level_dates) >= 3 and level_count >= 3
+        candidate_scores.append(_duration_candidate_score(
+            real_level=histories["tips30y"][end_date],
+            spread=histories["us30y"][end_date] - histories["us10y"][end_date],
+            nominal_change=window["changes"]["us30y"],
+            real_change=window["changes"]["tips30y"],
+            level_confirmed=level_confirmed,
+        ))
+    raw_score = _duration_candidate_score(
+        real_level=real_30y,
+        spread=spread,
+        nominal_change=nominal_change,
+        real_change=real_change,
+        level_confirmed=confirmed,
+    )
+    recent_confirmation_count = sum(value > 0 for value in candidate_scores)
+    recent_confirmed = len(candidate_scores) >= 2 and recent_confirmation_count >= 2
+    # Two of the last three observations are required both to enter and to
+    # remain in the recent-shock state.  One miss therefore does not cause a
+    # one-day color flip, while two misses release the warning.
+    score = max(candidate_scores, default=0.0) if recent_confirmed else 0.0
 
     changes63 = change63["changes"] if change63 else None
     persistent = bool(
@@ -311,6 +388,12 @@ def _duration_stress_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]
         "spread_30y10y": round(spread, 3),
         "change_20d": change20,
         "change_63d": change63,
+        "as_of_date": change20["end_date"],
+        "level_label": level_label,
+        "recent_label": label,
+        "raw_score": round(raw_score, 1),
+        "recent_confirmation_count_3d": recent_confirmation_count,
+        "recent_confirmed": recent_confirmed,
         "breakeven_10y_change_20d": round(bei_change, 4)
         if bei_change is not None else None,
         "confirmation_count_5d": confirmation_count,
@@ -322,6 +405,7 @@ def _duration_stress_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]
             "real_30y_change_20d": .15,
             "spread_30y10y": .50,
             "confirmation_observations": "3_of_5",
+            "shock_confirmation_observations": "2_of_3",
         },
     }
 

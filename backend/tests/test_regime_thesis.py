@@ -12,6 +12,7 @@ from app.services.regime_thesis import (
     classify_semiconductor_cycle,
     history_with_yoy,
     metric_summary,
+    RegimeThesisDataService,
 )
 
 
@@ -317,6 +318,61 @@ def test_dram_bottleneck_uses_hbm_proxy_as_one_confirmation_lane():
 def test_semiconductor_composite_lets_dram_lead_but_requires_two_negative_vetoes():
     state, _ = classify_semiconductor_cycle("타이트 신호", "재고 부담", "확장 확인", 1)
     assert state == "확장 확인"
+
+
+class _DateRepo:
+    def __init__(self, series=None):
+        self._series = series or {}
+
+    def series(self, series_id):
+        return self._series.get(series_id, [])
+
+    def matching_series(self, _prefix):
+        return []
+
+    def status(self, _source):
+        return None
+
+
+def test_semiconductor_decision_date_stays_on_primary_dram_sample(monkeypatch):
+    service = RegimeThesisDataService.__new__(RegimeThesisDataService)
+    service.repo = _DateRepo()
+    monkeypatch.setattr(
+        "app.services.regime_thesis.DartSemiconductorService.summary",
+        lambda _self: {"state": "판정 불가", "reason": "자료 부족", "companies": []},
+    )
+    memory = {
+        "state": "가격 확장",
+        "decision_as_of": "2026-06-30",
+        "series": [
+            {"series_id": "dram_contract_ddr5_sodimm_8gb", "observation_date": "2026-06-30", "is_stale": False},
+            {"series_id": "dram_spot_ddr5_16gb", "observation_date": "2026-08-18", "is_stale": False},
+        ],
+    }
+
+    summary = service.semiconductor_summary(memory)
+
+    assert summary["decision_as_of_date"] == "2026-06-30"
+    assert summary["dram_bottleneck"]["decision_as_of_date"] == "2026-06-30"
+    assert summary["as_of_date"] == "2026-08-18"
+    assert summary["supporting_as_of_range"] == {"from": "2026-06-30", "to": "2026-08-18"}
+
+
+def test_power_decision_date_uses_monthly_sales_not_newer_annual_capacity():
+    monthly = [{"observation_date": "2026-06-01", "value": 100}]
+    service = RegimeThesisDataService.__new__(RegimeThesisDataService)
+    service.repo = _DateRepo({
+        "us_electricity_sales_all": monthly,
+        "us_electricity_sales_commercial": monthly,
+        "us_electricity_sales_industrial": monthly,
+        "us_electricity_net_generation": monthly,
+        "us_electricity_net_summer_capacity": [{"observation_date": "2026-07-01", "value": 200}],
+    })
+
+    summary = service.power_summary()
+
+    assert summary["decision_as_of_date"] == "2026-06-01"
+    assert summary["as_of_date"] == "2026-07-01"
 
     state, _ = classify_semiconductor_cycle("타이트 신호", "재고 부담", "실적 둔화", 1)
     assert state == "경계"

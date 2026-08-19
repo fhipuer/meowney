@@ -1,4 +1,10 @@
-from app.services.regime_catalog import decision_chart, display_history, display_metrics, indicator_role
+from app.services.regime_catalog import (
+    decision_chart,
+    display_history,
+    display_metrics,
+    indicator_role,
+    indicator_semantics,
+)
 
 
 def observations(count):
@@ -30,9 +36,22 @@ def test_inflation_metrics_show_yoy_and_annualized_rate():
 
 def test_indicator_role_separates_regime_trigger_and_context():
     assert indicator_role("core_pce")["usage"] == "regime"
+    assert indicator_role("pce")["usage"] == "display"
     assert indicator_role("market_vix")["usage"] == "trigger"
     assert indicator_role("market_copper")["usage"] == "display"
     assert indicator_role("us3m")["usage"] == "display"
+
+
+def test_indicator_semantics_separates_raw_direction_from_interpretation():
+    assert indicator_semantics("us_claims") == {
+        "country": "미국",
+        "interpretation_lens": "macro",
+        "tone_policy": "higher_adverse",
+        "proxy_for": None,
+    }
+    assert indicator_semantics("market_gold")["tone_policy"] == "semantic_only"
+    assert indicator_semantics("market_gold")["interpretation_lens"] == "market_context"
+    assert indicator_semantics("us3m")["proxy_for"] == "SGOV 단기국채 금리환경"
 
 
 def test_inflation_decision_chart_uses_yoy_and_three_month_annualized_not_index_level():

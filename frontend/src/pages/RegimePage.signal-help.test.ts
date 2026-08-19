@@ -11,6 +11,9 @@ describe("regime indicator rule help", () => {
     expect(signalRuleHelp(signal("tips10y"))).toContain("높은 절대수준");
     expect(signalRuleHelp(signal("hy_oas"))).toContain("현재 절대수준");
     expect(signalRuleHelp(signal("us_gdp"))).toContain("12개월 변화율");
+    expect(signalRuleHelp(signal("us_claims"))).toContain("최근 13주");
+    expect(signalRuleHelp(signal("us_claims"))).toContain("전년 대비 52주");
+    expect(signalRuleHelp(signal("us3m"))).toContain("SGOV ETF 자체");
   });
 
   it("does not treat every increase as the same direction", () => {

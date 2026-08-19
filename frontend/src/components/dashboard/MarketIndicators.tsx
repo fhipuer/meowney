@@ -22,9 +22,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTip } from "@/components/ui/info-tip";
 import { REGIME_SERIES_COLORS } from "@/lib/regime-tone";
-import type { RegimeSignal } from "@/types";
+import type { RegimeSignal, RegimeTrigger } from "@/types";
 
-type Props = { signals: RegimeSignal[]; fetchedAt?: string | null };
+type Props = {
+  signals: RegimeSignal[];
+  fetchedAt?: string | null;
+  triggers?: RegimeTrigger[];
+};
 
 const META: Record<
   string,
@@ -79,13 +83,13 @@ const META: Record<
     group: "real",
   },
   market_gold: {
-    short: "금",
+    short: "COMEX 금 선물",
     role: "실질금리·달러·방어 수요",
     icon: Coins,
     group: "hedge",
   },
   market_silver: {
-    short: "은",
+    short: "COMEX 은 선물",
     role: "산업 수요·귀금속 혼합",
     icon: Coins,
     group: "hedge",
@@ -122,7 +126,14 @@ function changeTone(value?: number | null) {
     : "text-foreground";
 }
 
-function MarketCard({ signal }: { signal: RegimeSignal }) {
+function marketAlertLabel(signalId: string) {
+  if (["market_sp500", "market_nasdaq"].includes(signalId)) return "위험회피 경보";
+  if (signalId === "market_vix") return "시장 스트레스";
+  if (signalId === "market_usdkrw") return "원화·달러 긴축";
+  return "시장 경보";
+}
+
+function MarketCard({ signal, trigger }: { signal: RegimeSignal; trigger?: RegimeTrigger }) {
   const meta = META[signal.id];
   if (!meta) return null;
   const Icon = meta.icon;
@@ -140,6 +151,11 @@ function MarketCard({ signal }: { signal: RegimeSignal }) {
                 <Badge variant="outline" className="text-[10px] font-normal">
                   {signal.usage === "trigger" ? "경보 전용" : "맥락 지표"}
                 </Badge>
+                {trigger && (
+                  <Badge variant="danger" className="text-[10px] font-normal">
+                    {marketAlertLabel(signal.id)}
+                  </Badge>
+                )}
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {meta.role}
@@ -205,7 +221,7 @@ function normalizedTrend(signals: RegimeSignal[]) {
   );
 }
 
-export function MarketIndicators({ signals, fetchedAt }: Props) {
+export function MarketIndicators({ signals, fetchedAt, triggers = [] }: Props) {
   const available = signals.filter(
     (signal) => META[signal.id] && signal.value != null,
   );
@@ -221,7 +237,9 @@ export function MarketIndicators({ signals, fetchedAt }: Props) {
             <h2 className="text-xl font-semibold">시장 환경</h2>
             <InfoTip label="시장 환경 지표 사용법">
               시장 가격은 위험 선호와 충격을 확인하는 맥락·경보 지표입니다.
-              단독으로 자동 거시 레짐을 결정하지 않습니다.
+              단독으로 자동 거시 레짐을 결정하지 않습니다. 화살표는 가격 방향일
+              뿐 포트폴리오 전체의 긍정·부정을 뜻하지 않으며, 규칙이 경제적
+              의미를 확정한 활성 경보에만 위험 색상을 사용합니다.
             </InfoTip>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -356,7 +374,14 @@ export function MarketIndicators({ signals, fetchedAt }: Props) {
             </div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {group(id).map((signal) => (
-                <MarketCard key={signal.id} signal={signal} />
+                <MarketCard
+                  key={signal.id}
+                  signal={signal}
+                  trigger={triggers.find((trigger) =>
+                    trigger.rule_id.includes(signal.id.replace("market_", ""))
+                    || trigger.rule_id.includes(signal.id)
+                  )}
+                />
               ))}
             </div>
           </section>

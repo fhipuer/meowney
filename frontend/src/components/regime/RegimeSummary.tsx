@@ -26,7 +26,7 @@ export function RegimeSummary() {
           {data ? (
             <>
               <Badge className="max-w-full whitespace-normal text-center leading-4" variant={TONE_STYLES[regimeLevelTone(data.automatic_regime)].badge}>{regimeLevelLabel(data.automatic_regime)}</Badge>
-              <span className={data.triggers.length ? 'text-danger' : undefined}>점검 기준 충족 {data.triggers.length}개</span>
+              <span className={data.triggers.length ? 'text-danger' : undefined}>활성 위험 신호 {data.triggers.length}개</span>
             </>
           ) : '레짐 데이터 설정 후 시장 맥락을 표시합니다.'}
         </div>

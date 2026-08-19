@@ -15,6 +15,26 @@ def service_for(tmp_path):
     return service
 
 
+def test_semantic_migration_uses_user_facing_indicator_names(tmp_path):
+    service = service_for(tmp_path)
+    with service.db.connect() as conn:
+        names = {
+            row["id"]: row["name"]
+            for row in conn.execute(
+                "SELECT id,name FROM regime_indicators WHERE id IN ('us_claims','us3m')"
+            ).fetchall()
+        }
+        trigger_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(regime_triggers)").fetchall()
+        }
+
+    assert names == {
+        "us_claims": "미국 신규실업수당 4주 평균",
+        "us3m": "미국 3개월 국채금리",
+    }
+    assert "current_fired_at" in trigger_columns
+
+
 def test_thesis_snapshot_changes_compare_each_independent_stage():
     previous = {
         "ai_capex": {"state": "높은 투자 지속"},
@@ -150,7 +170,7 @@ def test_rate_model_is_connected_to_canonical_rate_domain(tmp_path):
     conditions = evaluation["macro_quadrant"]["financial_conditions"]
     rates_domain = next(item for item in evaluation["domains"] if item["id"] == "rates")
 
-    assert conditions["rates"]["version"] == "2026-08-rates-v3"
+    assert conditions["rates"]["version"] == "2026-08-rates-v4"
     assert conditions["duration_stress"]["label"] == "판정 불가"
     assert conditions["rates"]["score"] == pytest.approx(53.4)
     assert conditions["long_rates"]["term_premium_role"] == "decomposition_context"
@@ -170,6 +190,56 @@ def test_portfolio_context_does_not_mix_assets_from_other_portfolios(tmp_path):
     portfolio, _ = service._portfolio_context()
 
     assert [item["name"] for item in portfolio["assets"]] == ["기준 자산"]
+
+
+def test_recession_confirmation_does_not_treat_curve_warning_as_recession() -> None:
+    evaluation = {
+        "signals": [
+            {"id": "us_gdp", "status": "중립", "usable_for_decision": True},
+            {"id": "us_indpro", "status": "강함", "usable_for_decision": True},
+            {"id": "us_retail", "status": "중립", "usable_for_decision": True},
+        ],
+        "macro_quadrant": {
+            "as_of_date": "2026-08-18",
+            "financial_conditions": {
+                "as_of_date": "2026-08-18",
+                "yield_curve": {
+                    "score": 25,
+                    "as_of_date": "2026-08-18",
+                },
+                "credit": {"score": -38},
+            },
+        },
+    }
+
+    result = RegimeService._recession_confirmation(evaluation, [])
+
+    assert result["status"] == "leading_only"
+    assert result["label"] == "노동·실물·신용 3축의 악화 확인 없음 · 수익률곡선 선행 경고 관찰"
+    assert result["coincident_risk_count"] == 0
+    assert next(item for item in result["channels"] if item["id"] == "yield_curve")["state"] == "선행위험 경계"
+
+
+def test_recession_confirmation_requires_coincident_channels_for_confirmation() -> None:
+    evaluation = {
+        "signals": [
+            {"id": "us_gdp", "status": "둔화", "usable_for_decision": True},
+            {"id": "us_indpro", "status": "약화", "usable_for_decision": True},
+            {"id": "us_retail", "status": "중립", "usable_for_decision": True},
+        ],
+        "macro_quadrant": {
+            "financial_conditions": {
+                "yield_curve": {"score": 25, "as_of_date": "2026-08-18"},
+                "credit": {"score": 35},
+            },
+        },
+    }
+
+    result = RegimeService._recession_confirmation(evaluation, [])
+
+    assert result["status"] == "confirmed"
+    assert result["label"] == "노동·실물·신용 중 복수 축 악화 확인"
+    assert result["coincident_risk_count"] == 2
 
 
 def test_same_data_produces_same_evaluation(tmp_path):
@@ -290,6 +360,8 @@ def test_snapshot_keeps_auto_and_user_judgment_separate(tmp_path):
     assert snapshot["input_fingerprint"]
     assert snapshot["raw_data"]["schema_version"] == "2"
     assert any(item["id"] == "us_unemployment" for item in snapshot["raw_data"]["indicators"])
+    assert snapshot["ai_capex"]["aggregate"]["expected_count"] == 4
+    assert snapshot["ai_capex"]["period_alignment"] == "exact_period_end"
     with service.db.connect() as conn:
         acknowledgment = conn.execute("SELECT * FROM regime_review_acknowledgments").fetchone()
     assert acknowledgment is not None

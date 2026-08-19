@@ -18,6 +18,7 @@ from app.db.database import get_database_client
 
 FRED_RELEASE_DATES_API = "https://api.stlouisfed.org/fred/release/dates"
 FRED_RELEASE_PAGE = "https://fred.stlouisfed.org/release"
+FEDERAL_RESERVE_CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 EVENT_FEED_SOURCE = "macro_events"
 LOOKAHEAD_DAYS = 370
 
@@ -43,6 +44,39 @@ FRED_RELEASES = (
     FredRelease(54, "PCE·개인소득", ("growth", "inflation", "rates")),
     FredRelease(9, "미국 소매판매", ("growth", "rates")),
 )
+
+# 연준은 정례회의 일정을 연 단위로 미리 확정한다. 통계 발표 API와 독립된
+# 공식 일정이므로 최종 의사결정일(회의 둘째 날)을 결정론적으로 저장한다.
+FOMC_DECISION_DATES = (
+    "2026-09-16",
+    "2026-10-28",
+    "2026-12-09",
+    "2027-01-27",
+    "2027-03-17",
+    "2027-04-28",
+    "2027-06-09",
+    "2027-07-28",
+    "2027-09-15",
+    "2027-10-27",
+    "2027-12-08",
+)
+
+
+def official_policy_events(start_date: date, end_date: date) -> list[dict[str, Any]]:
+    return [
+        {
+            "title": "FOMC 금리결정",
+            "scheduled_date": value,
+            "scheduled_at": None,
+            "time_precision": "date",
+            "importance": "high",
+            "affected_domains": ["rates", "liquidity"],
+            "source": "Federal Reserve",
+            "source_url": FEDERAL_RESERVE_CALENDAR_URL,
+        }
+        for value in FOMC_DECISION_DATES
+        if start_date <= date.fromisoformat(value) <= end_date
+    ]
 
 
 def _safe_error(exc: Exception) -> str:
@@ -170,7 +204,9 @@ class RegimeEventService:
         error: str | None,
         today: date,
     ) -> int:
-        events = [event for _, release_events in successful_releases for event in release_events]
+        fred_events = [event for _, release_events in successful_releases for event in release_events]
+        policy_events = official_policy_events(today, today + timedelta(days=LOOKAHEAD_DAYS))
+        events = fred_events + policy_events
         with self.db.connect() as conn:
             for release, _ in successful_releases:
                 # 일정 변경 시 예전 미래 날짜가 중복 표시되지 않도록 해당 발표만 교체한다.
@@ -180,11 +216,17 @@ class RegimeEventService:
                     "AND COALESCE(scheduled_date,substr(scheduled_at,1,10))>=?",
                     (release.title, today.isoformat()),
                 )
+            conn.execute(
+                "DELETE FROM regime_events WHERE status='scheduled' AND event_type='FOMC 금리결정' "
+                "AND source='Federal Reserve' "
+                "AND COALESCE(scheduled_date,substr(scheduled_at,1,10))>=?",
+                (today.isoformat(),),
+            )
             for item in events:
                 event_id = str(
                     uuid5(
                         NAMESPACE_URL,
-                        f"FRED:{item['release_id']}:{item['scheduled_date']}",
+                        f"{item['source']}:{item.get('release_id', item['title'])}:{item['scheduled_date']}",
                     )
                 )
                 conn.execute(
@@ -222,14 +264,19 @@ class RegimeEventService:
 
     async def refresh(self) -> dict[str, Any]:
         attempted = datetime.now(timezone.utc).isoformat()
-        if not self.api_key:
-            return self._record_failure(
-                attempted,
-                "configuration_required",
-                "FRED_API_KEY가 설정되지 않았습니다.",
-            )
-
         today = datetime.now(ZoneInfo(settings.timezone)).date()
+        if not self.api_key:
+            error = "FRED_API_KEY가 설정되지 않아 FOMC 공식 일정만 갱신했습니다."
+            saved = self._persist(
+                [], attempted=attempted, status="partial", error=error, today=today
+            )
+            return {
+                "status": "partial",
+                "saved": saved,
+                "source": "Federal Reserve",
+                "error": error,
+            }
+
         end_date = today + timedelta(days=LOOKAHEAD_DAYS)
         try:
             async with self.client_factory(
@@ -259,7 +306,16 @@ class RegimeEventService:
                 successful_releases.append((release, result))
 
         if not successful_releases:
-            return self._record_failure(attempted, "failed", " · ".join(errors))
+            error = (" · ".join(errors) or "FRED 일정 갱신 실패")[:800]
+            saved = self._persist(
+                [], attempted=attempted, status="partial", error=error, today=today
+            )
+            return {
+                "status": "partial",
+                "saved": saved,
+                "source": "Federal Reserve",
+                "error": error,
+            }
 
         status = "partial" if errors else "success"
         error = " · ".join(errors)[:800] or None
@@ -273,7 +329,7 @@ class RegimeEventService:
         return {
             "status": status,
             "saved": saved,
-            "source": "FRED",
+            "source": "FRED+Federal Reserve",
             "error": error,
         }
 
@@ -285,7 +341,7 @@ class RegimeEventService:
             ).fetchone()
         return dict(row) if row else None
 
-    def upcoming(self, limit: int = 5) -> list[dict[str, Any]]:
+    def upcoming(self, limit: int = 8) -> list[dict[str, Any]]:
         today = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
         with self.db.connect() as conn:
             rows = conn.execute(

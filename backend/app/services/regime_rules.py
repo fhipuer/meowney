@@ -13,7 +13,7 @@ from app.services.regime_rates import (
 )
 
 
-RULE_VERSION = "2026-08-p2.0.0-rates-v3"
+RULE_VERSION = "2026-08-p2.0.0-rates-v4"
 SEVERITY_RANK = {"medium": 1, "high": 2, "critical": 3}
 REGIME_RANK = {"유지": 0, "경계": 1, "약화": 2, "전환": 3}
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
