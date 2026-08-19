@@ -7,10 +7,12 @@ from typing import Any
 from uuid import UUID
 
 from app.services.asset_service import AssetService
+from app.services.decision_regime_brief import build_regime_quantitative_markdown
 from app.services.rebalance_service import RebalanceService
+from app.services.regime_service import RegimeService
 
 
-PROMPT_TEMPLATE_VERSION = "1.0.0"
+PROMPT_TEMPLATE_VERSION = "1.1.0"
 PROMPT_TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "portfolio_decision_prompt.md"
 WEIGHT_TOLERANCE = Decimal("0.01")
 
@@ -60,6 +62,7 @@ def build_snapshot_markdown(
     summary: Any,
     matcher,
     generated_at: datetime,
+    regime_markdown: str | None = None,
 ) -> str:
     """이미 평가된 자산으로 스냅샷을 만든다. 가격·손익은 재계산하지 않는다."""
     if not plan:
@@ -206,6 +209,8 @@ def build_snapshot_markdown(
         lines += ["## 플랜 미분류 자산", "", "아래 자산은 선택된 플랜의 그룹 또는 개별 목표에 연결되지 않았습니다.", ""]
         for asset in unassigned:
             add_asset(asset)
+    if regime_markdown and regime_markdown.strip():
+        lines += [regime_markdown.strip(), ""]
     strategy_prompt = str(plan.get("strategy_prompt") or "")
     if strategy_prompt.strip():
         lines += ["## 플랜 전략 프롬프트", "", strategy_prompt, ""]
@@ -232,7 +237,16 @@ class DecisionPromptService:
         result = self.rebalance.db.table("portfolios").select("name,base_currency").eq("id", str(portfolio_id)).limit(1).execute()
         portfolio = result.data[0] if result.data else {"base_currency": "KRW"}
         now = datetime.now().astimezone()
-        snapshot = build_snapshot_markdown(plan, portfolio, enriched, summary, self.rebalance.match_item_to_asset, now)
+        regime_markdown = build_regime_quantitative_markdown(RegimeService().current())
+        snapshot = build_snapshot_markdown(
+            plan,
+            portfolio,
+            enriched,
+            summary,
+            self.rebalance.match_item_to_asset,
+            now,
+            regime_markdown=regime_markdown,
+        )
         markdown = snapshot
         safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in str(plan["name"])).strip("-") or "plan"
         return markdown, f"portfolio-decision-prompt_{safe_name}_{now:%Y-%m-%d}.md"

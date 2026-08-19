@@ -86,7 +86,7 @@ export function RebalancePlanPage() {
       anchor.remove()
       URL.revokeObjectURL(url)
     } catch (error: unknown) {
-      let message = 'AI 의사결정 프롬프트를 만들지 못했습니다.'
+      let message = 'AI 포트폴리오 점검 문서를 만들지 못했습니다.'
       if (error && typeof error === 'object' && 'response' in error) {
         const response = (error as { response?: { data?: Blob } }).response
         if (response?.data instanceof Blob) {
@@ -324,7 +324,7 @@ export function RebalancePlanPage() {
                     ) : (
                       <Download className="mr-2 h-3.5 w-3.5" />
                     )}
-                    {downloadingPlanId === plan.id ? '최신 가격 확인 중...' : 'AI 의사결정 프롬프트 다운로드'}
+                    {downloadingPlanId === plan.id ? '점검 문서 생성 중...' : 'AI 포트폴리오 점검 문서'}
                   </Button>
                 </div>
               </CardContent>

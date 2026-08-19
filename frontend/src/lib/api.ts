@@ -257,15 +257,6 @@ export const regimeApi = {
     const { data } = await apiClient.put<RegimeSnapshot>(`/regime/snapshots/${id}`, payload)
     return data
   },
-  downloadMarkdown: async () => {
-    const { data } = await apiClient.get('/regime/export?format=markdown', { responseType: 'blob' })
-    const url = URL.createObjectURL(data)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = 'meowney-regime.md'
-    anchor.click()
-    URL.revokeObjectURL(url)
-  },
 }
 
 // ============================================
@@ -353,7 +344,7 @@ export const rebalanceApi = {
     return data
   },
 
-  // 최신 자산 평가를 포함한 AI 의사결정 프롬프트 다운로드
+  // 최신 자산 평가와 정량 레짐 근거를 포함한 AI 포트폴리오 점검 문서 다운로드
   downloadDecisionPrompt: async (planId: string): Promise<{ blob: Blob; filename: string }> => {
     const response = await apiClient.get<Blob>(
       `/rebalance/plans/${planId}/decision-prompt`,

@@ -3,7 +3,7 @@
 import asyncio
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.services.regime_service import RegimeService
@@ -94,15 +94,3 @@ async def update_regime_snapshot(snapshot_id: str, request: SnapshotRequest):
         return RegimeService().update_judgment(snapshot_id, request.user_regime, request.user_note)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Snapshot을 찾을 수 없습니다.") from exc
-
-
-@router.get("/export")
-async def export_regime_data(format: Literal["markdown", "json"] = "markdown"):
-    service = RegimeService()
-    if format == "json":
-        return {"current": service.current(), "history": service.history(include_raw=True)}
-    return Response(
-        content=service.export_markdown(),
-        media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=meowney-regime.md"},
-    )

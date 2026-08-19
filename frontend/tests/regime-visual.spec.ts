@@ -28,7 +28,8 @@ test('regime current and indicator drill-down remain readable', async ({ page })
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/regime')
   await expect(page.getByRole('heading', { name: '투자 레짐' })).toBeVisible()
-  await expect(page.getByText('v1.12.0', { exact: true })).toBeVisible()
+  await expect(page.getByText('v1.13.0', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '상세점검용 데이터' })).toHaveCount(0)
   await expect(page.getByText('미국 거시경제 현재 수준과 최근 방향')).toBeVisible()
   await expect(page.getByText('DRAM·HBM 병목', { exact: true })).toBeVisible()
   const dramStage = page.locator('[data-thesis-stage="dram"]')
@@ -60,7 +61,7 @@ test('regime current and indicator drill-down remain readable', async ({ page })
   await page.mouse.move(0, 0)
   await expectNoPageOverflow(page)
   if (capture) {
-    await page.screenshot({ path: '../.local-run/regime-v1120-current-desktop.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/regime-v1130-current-desktop.png', fullPage: true })
   }
 
   await page.getByRole('tab', { name: '지표', exact: true }).click()
@@ -72,7 +73,7 @@ test('regime current and indicator drill-down remain readable', async ({ page })
   await expect(firstChart.locator('svg').first()).toBeVisible()
   await expectNoPageOverflow(page)
   if (capture) {
-    await page.screenshot({ path: '../.local-run/regime-v1120-growth-desktop.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/regime-v1130-growth-desktop.png', fullPage: true })
   }
 
   await page.getByRole('tab', { name: '금리', exact: true }).click()
@@ -91,9 +92,9 @@ test('regime current and indicator drill-down remain readable', async ({ page })
   await expect(page.getByText('미국 국채 3M (SGOV 프록시)')).toBeVisible()
   await expectNoPageOverflow(page)
   if (capture) {
-    await page.screenshot({ path: '../.local-run/regime-v1120-rates-desktop.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/regime-v1130-rates-desktop.png', fullPage: true })
     await page.getByText('금리 환경 판단').scrollIntoViewIfNeeded()
-    await page.screenshot({ path: '../.local-run/regime-v1120-rates-viewport.png' })
+    await page.screenshot({ path: '../.local-run/regime-v1130-rates-viewport.png' })
   }
 
   await page.getByRole('tab', { name: '메모리·반도체', exact: true }).click()
@@ -110,9 +111,9 @@ test('regime current and indicator drill-down remain readable', async ({ page })
   await expect(page.locator('[data-metric-label^="공급사 CAPEX YoY"]').first()).toHaveAttribute('data-semantic-tone', 'neutral')
   await expectNoPageOverflow(page)
   if (capture) {
-    await page.screenshot({ path: '../.local-run/regime-v1120-semiconductor-desktop.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/regime-v1130-semiconductor-desktop.png', fullPage: true })
     await page.getByText('국내 2사 실적 확인 · 보조축').scrollIntoViewIfNeeded()
-    await page.screenshot({ path: '../.local-run/regime-v1120-company-viewport.png' })
+    await page.screenshot({ path: '../.local-run/regime-v1130-company-viewport.png' })
   }
 
   const historyTab = page.getByRole('tab', { name: '기록', exact: true })
@@ -120,7 +121,7 @@ test('regime current and indicator drill-down remain readable', async ({ page })
   await expect(historyTab).toHaveAttribute('aria-selected', 'true')
   await expectNoPageOverflow(page)
   if (capture) {
-    await page.screenshot({ path: '../.local-run/regime-v1120-history-desktop.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/regime-v1130-history-desktop.png', fullPage: true })
   }
 
   expect(runtimeErrors).toEqual([])
@@ -139,7 +140,7 @@ test('regime current view has no global overflow on mobile', async ({ page }) =>
   await expectNoElementOverflow(page.locator('[data-financial-card]'))
   await expectNoPageOverflow(page)
   if (capture) {
-    await page.screenshot({ path: '../.local-run/regime-v1120-current-mobile.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/regime-v1130-current-mobile.png', fullPage: true })
   }
 
   await page.getByRole('tab', { name: '지표', exact: true }).click()
@@ -149,7 +150,7 @@ test('regime current view has no global overflow on mobile', async ({ page }) =>
   await expectNoPageOverflow(page)
   if (capture) {
     await page.getByText('금리 환경 판단').scrollIntoViewIfNeeded()
-    await page.screenshot({ path: '../.local-run/regime-v1120-rates-mobile.png' })
+    await page.screenshot({ path: '../.local-run/regime-v1130-rates-mobile.png' })
   }
 
   await page.getByRole('tab', { name: '메모리·반도체', exact: true }).click()
@@ -158,12 +159,32 @@ test('regime current view has no global overflow on mobile', async ({ page }) =>
   await expect(page.getByText('재고자산 YoY · 절대액').first()).toBeVisible()
   await expectNoPageOverflow(page)
   if (capture) {
-    await page.screenshot({ path: '../.local-run/regime-v1120-semiconductor-mobile.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/regime-v1130-semiconductor-mobile.png', fullPage: true })
   }
 
   await page.getByRole('tab', { name: '기록', exact: true }).click()
   await expectNoPageOverflow(page)
   if (capture) {
-    await page.screenshot({ path: '../.local-run/regime-v1120-history-mobile.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/regime-v1130-history-mobile.png', fullPage: true })
+  }
+})
+
+test('portfolio review document is exposed from plans only', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+
+  await page.goto('/regime')
+  await expect(page.getByRole('button', { name: '상세점검용 데이터' })).toHaveCount(0)
+
+  await page.goto('/rebalance/plans')
+  await expect(page.getByRole('heading', { name: '플랜 설정' })).toBeVisible()
+  const decisionButtons = page.getByRole('button', { name: 'AI 포트폴리오 점검 문서' })
+  await expect(decisionButtons.first()).toBeVisible({ timeout: 10_000 })
+  expect(await decisionButtons.count()).toBeGreaterThan(0)
+  await decisionButtons.first().scrollIntoViewIfNeeded()
+  await expectNoPageOverflow(page)
+
+  if (capture) {
+    await page.screenshot({ path: '../.local-run/plan-v1130-decision-document.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/plan-v1130-decision-document-viewport.png' })
   }
 })

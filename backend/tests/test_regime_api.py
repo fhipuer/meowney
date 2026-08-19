@@ -11,6 +11,10 @@ class RefreshStub:
         return self.result
 
 
+def test_regime_router_no_longer_exposes_a_separate_export():
+    assert "/export" not in {route.path for route in regime_api.router.routes}
+
+
 @pytest.mark.asyncio
 async def test_aggregate_refresh_reports_partial_when_one_feed_fails(monkeypatch):
     monkeypatch.setattr(regime_api, "RegimeService", lambda: RefreshStub({"status": "success"}))

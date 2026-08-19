@@ -54,7 +54,7 @@ def summary(assets):
     )
 
 
-def render(groups, assets, allocations=None, **plan_overrides):
+def render(groups, assets, allocations=None, regime_markdown=None, **plan_overrides):
     plan = {"id": "p1", "name": "한글 플랜", "strategy_prompt": None, "groups": groups, "allocations": allocations or []}
     plan.update(plan_overrides)
     return build_snapshot_markdown(
@@ -64,6 +64,7 @@ def render(groups, assets, allocations=None, **plan_overrides):
         summary(assets),
         matcher,
         datetime(2026, 8, 5, 12, tzinfo=timezone.utc),
+        regime_markdown=regime_markdown,
     )
 
 
@@ -210,6 +211,20 @@ def test_empty_strategy_prompt_uses_default_guidance_once_after_details():
 
     assert markdown.count("# 포트폴리오 의사결정 지침") == 1
     assert markdown.index("## 그룹별 상세") < markdown.index("# 포트폴리오 의사결정 지침")
+
+
+def test_regime_quantitative_data_is_inserted_before_user_strategy_prompt():
+    markdown = render(
+        [{"name": "성장 자산", "target_percentage": 100, "items": [{"asset_id": "a1"}]}],
+        [asset()],
+        regime_markdown="## Meowney 정량 레짐 데이터\n\n- Core CPI 3M 연율 2.6%",
+        strategy_prompt="# 사용자 의사결정 지침\n\n독립적으로 판단한다.",
+    )
+
+    details_position = markdown.index("## 그룹별 상세")
+    regime_position = markdown.index("## Meowney 정량 레짐 데이터")
+    strategy_position = markdown.index("## 플랜 전략 프롬프트")
+    assert details_position < regime_position < strategy_position
 
 
 def test_individual_allocation_asset_is_included_in_detail():

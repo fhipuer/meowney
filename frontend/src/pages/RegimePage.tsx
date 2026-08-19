@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { HelpCircle, Database, Download, RefreshCw } from "lucide-react";
+import { HelpCircle, Database, RefreshCw } from "lucide-react";
 import {
   CartesianGrid,
   Bar,
@@ -1727,13 +1727,6 @@ export function RegimePage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => regimeApi.downloadMarkdown()}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            상세점검용 데이터
-          </Button>
           <Button
             variant="outline"
             onClick={() => refresh.mutate()}
