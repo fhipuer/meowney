@@ -17,9 +17,11 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { usePlans, useCalculateRebalance } from '@/hooks/useRebalance'
 import { useSettings } from '@/hooks/useSettings'
-import { formatKRW, getProfitClass } from '@/lib/utils'
+import { formatKRW, getProfitClass, maskValue } from '@/lib/utils'
+import { useStore } from '@/store/useStore'
 
 export function RebalancePage() {
+  const { isPrivacyMode } = useStore()
   const { data: plans, isLoading: plansLoading } = usePlans()
   const { data: settings } = useSettings()
   const calculateMutation = useCalculateRebalance()
@@ -59,7 +61,7 @@ export function RebalancePage() {
   const hasPlans = plans && plans.length > 0
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="rebalance-page">
       {/* 페이지 헤더 */}
       <div className="flex items-end justify-between gap-4 border-b border-border/70 pb-6">
         <div>
@@ -156,11 +158,11 @@ export function RebalancePage() {
 
           {/* 계산 결과 */}
           {calculateMutation.data && (
-            <Card>
+            <Card data-testid="rebalance-result">
               <CardHeader>
                 <CardTitle>리밸런싱 제안</CardTitle>
                 <CardDescription>
-                  플랜: {calculateMutation.data.plan_name} | 총 자산: {formatKRW(calculateMutation.data.total_value)}
+                  플랜: {calculateMutation.data.plan_name} | 총 자산: {maskValue(formatKRW(calculateMutation.data.total_value), isPrivacyMode)}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -214,7 +216,7 @@ export function RebalancePage() {
                                     현재: {suggestion.current_percentage.toFixed(1)}% → 목표: {suggestion.target_percentage.toFixed(1)}%
                                   </div>
                                   <div className="text-xs text-muted-foreground mt-1">
-                                    평가금액: {formatKRW(suggestion.current_value)}
+                                    평가금액: {maskValue(formatKRW(suggestion.current_value), isPrivacyMode)}
                                     {suggestion.effective_band !== undefined && (
                                       <span className="ml-2 text-muted-foreground/70">
                                         허용 ±{suggestion.effective_band.toFixed(2)}%p
@@ -245,8 +247,8 @@ export function RebalancePage() {
                                           </>
                                         )}
                                       </div>
-                                      <div className={getProfitClass(suggestion.suggested_amount)}>
-                                        {formatKRW(Math.abs(suggestion.suggested_amount))}
+                                      <div className={`whitespace-nowrap ${getProfitClass(suggestion.suggested_amount)}`}>
+                                        {maskValue(formatKRW(Math.abs(suggestion.suggested_amount)), isPrivacyMode)}
                                       </div>
                                       {suggestion.suggested_quantity && (
                                         <div className="text-xs text-muted-foreground">
@@ -288,7 +290,7 @@ export function RebalancePage() {
                                     현재: {(groupSuggestion.current_percentage ?? 0).toFixed(1)}% → 목표: {groupSuggestion.target_percentage.toFixed(1)}%
                                   </div>
                                   <div className="text-xs text-muted-foreground mt-1">
-                                    평가금액: {formatKRW(groupSuggestion.current_value ?? 0)}
+                                    평가금액: {maskValue(formatKRW(groupSuggestion.current_value ?? 0), isPrivacyMode)}
                                   </div>
                                 </div>
 
@@ -317,8 +319,11 @@ export function RebalancePage() {
                                       <div className={diff >= 0 ? 'text-red-500' : 'text-blue-500'}>
                                         {diff >= 0 ? '+' : ''}{diff.toFixed(1)}%p
                                       </div>
-                                      <div className="text-xs text-muted-foreground mt-1">
-                                        {groupSuggestion.suggested_amount >= 0 ? '+' : ''}{formatKRW(groupSuggestion.suggested_amount)}
+                                      <div className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
+                                        {maskValue(
+                                          `${groupSuggestion.suggested_amount >= 0 ? '+' : ''}${formatKRW(groupSuggestion.suggested_amount)}`,
+                                          isPrivacyMode,
+                                        )}
                                       </div>
                                     </>
                                   )}

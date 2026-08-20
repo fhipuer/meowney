@@ -8,7 +8,11 @@ import {
   financialConditionTone,
   memoryPriceTone,
   memorySupplierPriceDeltaTone,
+  powerConstructionTone,
   powerDemandTone,
+  powerInterconnectionTone,
+  powerOperationsTone,
+  powerTransmissionTone,
   regimeLevelTone,
   signalMetricTone,
   signalStatusTone,
@@ -96,5 +100,24 @@ describe("regime semantic color context", () => {
     expect(powerDemandTone("상업용 수요 우세")).toBe("caution");
     expect(powerDemandTone("완만한 변화")).toBe("neutral");
     expect(powerDemandTone("수요 확장", false)).toBe("neutral");
+    expect(powerDemandTone("광범위한 수요 가속")).toBe("positive");
+    expect(powerDemandTone("공급 확충 진행")).toBe("neutral");
+    expect(powerConstructionTone("공급 확충 진행")).toBe("positive");
+    expect(powerDemandTone("병목 압력 상승")).toBe("caution");
+    expect(powerDemandTone("전력 수요 둔화")).toBe("negative");
+    expect(powerDemandTone("전력 수요 빠르게 확대")).toBe("positive");
+    expect(powerDemandTone("방향 엇갈림")).toBe("caution");
+    expect(powerDemandTone("전력망 투자 가설 강화")).toBe("positive");
+    expect(powerOperationsTone("운영 여유")).toBe("positive");
+    expect(powerOperationsTone("부담 신호 관찰")).toBe("caution");
+    expect(powerOperationsTone("운영 부담 높음")).toBe("negative");
+    expect(powerConstructionTone("건설 진행")).toBe("positive");
+    expect(powerConstructionTone("건설 미약")).toBe("caution");
+    expect(powerConstructionTone("지연·순감소")).toBe("negative");
+    expect(powerInterconnectionTone("접속 대기 부담 높음")).toBe("negative");
+    expect(powerInterconnectionTone("부담 완화")).toBe("positive");
+    expect(powerTransmissionTone("송전 투자 확대")).toBe("positive");
+    expect(powerTransmissionTone("투자 둔화")).toBe("negative");
+    expect(powerTransmissionTone("표본 제한")).toBe("neutral");
   });
 });

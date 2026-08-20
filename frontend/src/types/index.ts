@@ -757,8 +757,161 @@ export interface PowerCycle {
   source: string;
   source_url: string;
   fetch_status: RegimeFeedHealth | null;
+  demand_axis: {
+    state: string;
+    reason: string;
+    score: number;
+    coverage: number;
+    model: "eia930+monthly" | "monthly_fallback" | string;
+    observation_date: string | null;
+    age_days: number | null;
+    is_stale: boolean;
+    national_yoy_28d: number | null;
+    national_yoy_84d: number | null;
+    ai_regions_yoy_28d: number | null;
+    ai_regions_yoy_84d: number | null;
+    ai_regions_acceleration_pp: number | null;
+    ai_excess_growth_pp: number | null;
+    regional_expansion_share: number | null;
+    region_coverage: number;
+    expected_region_count: number;
+    available_region_count: number;
+    commercial_yoy_3m: number | null;
+    regions: Array<{
+      id: string;
+      name: string;
+      yoy_28d: number | null;
+      yoy_84d: number | null;
+      observation_date: string | null;
+      is_ai_proxy: boolean;
+      forecast_surprise_pct: number | null;
+      forecast_abs_error_pct: number | null;
+      generation_coverage_pct: number | null;
+      net_import_share_pct: number | null;
+      operating_pressure: boolean;
+    }>;
+    yoy_history: Array<{
+      date: string;
+      national: number;
+      ai_regions: number;
+    }>;
+    source_url: string;
+  };
+  operations_axis: {
+    state: string;
+    reason: string;
+    coverage: number;
+    observation_date: string | null;
+    age_days: number | null;
+    is_stale: boolean;
+    window_days: number;
+    forecast_surprise_pct: number | null;
+    forecast_abs_error_pct: number | null;
+    generation_coverage_pct: number | null;
+    net_import_share_pct: number | null;
+    pressure_region_count: number | null;
+    expected_region_count: number;
+    history: Array<{
+      date: string;
+      forecast_surprise_pct: number;
+      forecast_abs_error_pct: number | null;
+      generation_coverage_pct: number;
+      net_import_share_pct: number;
+    }>;
+    source_url: string;
+    limitations: string;
+  };
+  supply_axis: {
+    state: string;
+    reason: string;
+    coverage: number;
+    observation_date: string | null;
+    age_days: number | null;
+    is_stale: boolean;
+    operating_capacity_gw: number | null;
+    committed_additions_24m_gw: number | null;
+    retirements_24m_gw: number | null;
+    net_additions_24m_gw: number | null;
+    net_pipeline_ratio_24m_pct: number | null;
+    variable_storage_share_24m_pct: number | null;
+    delayed_committed_capacity_gw: number | null;
+    mix: Array<{
+      id: "solar" | "battery" | "wind" | "gas" | "other" | string;
+      value_gw: number | null;
+    }>;
+    source_url: string;
+    fetch_status: RegimeFeedHealth | null;
+  };
+  interconnection_axis: PowerStructuralAxis & {
+    metrics: {
+      active_queue_gw: PowerAxisMetric | null;
+      active_generation_gw: PowerAxisMetric | null;
+      active_storage_gw: PowerAxisMetric | null;
+      ia_executed_active_gw: PowerAxisMetric | null;
+      ia_executed_share_pct: PowerAxisMetric | null;
+      median_active_age_years: PowerAxisMetric | null;
+      recent_ir_to_cod_median_years: PowerAxisMetric | null;
+      active_projects: PowerAxisMetric | null;
+      raw_component_total_gw?: PowerAxisMetric | null;
+      raw_component_storage_gw?: PowerAxisMetric | null;
+    };
+    history: Array<{
+      date: string;
+      active_requests_gw?: number;
+      completed_gw?: number;
+      withdrawn_gw?: number;
+      median_ir_to_cod_years?: number;
+    }>;
+  };
+  transmission_investment_axis: PowerStructuralAxis & {
+    metrics: {
+      annual_additions_usd: PowerAxisMetric | null;
+      reporter_count: PowerAxisMetric | null;
+      three_year_cagr_pct: PowerAxisMetric | null;
+      like_for_like_three_year_cagr_pct: PowerAxisMetric | null;
+      current_reporter_prior_year_coverage_pct: PowerAxisMetric | null;
+      prior_reporter_retention_pct: PowerAxisMetric | null;
+    };
+    history: Array<{
+      date: string;
+      additions_usd?: number;
+      reporter_count?: number;
+      current_reporter_prior_year_coverage_pct?: number;
+    }>;
+  };
   methodology: string;
   limitations: string;
+}
+
+export interface PowerAxisMetric {
+  value: number;
+  unit: string;
+  observation_date: string;
+}
+
+export interface PowerStructuralAxis {
+  state: string;
+  reason: string;
+  coverage: number;
+  observation_date: string | null;
+  is_stale: boolean;
+  provenance: {
+    provider: string;
+    source_url: string;
+    scope_note: string;
+    dataset?: string;
+    original_source?: string;
+    data_url?: string;
+    license?: string;
+  };
+  freshness: {
+    status: string;
+    observation_date: string | null;
+    is_stale: boolean;
+    last_success_at?: string | null;
+    last_attempted_at?: string | null;
+    error?: string | null;
+  };
 }
 
 export interface RegimeFeedHealth {

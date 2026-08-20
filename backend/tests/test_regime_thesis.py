@@ -373,6 +373,8 @@ def test_power_decision_date_uses_monthly_sales_not_newer_annual_capacity():
 
     assert summary["decision_as_of_date"] == "2026-06-01"
     assert summary["as_of_date"] == "2026-07-01"
+    assert summary["is_stale"] is True
+    assert summary["supply_axis"]["is_stale"] is True
 
     state, _ = classify_semiconductor_cycle("타이트 신호", "재고 부담", "실적 둔화", 1)
     assert state == "경계"

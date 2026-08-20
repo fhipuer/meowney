@@ -17,7 +17,8 @@ import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { formatKRW, formatPercent } from '@/lib/utils'
+import { formatKRW, formatPercent, maskValue } from '@/lib/utils'
+import { useStore } from '@/store/useStore'
 import type { Asset } from '@/types'
 
 interface AssetSelectorModalProps {
@@ -46,6 +47,7 @@ export function AssetSelectorModal({
   description = "플랜에 추가할 자산을 선택하세요.",
   multiSelect = true,
 }: AssetSelectorModalProps) {
+  const { isPrivacyMode } = useStore()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
@@ -203,7 +205,7 @@ export function AssetSelectorModal({
                         )}
                       </div>
                       <div className="flex items-center gap-2 text-sm text-muted-foreground mt-0.5">
-                        <span>{formatKRW(asset.market_value || 0)}</span>
+                        <span>{maskValue(formatKRW(asset.market_value || 0), isPrivacyMode)}</span>
                         <span className="text-xs">
                           비중 {formatPercent(weight)}
                         </span>

@@ -46,7 +46,11 @@ def test_thesis_snapshot_changes_compare_each_independent_stage():
             "supply": {"state": "수급 개선"},
             "company_confirmation": {"state": "확장 확인"},
         },
-        "power_cycle": {"state": "완만한 변화"},
+        "power_cycle": {
+            "state": "병목 근거 제한",
+            "demand_axis": {"state": "혼조"},
+            "supply_axis": {"state": "공급 대응 제한"},
+        },
     }
     current = {
         "ai_capex": {"state": "높은 투자 지속"},
@@ -58,7 +62,11 @@ def test_thesis_snapshot_changes_compare_each_independent_stage():
             "supply": {"state": "재고 부담"},
             "company_confirmation": {"state": "실적 둔화"},
         },
-        "power_cycle": {"state": "완만한 변화"},
+        "power_cycle": {
+            "state": "수요 확대·공급 확충",
+            "demand_axis": {"state": "수요 확장"},
+            "supply_axis": {"state": "공급 확충 진행"},
+        },
     }
 
     assert RegimeService._thesis_changes(previous, current) == [
@@ -67,6 +75,9 @@ def test_thesis_snapshot_changes_compare_each_independent_stage():
         "HBM·서버 DRAM 간접계측: 타이트 관찰 → 타이트 지속 신호",
         "완제품 재고 보조축: 수급 개선 → 재고 부담",
         "국내 기업 확인: 확장 확인 → 실적 둔화",
+        "전력 투자 근거: 병목 근거 제한 → 수요 확대·공급 확충",
+        "전력 수요: 혼조 → 수요 확장",
+        "발전·저장 건설: 공급 대응 제한 → 공급 확충 진행",
     ]
 
 

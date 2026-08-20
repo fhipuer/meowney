@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
-from statistics import mean
+from collections import defaultdict
+from datetime import date, timedelta
+from statistics import mean, median
 from typing import Any
 
 from app.services.regime_customs import (
@@ -12,8 +13,21 @@ from app.services.regime_customs import (
     aggregate_customs_exports,
 )
 from app.services.regime_dart import DartSemiconductorService
-from app.services.regime_eia import EIA_DOC_URL, EiaPowerService
+from app.services.regime_eia import (
+    AI_POWER_PROXY_REGIONS,
+    EIA_860M_URL,
+    EIA_DOC_URL,
+    EIA_GRID_URL,
+    PIPELINE_FEED_ID,
+    RTO_REGIONS,
+    EiaPowerService,
+)
 from app.services.regime_external import ExternalObservationRepository
+from app.services.regime_grid import (
+    LBNL_FEED_ID,
+    PUDL_FEED_ID,
+    GridInfrastructureService,
+)
 from app.services.regime_kosis import KOSIS_TABLE_URL, KosisSemiconductorService
 from app.services.regime_memory import MemoryPriceService
 
@@ -714,8 +728,463 @@ def classify_power_demand(total: dict[str, Any], commercial: dict[str, Any]) -> 
     return "완만한 변화", "총수요와 상업용 수요가 강한 확장 또는 동반 둔화 조건에 해당하지 않습니다."
 
 
+def aligned_daily_yoy(
+    points: list[dict[str, Any]],
+    *,
+    window_days: int,
+    prior_offset_days: int = 364,
+    minimum_coverage: float = 0.8,
+) -> dict[str, Any]:
+    """Compare aligned weekday windows while tolerating sparse EIA-930 corrections."""
+    values: dict[date, float] = {}
+    for point in points:
+        try:
+            values[date.fromisoformat(point["date"])] = float(point["value"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not values:
+        return {"value": None, "sample_days": 0, "from": None, "to": None}
+    end = max(values)
+    pairs = [
+        (end - timedelta(days=offset), end - timedelta(days=offset + prior_offset_days))
+        for offset in range(window_days)
+    ]
+    pairs = [pair for pair in pairs if pair[0] in values and pair[1] in values]
+    if len(pairs) < window_days * minimum_coverage:
+        return {"value": None, "sample_days": len(pairs), "from": None, "to": end.isoformat()}
+    prior = sum(values[old] for _, old in pairs)
+    current = sum(values[new] for new, _ in pairs)
+    return {
+        "value": (current / prior - 1) * 100 if prior else None,
+        "sample_days": len(pairs),
+        "from": min(new for new, _ in pairs).isoformat(),
+        "to": max(new for new, _ in pairs).isoformat(),
+    }
+
+
+def aggregate_daily_series(
+    series: Iterable[list[dict[str, Any]]],
+    *,
+    expected_series_count: int | None = None,
+) -> list[dict[str, Any]]:
+    """Sum dates shared by every expected constituent region.
+
+    A missing region must not silently shrink a fixed geographic basket.  That
+    would make, for example, five available AI proxy regions look like the
+    intended six-region aggregate.
+    """
+    mappings: list[dict[str, float]] = []
+    for points in series:
+        mapping = {
+            str(point["date"]): float(point["value"])
+            for point in points if point.get("date") and point.get("value") is not None
+        }
+        if mapping:
+            mappings.append(mapping)
+    if not mappings or (
+        expected_series_count is not None and len(mappings) != expected_series_count
+    ):
+        return []
+    common_dates = set(mappings[0])
+    for mapping in mappings[1:]:
+        common_dates &= set(mapping)
+    return [
+        {"date": observed, "value": sum(mapping[observed] for mapping in mappings)}
+        for observed in sorted(common_dates)
+    ]
+
+
+def rolling_power_yoy_history(
+    national: list[dict[str, Any]],
+    ai_regions: list[dict[str, Any]],
+    *,
+    window_days: int = 28,
+    prior_offset_days: int = 364,
+    limit: int = 180,
+) -> list[dict[str, Any]]:
+    """Build rolling weekday-aligned YoY history for both demand lanes."""
+
+    def rolling(points: list[dict[str, Any]]) -> dict[str, float]:
+        values = dict(
+            (date.fromisoformat(point["date"]), float(point["value"]))
+            for point in points if point.get("date") and point.get("value") is not None
+        )
+        result: dict[str, float] = {}
+        for end in sorted(values):
+            pairs = [
+                (end - timedelta(days=offset), end - timedelta(days=offset + prior_offset_days))
+                for offset in range(window_days)
+            ]
+            pairs = [pair for pair in pairs if pair[0] in values and pair[1] in values]
+            if len(pairs) < window_days * 0.8:
+                continue
+            prior = sum(values[old] for _, old in pairs)
+            current = sum(values[new] for new, _ in pairs)
+            if prior:
+                result[end.isoformat()] = (current / prior - 1) * 100
+        return result
+
+    national_rolling = rolling(national)
+    ai_rolling = rolling(ai_regions)
+    dates = sorted(set(national_rolling) & set(ai_rolling))[-limit:]
+    return [
+        {
+            "date": observed,
+            "national": national_rolling[observed],
+            "ai_regions": ai_rolling[observed],
+        }
+        for observed in dates
+    ]
+
+
+def classify_power_demand_axis(
+    *,
+    national_yoy_84d: float | None,
+    ai_regions_yoy_84d: float | None,
+    commercial_yoy_3m: float | None,
+    regional_expansion_share: float | None,
+    ai_regions_acceleration_pp: float | None,
+    ai_excess_growth_pp: float | None = None,
+    region_coverage: float = 1.0,
+) -> tuple[str, str, int, float]:
+    """Use primary and confirming lanes instead of correlated vote counting."""
+    required = [national_yoy_84d, ai_regions_yoy_84d]
+    optional = [commercial_yoy_3m, regional_expansion_share, ai_regions_acceleration_pp]
+    coverage = (
+        (sum(value is not None for value in required) + sum(value is not None for value in optional))
+        / (len(required) + len(optional))
+    ) * min(max(region_coverage, 0.0), 1.0)
+    if any(value is None for value in required) or region_coverage < 1:
+        return (
+            "자료 부족",
+            "미국 전체 또는 고정된 AI 관찰지역 바스켓의 일간 수요가 빠져 방향을 판정하지 않습니다.",
+            0,
+            coverage,
+        )
+
+    national = float(national_yoy_84d)
+    ai_growth = float(ai_regions_yoy_84d)
+    ai_excess = ai_excess_growth_pp
+    if ai_excess is None:
+        # Compatibility for callers that do not yet provide the non-AI basket.
+        ai_excess = ai_growth - national
+
+    if national <= -1 and (
+        regional_expansion_share is None or regional_expansion_share <= 0.4
+    ):
+        state, score = "전력 수요 감소", -2
+    elif ai_growth >= 2 and ai_excess >= 1:
+        state, score = "AI 관찰지역 중심 확대", 2
+    elif national >= 2:
+        state, score = "전력 수요 빠르게 확대", 2
+    elif national >= 0.75:
+        state, score = "전력 수요 확대", 1
+    else:
+        state, score = "방향 엇갈림", 0
+    values = []
+    if national_yoy_84d is not None:
+        values.append(f"미국 84일 {national_yoy_84d:+.1f}%")
+    if ai_regions_yoy_84d is not None:
+        values.append(f"AI 인프라 관찰지역 84일 {ai_regions_yoy_84d:+.1f}%")
+    values.append(f"비AI 지역 대비 {ai_excess:+.1f}%p")
+    if commercial_yoy_3m is not None:
+        values.append(f"상업용 월간 {commercial_yoy_3m:+.1f}%")
+    if regional_expansion_share is not None:
+        values.append(f"지역 확산 {regional_expansion_share * 100:.0f}%")
+    return state, " · ".join(values), score, coverage
+
+
+def window_grid_operations(
+    demand: list[dict[str, Any]],
+    forecast: list[dict[str, Any]],
+    generation: list[dict[str, Any]],
+    interchange: list[dict[str, Any]],
+    *,
+    window_days: int = 28,
+    minimum_coverage: float = 0.8,
+) -> dict[str, Any]:
+    """Calculate matched EIA-930 operating-pressure proxies.
+
+    EIA defines negative total interchange as net inflow.  Both interchange and
+    forecast error are context signals—not direct measures of reserve margin or
+    a transmission bottleneck.
+    """
+
+    def mapping(points: list[dict[str, Any]]) -> dict[str, float]:
+        result: dict[str, float] = {}
+        for point in points:
+            try:
+                result[str(point["date"])] = float(point["value"])
+            except (KeyError, TypeError, ValueError):
+                continue
+        return result
+
+    lanes = [mapping(points) for points in (demand, forecast, generation, interchange)]
+    empty = {
+        "observation_date": None, "sample_days": 0, "coverage": 0.0,
+        "forecast_surprise_pct": None, "forecast_abs_error_pct": None,
+        "generation_coverage_pct": None, "net_import_share_pct": None,
+    }
+    if any(not lane for lane in lanes):
+        return empty
+    common = set(lanes[0])
+    for lane in lanes[1:]:
+        common &= set(lane)
+    selected = sorted(common)[-window_days:]
+    coverage = len(selected) / window_days
+    if coverage < minimum_coverage:
+        return {
+            **empty,
+            "observation_date": selected[-1] if selected else None,
+            "sample_days": len(selected),
+            "coverage": coverage,
+        }
+    demand_sum = sum(lanes[0][day] for day in selected)
+    forecast_sum = sum(lanes[1][day] for day in selected)
+    generation_sum = sum(lanes[2][day] for day in selected)
+    interchange_sum = sum(lanes[3][day] for day in selected)
+    abs_errors = [
+        abs(lanes[0][day] - lanes[1][day]) / lanes[1][day] * 100
+        for day in selected if lanes[1][day]
+    ]
+    return {
+        "observation_date": selected[-1],
+        "sample_days": len(selected),
+        "coverage": coverage,
+        "forecast_surprise_pct": (
+            (demand_sum - forecast_sum) / forecast_sum * 100 if forecast_sum else None
+        ),
+        "forecast_abs_error_pct": median(abs_errors) if abs_errors else None,
+        "generation_coverage_pct": generation_sum / demand_sum * 100 if demand_sum else None,
+        "net_import_share_pct": max(0.0, -interchange_sum) / demand_sum * 100 if demand_sum else None,
+    }
+
+
+def classify_grid_operations_axis(
+    *,
+    load_yoy_28d: float | None,
+    forecast_surprise_pct: float | None,
+    forecast_abs_error_pct: float | None,
+    net_import_share_pct: float | None,
+    pressure_region_count: int | None,
+    expected_region_count: int,
+    coverage: float,
+) -> tuple[str, str]:
+    if (
+        load_yoy_28d is None
+        or forecast_surprise_pct is None
+        or net_import_share_pct is None
+        or pressure_region_count is None
+        or coverage < 0.8
+    ):
+        return "자료 부족", "수요·익일예측·순발전·지역간 전력교환의 공통 28일 자료가 부족합니다."
+    high_load = load_yoy_28d >= 3
+    expanding_load = load_yoy_28d >= 2
+    forecast_pressure = forecast_surprise_pct >= 1.5
+    import_context = net_import_share_pct >= 5
+    broad_pressure = pressure_region_count >= max(2, expected_region_count // 2)
+    if high_load and forecast_pressure and (import_context or broad_pressure):
+        state = "운영 부담 높음"
+    elif (expanding_load and (forecast_pressure or import_context)) or broad_pressure:
+        state = "부담 신호 관찰"
+    else:
+        state = "운영 여유"
+    error_text = (
+        f" · 절대오차 중앙값 {forecast_abs_error_pct:.1f}%"
+        if forecast_abs_error_pct is not None else ""
+    )
+    return (
+        state,
+        f"AI 관찰지역 28일 수요 {load_yoy_28d:+.1f}% · 실제-익일예측 "
+        f"{forecast_surprise_pct:+.1f}%{error_text} · 순유입 의존 {net_import_share_pct:.1f}% · "
+        f"부담 관찰지역 {pressure_region_count}/{expected_region_count}",
+    )
+
+
+def rolling_grid_operations_history(
+    demand: list[dict[str, Any]],
+    forecast: list[dict[str, Any]],
+    generation: list[dict[str, Any]],
+    interchange: list[dict[str, Any]],
+    *,
+    window_days: int = 28,
+    limit: int = 180,
+) -> list[dict[str, Any]]:
+    """Build a bounded history from the same matched-window formulas."""
+
+    def mapping(points: list[dict[str, Any]]) -> dict[str, float]:
+        return {
+            str(point["date"]): float(point["value"])
+            for point in points if point.get("date") and point.get("value") is not None
+        }
+
+    lanes = [mapping(points) for points in (demand, forecast, generation, interchange)]
+    if any(not lane for lane in lanes):
+        return []
+    common = set(lanes[0])
+    for lane in lanes[1:]:
+        common &= set(lane)
+    dates = sorted(common)
+    history: list[dict[str, Any]] = []
+    for index in range(window_days - 1, len(dates)):
+        selected = dates[index - window_days + 1:index + 1]
+        demand_sum = sum(lanes[0][day] for day in selected)
+        forecast_sum = sum(lanes[1][day] for day in selected)
+        generation_sum = sum(lanes[2][day] for day in selected)
+        interchange_sum = sum(lanes[3][day] for day in selected)
+        if not demand_sum or not forecast_sum:
+            continue
+        abs_errors = [
+            abs(lanes[0][day] - lanes[1][day]) / lanes[1][day] * 100
+            for day in selected if lanes[1][day]
+        ]
+        history.append({
+            "date": selected[-1],
+            "forecast_surprise_pct": (demand_sum - forecast_sum) / forecast_sum * 100,
+            "forecast_abs_error_pct": median(abs_errors) if abs_errors else None,
+            "generation_coverage_pct": generation_sum / demand_sum * 100,
+            "net_import_share_pct": max(0.0, -interchange_sum) / demand_sum * 100,
+        })
+    return history[-limit:]
+
+
+def classify_power_supply_axis(
+    net_pipeline_ratio_24m: float | None,
+    variable_storage_share: float | None,
+) -> tuple[str, str]:
+    if net_pipeline_ratio_24m is None:
+        return "자료 부족", "월간 가동·건설·은퇴 설비 자료가 더 필요합니다."
+    if net_pipeline_ratio_24m >= 6:
+        state = "건설 확대"
+    elif net_pipeline_ratio_24m >= 3:
+        state = "건설 진행"
+    elif net_pipeline_ratio_24m >= 0:
+        state = "건설 미약"
+    else:
+        state = "지연·순감소"
+    mix = (
+        f" 태양광·풍력·배터리 비중은 {variable_storage_share:.0f}%로 명목 MW가 확정 공급력을 뜻하지 않습니다."
+        if variable_storage_share is not None else ""
+    )
+    return state, f"향후 24개월 순확충은 현재 가동용량의 {net_pipeline_ratio_24m:.1f}%입니다.{mix}"
+
+
+def classify_interconnection_axis(
+    *,
+    active_queue_gw: float | None,
+    operating_capacity_gw: float | None,
+    ia_executed_share_pct: float | None,
+    median_active_age_years: float | None,
+    ir_to_cod_median_years: float | None,
+    usable: bool,
+) -> tuple[str, str]:
+    """Classify supply-side interconnection friction, never load connections."""
+    required = [
+        active_queue_gw, operating_capacity_gw, ia_executed_share_pct,
+        median_active_age_years,
+    ]
+    if not usable or any(value is None for value in required):
+        return "자료 부족", "발전·저장 접속 대기열의 규모·진행단계·대기기간 자료가 부족합니다."
+    queue_ratio = float(active_queue_gw) / float(operating_capacity_gw) * 100
+    friction_count = sum((
+        float(ia_executed_share_pct) < 30,
+        round(float(median_active_age_years), 1) >= 3,
+        ir_to_cod_median_years is not None
+        and round(float(ir_to_cod_median_years), 1) >= 5,
+    ))
+    if queue_ratio >= 100 and friction_count >= 2:
+        state = "접속 대기 부담 높음"
+    elif queue_ratio >= 60 and friction_count >= 1:
+        state = "접속 대기 부담"
+    else:
+        state = "부담 완화"
+    cod_text = (
+        f" · 최근 접수→상업운전 {float(ir_to_cod_median_years):.1f}년"
+        if ir_to_cod_median_years is not None else ""
+    )
+    return (
+        state,
+        f"활성 대기용량은 현재 가동용량의 {queue_ratio:.0f}% · 연결계약 체결 단계 "
+        f"{float(ia_executed_share_pct):.1f}% · 활성 프로젝트 중앙 대기 "
+        f"{float(median_active_age_years):.1f}년{cod_text}",
+    )
+
+
+def classify_transmission_investment_axis(
+    *,
+    additions_usd: float | None,
+    like_for_like_cagr_pct: float | None,
+    reporter_count: float | None,
+    reporter_coverage_pct: float | None,
+    usable: bool,
+) -> tuple[str, str]:
+    """Classify nominal FERC Form 1 transmission additions with a coverage gate."""
+    if (
+        not usable
+        or additions_usd is None
+        or like_for_like_cagr_pct is None
+        or reporter_count is None
+        or reporter_coverage_pct is None
+    ):
+        return "자료 부족", "송전설비 추가액과 동일 보고자 비교자료가 부족합니다."
+    if reporter_count < 50 or reporter_coverage_pct < 85:
+        return (
+            "표본 제한",
+            f"보고 사업자 {int(reporter_count)}곳 · 전년 보고자 연결률 {reporter_coverage_pct:.1f}%로 비교 표본이 불안정합니다.",
+        )
+    if like_for_like_cagr_pct >= 8:
+        state = "송전 투자 확대"
+    elif like_for_like_cagr_pct >= 0:
+        state = "투자 유지"
+    else:
+        state = "투자 둔화"
+    return (
+        state,
+        f"최근 명목 송전설비 추가액 ${additions_usd / 1_000_000_000:.1f}B · "
+        f"동일 보고자 3년 CAGR {like_for_like_cagr_pct:+.1f}% · "
+        f"보고 사업자 {int(reporter_count)}곳",
+    )
+
+
+def classify_power_investment_thesis(
+    demand_state: str,
+    supply_state: str | None = None,
+    *,
+    operations_state: str | None = None,
+    interconnection_state: str | None = None,
+    transmission_state: str | None = None,
+) -> tuple[str, str]:
+    """Pass independent evidence gates instead of summing correlated scores."""
+    if demand_state in {"자료 부족", "판정 제한"}:
+        return "판정 제한", "현재 전력수요 자료가 부족해 후속 인프라 투자 근거를 판정하지 않습니다."
+    if demand_state in {"전력 수요 감소", "수요 둔화"}:
+        return "전력 투자 근거 약화", "전력수요가 감소해 후속 전력 인프라 투자 근거가 약해졌습니다."
+
+    demand_expanding = demand_state in {
+        "전력 수요 빠르게 확대", "전력 수요 확대", "AI 관찰지역 중심 확대",
+        "광범위한 수요 가속", "수요 확장",
+    }
+    grid_pressure = operations_state in {"부담 신호 관찰", "운영 부담 높음"} or (
+        interconnection_state in {"접속 대기 부담", "접속 대기 부담 높음"}
+    )
+    transmission_expanding = transmission_state in {"송전 투자 확대", "투자 유지"}
+    if demand_expanding and grid_pressure and transmission_expanding:
+        return "전력망 투자 가설 강화", "수요 확대와 계통 부담, 실제 송전투자 집행이 서로 다른 자료에서 함께 확인됩니다."
+    if demand_expanding and grid_pressure:
+        return "계통 부담 확인·투자 반응 대기", "수요 확대와 계통 부담은 확인됐지만 실제 송전투자 확대는 아직 확인이 부족합니다."
+    if demand_expanding:
+        return "전력수요 확대·병목 미확인", "전력수요는 확대 중이지만 계통 운영·접속 자료만으로 병목을 확정하지 않습니다."
+    if transmission_expanding:
+        return "투자 선행·수요 확인 필요", "송전투자는 늘고 있으나 최근 전력수요 방향이 뚜렷하지 않습니다."
+    construction = f" 발전·저장설비는 {supply_state}입니다." if supply_state else ""
+    return "근거 혼조", f"수요와 계통·투자 실행의 방향이 일치하지 않습니다.{construction}"
+
+
 class RegimeThesisDataService:
-    FEEDS = ("kosis_semiconductor", "customs_memory_exports", "opendart_semiconductor", "eia_power")
+    FEEDS = (
+        "kosis_semiconductor", "customs_memory_exports", "opendart_semiconductor",
+        "eia_power", LBNL_FEED_ID, PUDL_FEED_ID,
+    )
 
     def __init__(self) -> None:
         self.repo = ExternalObservationRepository()
@@ -726,6 +1195,7 @@ class RegimeThesisDataService:
             "customs": CustomsMemoryExportService().refresh(force=force),
             "opendart": DartSemiconductorService().refresh(force=force),
             "eia": EiaPowerService().refresh(force=force),
+            "grid": GridInfrastructureService().refresh(force=force),
         }
         raw = await asyncio.gather(*jobs.values(), return_exceptions=True)
         results: dict[str, Any] = {}
@@ -881,21 +1351,405 @@ class RegimeThesisDataService:
         # Capacity is annual. A three-observation average is not a three-month
         # momentum and must not be exposed under the monthly field name.
         metrics["capacity"]["yoy_3m_avg"] = None
-        state, reason = classify_power_demand(metrics["total_sales"], metrics["commercial_sales"])
-        dates = [metric["observation_date"] for metric in metrics.values() if metric.get("observation_date")]
-        latest_monthly = metrics["total_sales"].get("observation_date")
-        age_days = (date.today() - date.fromisoformat(latest_monthly)).days if latest_monthly else None
-        return {
-            "state": state, "reason": reason, "coverage": (
-                sum(metrics[key]["latest"] is not None for key in ("total_sales", "commercial_sales", "generation")) / 3
+        legacy_state, legacy_reason = classify_power_demand(
+            metrics["total_sales"], metrics["commercial_sales"]
+        )
+
+        daily_by_region = {
+            respondent: _repo_points(
+                self.repo, f"us_electricity_daily_demand_{respondent.lower()}"
+            )
+            for respondent in ("US48", *RTO_REGIONS)
+        }
+        daily_forecast_by_region = {
+            respondent: _repo_points(
+                self.repo, f"us_electricity_daily_demand_forecast_{respondent.lower()}"
+            )
+            for respondent in ("US48", *RTO_REGIONS)
+        }
+        daily_generation_by_region = {
+            respondent: _repo_points(
+                self.repo, f"us_electricity_daily_net_generation_{respondent.lower()}"
+            )
+            for respondent in ("US48", *RTO_REGIONS)
+        }
+        daily_interchange_by_region = {
+            respondent: _repo_points(
+                self.repo, f"us_electricity_daily_total_interchange_{respondent.lower()}"
+            )
+            for respondent in ("US48", *RTO_REGIONS)
+        }
+        national_daily = daily_by_region["US48"]
+        ai_region_daily = aggregate_daily_series(
+            (daily_by_region[respondent] for respondent in AI_POWER_PROXY_REGIONS),
+            expected_series_count=len(AI_POWER_PROXY_REGIONS),
+        )
+        non_ai_regions = tuple(
+            respondent for respondent in RTO_REGIONS
+            if respondent not in AI_POWER_PROXY_REGIONS
+        )
+        non_ai_region_daily = aggregate_daily_series(
+            (daily_by_region[respondent] for respondent in non_ai_regions),
+            expected_series_count=len(non_ai_regions),
+        )
+        national_28d = aligned_daily_yoy(national_daily, window_days=28)
+        national_84d = aligned_daily_yoy(national_daily, window_days=84)
+        ai_regions_28d = aligned_daily_yoy(ai_region_daily, window_days=28)
+        ai_regions_84d = aligned_daily_yoy(ai_region_daily, window_days=84)
+        non_ai_regions_84d = aligned_daily_yoy(non_ai_region_daily, window_days=84)
+        ai_excess_growth = (
+            ai_regions_84d["value"] - non_ai_regions_84d["value"]
+            if ai_regions_84d["value"] is not None and non_ai_regions_84d["value"] is not None
+            else None
+        )
+        region_details = []
+        for respondent, name in RTO_REGIONS.items():
+            recent = aligned_daily_yoy(daily_by_region[respondent], window_days=28)
+            structural = aligned_daily_yoy(daily_by_region[respondent], window_days=84)
+            operations = window_grid_operations(
+                daily_by_region[respondent],
+                daily_forecast_by_region[respondent],
+                daily_generation_by_region[respondent],
+                daily_interchange_by_region[respondent],
+            )
+            pressure = bool(
+                recent["value"] is not None
+                and recent["value"] >= 2
+                and (
+                    (operations["forecast_surprise_pct"] is not None and operations["forecast_surprise_pct"] >= 1.5)
+                    or (operations["net_import_share_pct"] is not None and operations["net_import_share_pct"] >= 5)
+                )
+            )
+            region_details.append({
+                "id": respondent,
+                "name": name,
+                "yoy_28d": recent["value"],
+                "yoy_84d": structural["value"],
+                "observation_date": structural["to"],
+                "is_ai_proxy": respondent in AI_POWER_PROXY_REGIONS,
+                "forecast_surprise_pct": operations["forecast_surprise_pct"],
+                "forecast_abs_error_pct": operations["forecast_abs_error_pct"],
+                "generation_coverage_pct": operations["generation_coverage_pct"],
+                "net_import_share_pct": operations["net_import_share_pct"],
+                "operating_pressure": pressure,
+            })
+        available_regions = [
+            item for item in region_details if item["yoy_84d"] is not None
+        ]
+        region_coverage = len(available_regions) / len(RTO_REGIONS)
+        regional_expansion_share = (
+            sum(item["yoy_84d"] >= 2 for item in available_regions) / len(RTO_REGIONS)
+            if len(available_regions) == len(RTO_REGIONS) else None
+        )
+        ai_acceleration = (
+            ai_regions_28d["value"] - ai_regions_84d["value"]
+            if ai_regions_28d["value"] is not None and ai_regions_84d["value"] is not None
+            else None
+        )
+        demand_state, demand_reason, demand_score, demand_coverage = classify_power_demand_axis(
+            national_yoy_84d=national_84d["value"],
+            ai_regions_yoy_84d=ai_regions_84d["value"],
+            commercial_yoy_3m=metrics["commercial_sales"].get("yoy_3m_avg"),
+            regional_expansion_share=regional_expansion_share,
+            ai_regions_acceleration_pp=ai_acceleration,
+            ai_excess_growth_pp=ai_excess_growth,
+            region_coverage=region_coverage,
+        )
+        demand_model = "eia930+monthly"
+        if demand_state in {"자료 부족", "판정 제한"} and legacy_state != "판정 불가":
+            demand_state, demand_reason = legacy_state, legacy_reason
+            demand_model = "monthly_fallback"
+
+        def aggregate_kind(
+            lane: dict[str, list[dict[str, Any]]],
+            regions: tuple[str, ...],
+        ) -> list[dict[str, Any]]:
+            return aggregate_daily_series(
+                (lane[respondent] for respondent in regions),
+                expected_series_count=len(regions),
+            )
+
+        ai_forecast_daily = aggregate_kind(daily_forecast_by_region, AI_POWER_PROXY_REGIONS)
+        ai_generation_daily = aggregate_kind(daily_generation_by_region, AI_POWER_PROXY_REGIONS)
+        ai_interchange_daily = aggregate_kind(daily_interchange_by_region, AI_POWER_PROXY_REGIONS)
+        operations_metrics = window_grid_operations(
+            ai_region_daily, ai_forecast_daily, ai_generation_daily, ai_interchange_daily
+        )
+        ai_operating_regions = [
+            item for item in region_details if item["is_ai_proxy"]
+        ]
+        operations_region_coverage = (
+            sum(item["forecast_surprise_pct"] is not None for item in ai_operating_regions)
+            / len(AI_POWER_PROXY_REGIONS)
+        )
+        pressure_region_count = (
+            sum(item["operating_pressure"] for item in ai_operating_regions)
+            if operations_region_coverage == 1 else None
+        )
+        operations_coverage = min(
+            operations_metrics["coverage"], operations_region_coverage
+        )
+        operations_state, operations_reason = classify_grid_operations_axis(
+            load_yoy_28d=ai_regions_28d["value"],
+            forecast_surprise_pct=operations_metrics["forecast_surprise_pct"],
+            forecast_abs_error_pct=operations_metrics["forecast_abs_error_pct"],
+            net_import_share_pct=operations_metrics["net_import_share_pct"],
+            pressure_region_count=pressure_region_count,
+            expected_region_count=len(AI_POWER_PROXY_REGIONS),
+            coverage=operations_coverage,
+        )
+
+        def latest(series_id: str) -> dict[str, Any]:
+            # Some read-only test/adaptor repositories intentionally expose the
+            # minimal ``series(series_id)`` protocol.  The production repository
+            # is already date-sorted, so selecting the last row here keeps that
+            # protocol small without changing the result.
+            rows = self.repo.series(series_id)
+            return rows[-1] if rows else {}
+
+        pipeline_rows = {
+            "operating_capacity_mw": latest("us_power_operating_capacity_mw"),
+            "committed_additions_24m_mw": latest("us_power_committed_additions_24m_mw"),
+            "retirements_24m_mw": latest("us_power_planned_retirements_24m_mw"),
+            "net_additions_24m_mw": latest("us_power_net_committed_additions_24m_mw"),
+            "net_pipeline_ratio_24m_pct": latest("us_power_net_pipeline_ratio_24m_pct"),
+            "variable_storage_share_24m_pct": latest("us_power_variable_storage_share_24m_pct"),
+            "delayed_committed_capacity_mw": latest("us_power_delayed_committed_capacity_mw"),
+        }
+        pipeline_mix = []
+        for group in ("solar", "battery", "wind", "gas", "other"):
+            row = latest(f"us_power_committed_pipeline_{group}_mw")
+            pipeline_mix.append({
+                "id": group,
+                "value_gw": float(row["value"]) / 1000 if row.get("value") is not None else None,
+            })
+        pipeline_date = next((
+            row.get("observation_date") for row in pipeline_rows.values()
+            if row.get("observation_date")
+        ), None)
+        net_pipeline_ratio = pipeline_rows["net_pipeline_ratio_24m_pct"].get("value")
+        variable_storage_share = pipeline_rows["variable_storage_share_24m_pct"].get("value")
+        supply_state, supply_reason = classify_power_supply_axis(
+            float(net_pipeline_ratio) if net_pipeline_ratio is not None else None,
+            float(variable_storage_share) if variable_storage_share is not None else None,
+        )
+        grid_service = GridInfrastructureService()
+        grid_service.repo = self.repo
+        grid_summary = grid_service.summary()
+        interconnection_axis = grid_summary["interconnection_axis"]
+        transmission_axis = grid_summary["transmission_investment_axis"]
+
+        def grid_value(axis: dict[str, Any], key: str) -> float | None:
+            metric = (axis.get("metrics") or {}).get(key) or {}
+            value = metric.get("value")
+            return float(value) if value is not None else None
+
+        operating_capacity_mw = pipeline_rows["operating_capacity_mw"].get("value")
+        operating_capacity_gw = (
+            float(operating_capacity_mw) / 1000
+            if operating_capacity_mw is not None else None
+        )
+        interconnection_state, interconnection_reason = classify_interconnection_axis(
+            active_queue_gw=grid_value(interconnection_axis, "active_queue_gw"),
+            operating_capacity_gw=operating_capacity_gw,
+            ia_executed_share_pct=grid_value(interconnection_axis, "ia_executed_share_pct"),
+            median_active_age_years=grid_value(interconnection_axis, "median_active_age_years"),
+            ir_to_cod_median_years=grid_value(
+                interconnection_axis, "recent_ir_to_cod_median_years"
             ),
+            usable=not bool((interconnection_axis.get("freshness") or {}).get("is_stale", True)),
+        )
+        transmission_state, transmission_reason = classify_transmission_investment_axis(
+            additions_usd=grid_value(transmission_axis, "annual_additions_usd"),
+            like_for_like_cagr_pct=grid_value(
+                transmission_axis, "like_for_like_three_year_cagr_pct"
+            ),
+            reporter_count=grid_value(transmission_axis, "reporter_count"),
+            reporter_coverage_pct=grid_value(
+                transmission_axis, "current_reporter_prior_year_coverage_pct"
+            ),
+            usable=not bool((transmission_axis.get("freshness") or {}).get("is_stale", True)),
+        )
+        daily_date = national_84d.get("to")
+        latest_monthly = metrics["total_sales"].get("observation_date")
+        demand_date = daily_date or latest_monthly
+        age_days = (date.today() - date.fromisoformat(demand_date)).days if demand_date else None
+        pipeline_age_days = (
+            (date.today() - date.fromisoformat(pipeline_date)).days if pipeline_date else None
+        )
+        demand_is_stale = age_days is None or age_days > (7 if daily_date else 150)
+        operations_date = operations_metrics.get("observation_date")
+        operations_age_days = (
+            (date.today() - date.fromisoformat(operations_date)).days
+            if operations_date else None
+        )
+        operations_is_stale = operations_age_days is None or operations_age_days > 7
+        supply_is_stale = pipeline_age_days is None or pipeline_age_days > 90
+        effective_demand_state = "자료 부족" if demand_is_stale else demand_state
+        effective_operations_state = (
+            "자료 부족" if operations_is_stale else operations_state
+        )
+        state, reason = classify_power_investment_thesis(
+            effective_demand_state,
+            supply_state,
+            operations_state=effective_operations_state,
+            interconnection_state=interconnection_state,
+            transmission_state=transmission_state,
+        )
+        dates = [
+            *[metric["observation_date"] for metric in metrics.values() if metric.get("observation_date")],
+            *([daily_date] if daily_date else []),
+            *([pipeline_date] if pipeline_date else []),
+        ]
+        supply_values = [
+            pipeline_rows[key].get("value") for key in (
+                "operating_capacity_mw", "committed_additions_24m_mw",
+                "retirements_24m_mw", "net_additions_24m_mw",
+            )
+        ]
+        supply_coverage = sum(value is not None for value in supply_values) / len(supply_values)
+        interconnection_metrics = interconnection_axis.get("metrics") or {}
+        transmission_metrics = transmission_axis.get("metrics") or {}
+        interconnection_coverage = (
+            sum(value is not None for value in interconnection_metrics.values())
+            / len(interconnection_metrics) if interconnection_metrics else 0.0
+        )
+        transmission_coverage = (
+            sum(value is not None for value in transmission_metrics.values())
+            / len(transmission_metrics) if transmission_metrics else 0.0
+        )
+        interconnection_freshness = interconnection_axis.get("freshness") or {}
+        transmission_freshness = transmission_axis.get("freshness") or {}
+        interconnection_is_stale = bool(interconnection_freshness.get("is_stale", True))
+        transmission_is_stale = bool(transmission_freshness.get("is_stale", True))
+        dates.extend([
+            observed for observed in (
+                interconnection_freshness.get("observation_date"),
+                transmission_freshness.get("observation_date"),
+            ) if observed
+        ])
+        return {
+            "state": state,
+            "reason": reason,
+            "coverage": (
+                demand_coverage + operations_coverage + supply_coverage
+                + interconnection_coverage + transmission_coverage
+            ) / 5,
             "role": "context", "as_of_date": max(dates) if dates else None,
-            "decision_as_of_date": latest_monthly,
-            "age_days": age_days, "is_stale": age_days is None or age_days > 150,
+            "decision_as_of_date": demand_date,
+            "age_days": age_days,
+            "is_stale": (
+                demand_is_stale or operations_is_stale or supply_is_stale
+                or interconnection_is_stale or transmission_is_stale
+            ),
             "metrics": metrics, "source": "U.S. EIA Electricity Data", "source_url": EIA_DOC_URL,
             "fetch_status": self.repo.status("eia_power"),
-            "methodology": "계절성이 큰 월간 전력판매는 전년동월 YoY와 최근 3개월 평균으로 판정하고 발전량·연간 순하계 설비용량은 공급 맥락으로 표시",
-            "limitations": "상업용 전력판매는 데이터센터 전용 수요가 아니며 EIA 전력량만으로 계통 연결 지연·변압기 리드타임·전력망 병목을 판정하지 않음",
+            "demand_axis": {
+                "state": demand_state,
+                "reason": demand_reason,
+                "score": demand_score,
+                "coverage": demand_coverage,
+                "model": demand_model,
+                "observation_date": demand_date,
+                "age_days": age_days,
+                "is_stale": demand_is_stale,
+                "national_yoy_28d": national_28d["value"],
+                "national_yoy_84d": national_84d["value"],
+                "ai_regions_yoy_28d": ai_regions_28d["value"],
+                "ai_regions_yoy_84d": ai_regions_84d["value"],
+                "ai_regions_acceleration_pp": ai_acceleration,
+                "ai_excess_growth_pp": ai_excess_growth,
+                "regional_expansion_share": regional_expansion_share,
+                "region_coverage": region_coverage,
+                "expected_region_count": len(RTO_REGIONS),
+                "available_region_count": len(available_regions),
+                "commercial_yoy_3m": metrics["commercial_sales"].get("yoy_3m_avg"),
+                "regions": sorted(
+                    region_details,
+                    key=lambda item: item["yoy_84d"] if item["yoy_84d"] is not None else -999,
+                    reverse=True,
+                ),
+                "yoy_history": rolling_power_yoy_history(national_daily, ai_region_daily),
+                "source_url": EIA_GRID_URL,
+            },
+            "operations_axis": {
+                "state": operations_state,
+                "reason": operations_reason,
+                "coverage": operations_coverage,
+                "observation_date": operations_date,
+                "age_days": operations_age_days,
+                "is_stale": operations_is_stale,
+                "window_days": 28,
+                "forecast_surprise_pct": operations_metrics["forecast_surprise_pct"],
+                "forecast_abs_error_pct": operations_metrics["forecast_abs_error_pct"],
+                "generation_coverage_pct": operations_metrics["generation_coverage_pct"],
+                "net_import_share_pct": operations_metrics["net_import_share_pct"],
+                "pressure_region_count": pressure_region_count,
+                "expected_region_count": len(AI_POWER_PROXY_REGIONS),
+                "history": rolling_grid_operations_history(
+                    ai_region_daily,
+                    ai_forecast_daily,
+                    ai_generation_daily,
+                    ai_interchange_daily,
+                ),
+                "source_url": EIA_GRID_URL,
+                "limitations": "익일예측 오차는 날씨·예측 품질을 함께 반영하고 순유입은 정상적인 지역간 거래일 수 있어, 단독으로 계통 병목이나 예비율 부족을 뜻하지 않습니다.",
+            },
+            "supply_axis": {
+                "state": supply_state,
+                "reason": supply_reason,
+                "coverage": supply_coverage,
+                "observation_date": pipeline_date,
+                "age_days": pipeline_age_days,
+                "is_stale": supply_is_stale,
+                "operating_capacity_gw": (
+                    float(pipeline_rows["operating_capacity_mw"]["value"]) / 1000
+                    if pipeline_rows["operating_capacity_mw"].get("value") is not None else None
+                ),
+                "committed_additions_24m_gw": (
+                    float(pipeline_rows["committed_additions_24m_mw"]["value"]) / 1000
+                    if pipeline_rows["committed_additions_24m_mw"].get("value") is not None else None
+                ),
+                "retirements_24m_gw": (
+                    float(pipeline_rows["retirements_24m_mw"]["value"]) / 1000
+                    if pipeline_rows["retirements_24m_mw"].get("value") is not None else None
+                ),
+                "net_additions_24m_gw": (
+                    float(pipeline_rows["net_additions_24m_mw"]["value"]) / 1000
+                    if pipeline_rows["net_additions_24m_mw"].get("value") is not None else None
+                ),
+                "net_pipeline_ratio_24m_pct": (
+                    float(net_pipeline_ratio) if net_pipeline_ratio is not None else None
+                ),
+                "variable_storage_share_24m_pct": (
+                    float(variable_storage_share) if variable_storage_share is not None else None
+                ),
+                "delayed_committed_capacity_gw": (
+                    float(pipeline_rows["delayed_committed_capacity_mw"]["value"]) / 1000
+                    if pipeline_rows["delayed_committed_capacity_mw"].get("value") is not None else None
+                ),
+                "mix": pipeline_mix,
+                "source_url": EIA_860M_URL,
+                "fetch_status": self.repo.status(PIPELINE_FEED_ID),
+            },
+            "interconnection_axis": {
+                **interconnection_axis,
+                "state": interconnection_state,
+                "reason": interconnection_reason,
+                "coverage": interconnection_coverage,
+                "observation_date": interconnection_freshness.get("observation_date"),
+                "is_stale": interconnection_is_stale,
+            },
+            "transmission_investment_axis": {
+                **transmission_axis,
+                "state": transmission_state,
+                "reason": transmission_reason,
+                "coverage": transmission_coverage,
+                "observation_date": transmission_freshness.get("observation_date"),
+                "is_stale": transmission_is_stale,
+            },
+            "methodology": "EIA-930 수요를 전국 주축과 AI·비AI 지역 초과성장 확인축으로 분리하고, 익일예측·순발전·지역간 전력교환은 별도 운영 압력 프록시로 계산합니다. EIA-860M은 발전·저장 건설활동으로만 판정합니다.",
+            "limitations": "고빈도 수요는 날씨 보정 전이며 AI 관찰지역도 데이터센터 전용 부하가 아닙니다. 익일예측 오차·순유입과 EIA-860M 순하계 명목 MW는 공인 공급력·예비율·송전 가능량이나 데이터센터 연결 대기열을 직접 뜻하지 않습니다.",
         }
 
     def feed_health(self) -> dict[str, dict[str, Any] | None]:

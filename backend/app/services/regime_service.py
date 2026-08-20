@@ -778,7 +778,12 @@ class RegimeService:
             ("메모리 수요", "semiconductor_cycle", ("demand", "state")),
             ("완제품 재고 보조축", "semiconductor_cycle", ("supply", "state")),
             ("국내 기업 확인", "semiconductor_cycle", ("company_confirmation", "state")),
-            ("전력 수요 맥락", "power_cycle", ("state",)),
+            ("전력 투자 근거", "power_cycle", ("state",)),
+            ("전력 수요", "power_cycle", ("demand_axis", "state")),
+            ("전력 운영 압력", "power_cycle", ("operations_axis", "state")),
+            ("발전·저장 건설", "power_cycle", ("supply_axis", "state")),
+            ("발전 접속 대기", "power_cycle", ("interconnection_axis", "state")),
+            ("송전 투자 실행", "power_cycle", ("transmission_investment_axis", "state")),
         ]
         changes: list[str] = []
         for label, section, path in comparisons:
@@ -1030,6 +1035,8 @@ class RegimeService:
             "customs": thesis_feeds["customs_memory_exports"],
             "opendart": thesis_feeds["opendart_semiconductor"],
             "eia": thesis_feeds["eia_power"],
+            "lbnl_queue": thesis_feeds.get("lbnl_interconnection_queue"),
+            "transmission_investment": thesis_feeds.get("pudl_ferc1_transmission_investment"),
         }
 
     def _sync_triggers(self, triggers: list[dict[str, Any]]) -> None:

@@ -167,11 +167,21 @@ def current_fixture():
             "limitations": "직접 HBM 계약가격 없음",
         },
         "power_cycle": {
-            "state": "수요 증가",
-            "reason": "상업용 판매 증가",
+            "state": "수요 확대·공급 확충",
+            "reason": "실제수요와 건설 중 설비 동반 확대",
             "source": "EIA",
             "source_url": "https://example.com/eia",
             "limitations": "전력망 연결 대기 직접 측정 아님",
+            "demand_axis": {
+                "state": "수요 확장", "observation_date": "2026-08-19",
+                "national_yoy_84d": 2.5, "ai_regions_yoy_84d": 2.8,
+                "regional_expansion_share": 0.54,
+            },
+            "supply_axis": {
+                "state": "공급 확충 진행", "observation_date": "2026-06-30",
+                "committed_additions_24m_gw": 83.2, "retirements_24m_gw": 19.9,
+                "net_additions_24m_gw": 63.4, "net_pipeline_ratio_24m_pct": 4.9,
+            },
             "metrics": {"commercial_sales": trend(120, yoy=7.5, unit="TWh")},
         },
         "feed_health": {
@@ -199,6 +209,10 @@ def test_quantitative_brief_contains_decision_data_and_provenance_without_histor
     assert "DRAM 칩 수출액" in markdown and "+420.0%" in markdown
     assert "SK하이닉스" in markdown and "+35.0%" in markdown
     assert "상업용 전력판매" in markdown
+    assert "미국 전력 투자 근거" in markdown
+    assert "AI 관찰지역 +2.8%" in markdown
+    assert "순확충 +63.4 GW" in markdown
+    assert "송전 연결 가능량이나 확정 공급력을 뜻하지 않습니다" in markdown
     assert "관측일" in markdown and "출처" in markdown
     assert "WTI unavailable" in markdown
     assert "999,999" not in markdown

@@ -22,6 +22,10 @@ interface AssetTrendChartProps {
   portfolioId?: string
 }
 
+export function formatAssetTrendYAxisTick(value: number, isPrivacyMode: boolean) {
+  return isPrivacyMode ? PRIVACY_MASK : `${(value / 10000).toFixed(0)}만`
+}
+
 export function AssetTrendChart({ portfolioId }: AssetTrendChartProps) {
   const { isPrivacyMode } = useStore()
   const [period, setPeriod] = useState<Period>('1M')
@@ -74,7 +78,7 @@ export function AssetTrendChart({ portfolioId }: AssetTrendChartProps) {
 
   if (historyLoading) {
     return (
-      <Card className="h-[450px] border-0 bg-gradient-to-br from-background to-muted/30">
+      <Card data-testid="asset-trend-chart" className="h-[450px] border-0 bg-gradient-to-br from-background to-muted/30">
         <CardHeader>
           <div className="h-6 w-32 animate-shimmer rounded" />
         </CardHeader>
@@ -87,7 +91,7 @@ export function AssetTrendChart({ portfolioId }: AssetTrendChartProps) {
 
   if (!history || history.length === 0) {
     return (
-      <Card className="h-[450px] border-0 bg-gradient-to-br from-background to-muted/30">
+      <Card data-testid="asset-trend-chart" className="h-[450px] border-0 bg-gradient-to-br from-background to-muted/30">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle>자산 추이</CardTitle>
@@ -106,6 +110,7 @@ export function AssetTrendChart({ portfolioId }: AssetTrendChartProps) {
 
   return (
     <Card
+      data-testid="asset-trend-chart"
       className="h-[450px] border-0 bg-gradient-to-br from-background to-muted/30 opacity-0 animate-slide-up"
       style={{ animationDelay: '100ms' }}
     >
@@ -150,11 +155,11 @@ export function AssetTrendChart({ portfolioId }: AssetTrendChartProps) {
             />
             <YAxis
               yAxisId="value"
-              tickFormatter={(value) => `${(value / 10000).toFixed(0)}만`}
-              tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+              tickFormatter={(value) => formatAssetTrendYAxisTick(Number(value), isPrivacyMode)}
+              tick={isPrivacyMode ? false : { fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
               axisLine={false}
               tickLine={false}
-              width={45}
+              width={isPrivacyMode ? 8 : 45}
             />
             <Tooltip
               formatter={(value: number, name: string) => {

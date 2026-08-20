@@ -6,7 +6,9 @@ import {
   longRatePressureLabel,
   policyPressureLabel,
   plainLanguageStateText,
+  powerDemandAxisLabel,
   powerStateLabel,
+  powerSupplyAxisLabel,
   recentRateShockLabel,
   termPremiumLabel,
   yieldCurveStateLabel,
@@ -33,6 +35,12 @@ describe("regime display vocabulary", () => {
 
   it("keeps an unknown future value visible instead of hiding it", () => {
     expect(powerStateLabel("새 분류")).toBe("새 분류");
+  });
+
+  it("explains the separate power demand, supply, and composite states", () => {
+    expect(powerStateLabel("수요 확대·공급 확충")).toBe("수요 증가와 설비 확충 동행");
+    expect(powerDemandAxisLabel("광범위한 수요 가속")).toBe("여러 지역에서 수요 가속");
+    expect(powerSupplyAxisLabel("공급 대응 제한")).toBe("예정된 순설비 확충이 제한적");
   });
 
   it("explains missing comparison data instead of showing a bare judgment failure", () => {

@@ -29,7 +29,8 @@ import { useAssets } from '@/hooks/useAssets'
 import { useExchangeRate } from '@/hooks/useDashboard'
 import { useSaveAllocations, useUpdatePlan, useSaveGroups } from '@/hooks/useRebalance'
 import { useSettings } from '@/hooks/useSettings'
-import { formatKRW, formatUSD } from '@/lib/utils'
+import { formatKRW, formatUSD, maskValue } from '@/lib/utils'
+import { useStore } from '@/store/useStore'
 import { TickerSparkline } from './TickerSparkline'
 import { RealTimePieChart } from './RealTimePieChart'
 import { AssetSelectorModal } from './AssetSelectorModal'
@@ -83,6 +84,7 @@ interface AllocationEditorProps {
 const generateId = () => Math.random().toString(36).substr(2, 9)
 
 export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorProps) {
+  const { isPrivacyMode } = useStore()
   const { data: assetsData } = useAssets()
   const assets = assetsData?.assets
   const { data: exchangeRate } = useExchangeRate()
@@ -759,15 +761,15 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                           {alloc.matched_asset?.currency === 'USD' && exchangeRate ? (
                             <div className="text-sm text-right min-w-[90px]">
                               <div className="text-emerald-600 dark:text-emerald-400 font-medium">
-                                {formatUSD(alloc.matched_asset.market_value_usd || 0)}
+                                {maskValue(formatUSD(alloc.matched_asset.market_value_usd || 0), isPrivacyMode)}
                               </div>
                               <div className="text-xs text-muted-foreground">
-                                {formatKRW(value)}
+                                {maskValue(formatKRW(value), isPrivacyMode)}
                               </div>
                             </div>
                           ) : (
                             <span className="text-sm text-muted-foreground min-w-[70px] text-right">
-                              {formatKRW(value)}
+                              {maskValue(formatKRW(value), isPrivacyMode)}
                             </span>
                           )}
                           <div className="flex items-center gap-1">
@@ -865,7 +867,7 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                             </CollapsibleTrigger>
                             <div className="flex items-center gap-2">
                               <span className="text-sm text-muted-foreground">
-                                {formatKRW(groupValue)}
+                                {maskValue(formatKRW(groupValue), isPrivacyMode)}
                               </span>
                               <div className="flex items-center gap-1">
                                 <Input
@@ -941,14 +943,16 @@ export function AllocationEditor({ plan, open, onOpenChange }: AllocationEditorP
                                     {isUSD && exchangeRate ? (
                                       <div className="text-right">
                                         <div className="text-emerald-600 dark:text-emerald-400 text-xs">
-                                          {formatUSD(itemValueUSD)}
+                                          {maskValue(formatUSD(itemValueUSD), isPrivacyMode)}
                                         </div>
                                         <div className="text-muted-foreground text-xs">
-                                          {formatKRW(itemValueKRW)}
+                                          {maskValue(formatKRW(itemValueKRW), isPrivacyMode)}
                                         </div>
                                       </div>
                                     ) : (
-                                      <span className="text-muted-foreground">{formatKRW(itemValueKRW)}</span>
+                                      <span className="text-muted-foreground">
+                                        {maskValue(formatKRW(itemValueKRW), isPrivacyMode)}
+                                      </span>
                                     )}
                                     <Button
                                       variant="ghost"

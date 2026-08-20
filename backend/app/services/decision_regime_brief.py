@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 
-DECISION_BRIEF_SCHEMA_VERSION = "1.0.0"
+DECISION_BRIEF_SCHEMA_VERSION = "1.1.0"
 
 SIGNAL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
@@ -361,10 +361,64 @@ def _append_ai_thesis(lines: list[str], current: dict[str, Any]) -> None:
             lines.append("")
 
     if power:
+        demand_axis = power.get("demand_axis") or {}
+        operations_axis = power.get("operations_axis") or {}
+        supply_axis = power.get("supply_axis") or {}
+        interconnection_axis = power.get("interconnection_axis") or {}
+        transmission_axis = power.get("transmission_investment_axis") or {}
+        regional_share = demand_axis.get("regional_expansion_share")
+        regional_share_pct = float(regional_share) * 100 if regional_share is not None else None
         lines += [
-            f"- 미국 전력 수요 맥락: {_text(power.get('state'))} · {_text(power.get('reason'))}",
+            f"- 미국 전력 투자 근거: {_text(power.get('state'))} · {_text(power.get('reason'))}",
             "",
         ]
+        if demand_axis or supply_axis:
+            queue_metrics = interconnection_axis.get("metrics") or {}
+            transmission_metrics = transmission_axis.get("metrics") or {}
+
+            def axis_value(metrics: dict[str, Any], key: str) -> Any:
+                return (metrics.get(key) or {}).get("value")
+
+            transmission_additions = axis_value(
+                transmission_metrics, "annual_additions_usd"
+            )
+            transmission_billions = (
+                float(transmission_additions) / 1_000_000_000
+                if transmission_additions is not None else None
+            )
+
+            lines += [
+                "| 전력 투자 축 | 판정 | 핵심 정량값 | 기준일 |",
+                "| --- | --- | --- | --- |",
+                f"| 실제 수요 | {_text(demand_axis.get('state'))} "
+                f"| 미국 84일 YoY {_percent(demand_axis.get('national_yoy_84d'), 1, signed=True)} · "
+                f"AI 관찰지역 {_percent(demand_axis.get('ai_regions_yoy_84d'), 1, signed=True)} · "
+                f"2% 이상 증가 지역 {_percent(regional_share_pct, 0)} "
+                f"| {_text(demand_axis.get('observation_date'))} |",
+                f"| 계통 운영 압력 프록시 | {_text(operations_axis.get('state'))} "
+                f"| 실제-익일예측 {_percent(operations_axis.get('forecast_surprise_pct'), 1, signed=True)} · "
+                f"순발전/수요 {_percent(operations_axis.get('generation_coverage_pct'), 1)} · "
+                f"순유입 의존 {_percent(operations_axis.get('net_import_share_pct'), 1)} "
+                f"| {_text(operations_axis.get('observation_date'))} |",
+                f"| 발전·저장 건설 | {_text(supply_axis.get('state'))} "
+                f"| 24개월 건설 중 {_number(supply_axis.get('committed_additions_24m_gw'), 1, signed=True)} GW · "
+                f"예정 은퇴 {_number(supply_axis.get('retirements_24m_gw'), 1, signed=True)} GW · "
+                f"순확충 {_number(supply_axis.get('net_additions_24m_gw'), 1, signed=True)} GW "
+                f"({_percent(supply_axis.get('net_pipeline_ratio_24m_pct'), 1, signed=True)}) "
+                f"| {_text(supply_axis.get('observation_date'))} |",
+                f"| 발전 공급 접속 대기 | {_text(interconnection_axis.get('state'))} "
+                f"| 활성 {_number(axis_value(queue_metrics, 'active_queue_gw'), 1)} GW · "
+                f"연결계약 단계 {_percent(axis_value(queue_metrics, 'ia_executed_share_pct'), 1)} · "
+                f"중앙 대기 {_number(axis_value(queue_metrics, 'median_active_age_years'), 1)}년 "
+                f"| {_text(interconnection_axis.get('observation_date'))} |",
+                f"| 송전 투자 실행 | {_text(transmission_axis.get('state'))} "
+                f"| 연간 ${_number(transmission_billions, 1)}B · "
+                f"동일 보고자 3년 CAGR {_percent(axis_value(transmission_metrics, 'like_for_like_three_year_cagr_pct'), 1, signed=True)} "
+                f"| {_text(transmission_axis.get('observation_date'))} |",
+                "",
+                "전력 판정 제한: AI 관찰지역은 데이터센터 전용 부하가 아니며, LBNL 대기열은 발전·저장 공급측 접속 요청입니다. EIA 명목 MW는 송전 연결 가능량이나 확정 공급력을 뜻하지 않습니다. 지역간 순유입도 예비율 부족이나 데이터센터 연결 지연을 직접 뜻하지 않습니다.",
+                "",
+            ]
         metrics = power.get("metrics") or {}
         if metrics:
             labels = {

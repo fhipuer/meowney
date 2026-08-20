@@ -32,8 +32,12 @@ import {
   nandPriceStateLabel,
   observationStatusLabel,
   plainLanguageStateText,
+  interconnectionAxisLabel,
   policyPressureLabel,
+  powerDemandAxisLabel,
+  powerOperationsAxisLabel,
   powerStateLabel,
+  powerSupplyAxisLabel,
   rateDirectionLabel,
   recentRateShockLabel,
   regimeCandidateLabel,
@@ -41,6 +45,7 @@ import {
   rdimmStateLabel,
   supplyStateLabel,
   termPremiumLabel,
+  transmissionInvestmentAxisLabel,
   yieldCurveChangeLabel,
   yieldCurveConfirmationLabel,
   yieldCurveStateLabel,
@@ -53,7 +58,11 @@ import {
   dataQualityTone,
   financialConditionTone,
   memoryPriceTone,
+  powerConstructionTone,
   powerDemandTone,
+  powerInterconnectionTone,
+  powerOperationsTone,
+  powerTransmissionTone,
   regimeLevelTone,
   thesisSignalTone,
   type SemanticTone,
@@ -1043,6 +1052,79 @@ function ProxyMetricTile({
   );
 }
 
+function PowerEvidenceAxis({
+  step,
+  title,
+  state,
+  value,
+  detail,
+  asOf,
+  tone,
+  sourceLabel,
+  sourceUrl,
+}: {
+  step: number;
+  title: string;
+  state: string;
+  value: string;
+  detail: string;
+  asOf?: string | null;
+  tone: SemanticTone;
+  sourceLabel: string;
+  sourceUrl?: string | null;
+}) {
+  return (
+    <div
+      className="relative min-w-0"
+      data-power-axis={step}
+      data-semantic-tone={tone}
+    >
+      <div
+        className="flex h-full min-h-[210px] min-w-0 flex-col rounded-xl border bg-background/35 p-4"
+        data-power-axis-content={step}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <p className="text-[10px] font-medium tracking-wide text-muted-foreground">
+            {String(step).padStart(2, "0")}
+          </p>
+          <Badge
+            className="max-w-full whitespace-normal text-right leading-4"
+            variant={TONE_STYLES[tone].badge}
+          >
+            {state}
+          </Badge>
+        </div>
+        <h4 className="mt-3 text-sm font-semibold leading-5">{title}</h4>
+        <p className={`mt-3 text-lg font-semibold tabular-nums ${TONE_STYLES[tone].text}`}>
+          {value}
+        </p>
+        <p className="mt-1 flex-1 text-[11px] leading-5 text-muted-foreground">{detail}</p>
+        <div className="mt-3 border-t border-border/70 pt-3 text-[10px] leading-4 text-muted-foreground">
+          <p>기준 {asOf || "미수집"}</p>
+          {sourceUrl ? (
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-block break-words text-primary hover:underline"
+            >
+              {sourceLabel}
+            </a>
+          ) : (
+            <p className="mt-1">{sourceLabel}</p>
+          )}
+        </div>
+      </div>
+      {step < 5 && (
+        <ArrowRight
+          aria-hidden="true"
+          className="absolute -right-[18px] top-1/2 z-10 hidden h-4 w-4 -translate-y-1/2 text-muted-foreground/70 xl:block"
+        />
+      )}
+    </div>
+  );
+}
+
 export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
   const [activeStage, setActiveStage] = useState<
     "capex" | "dram" | "confirmation" | "power" | null
@@ -1053,12 +1135,33 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
   const memory = data.memory_cycle;
   const semiconductor = data.semiconductor_cycle;
   const power = data.power_cycle;
+  const powerDemand = power.demand_axis;
+  const powerOperations = power.operations_axis;
+  const powerSupply = power.supply_axis;
+  const powerInterconnection = power.interconnection_axis;
+  const powerTransmission = power.transmission_investment_axis;
   const overview = aiThesisOverview(data);
   const dramTone = thesisSignalTone(semiconductor.dram_bottleneck.state);
   const supplyTone = thesisSignalTone(semiconductor.supply.state);
   const companyTone = thesisSignalTone(semiconductor.company_confirmation.state);
-  const powerTone = thesisSignalTone(power.state);
-  const powerMetricTone = powerDemandTone(power.state, !power.is_stale);
+  const powerTone = powerDemandTone(power.state, !power.is_stale);
+  const powerMetricTone = powerDemandTone(powerDemand?.state || power.state, !power.is_stale);
+  const powerOperationsMetricTone = powerOperationsTone(
+    powerOperations?.state,
+    !powerOperations?.is_stale,
+  );
+  const powerConstructionMetricTone = powerConstructionTone(
+    powerSupply?.state,
+    !powerSupply?.is_stale,
+  );
+  const powerInterconnectionMetricTone = powerInterconnectionTone(
+    powerInterconnection?.state,
+    !powerInterconnection?.is_stale,
+  );
+  const powerTransmissionMetricTone = powerTransmissionTone(
+    powerTransmission?.state,
+    !powerTransmission?.is_stale,
+  );
   const hbmProxy = semiconductor.hbm_server_proxy;
   const rdimm = hbmProxy.components.server_rdimm;
   const exportDecomposition = hbmProxy.components.export_decomposition;
@@ -1082,7 +1185,21 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
     { name: "공개 NAND 가격 표본", status: memory.nand_state === "판정 불가" ? "제한" : "연결", role: "메모리 보조축" },
     { name: "한국 반도체 완제품 재고", status: semiconductor.supply.state === "판정 불가" ? "제한" : "연결", role: "광의 보조지표" },
     { name: "국내 2사 실적", status: semiconductor.company_confirmation.companies.some((item) => !item.is_stale) ? "연결" : "제한", role: "기업 보조축" },
-    { name: "미국 상업용 전력판매", status: power.state !== "판정 불가" && !power.is_stale ? "연결" : "제한", role: "후행 인프라 맥락" },
+    {
+      name: "미국 전력 인프라 전달경로",
+      status:
+        powerDemand && powerOperations && powerSupply && powerInterconnection && powerTransmission
+        && power.state !== "판정 제한"
+        && !power.is_stale
+        && !powerDemand.is_stale
+        && !powerOperations.is_stale
+        && !powerSupply.is_stale
+        && !powerInterconnection.is_stale
+        && !powerTransmission.is_stale
+          ? "연결"
+          : "제한",
+      role: "수요·운영·건설·접속대기·송전투자",
+    },
     {
       name: "HBM·서버 DRAM",
       status: hbmProxy.state === "판정 제한" || rdimm.is_stale ? "제한" : "간접 관측",
@@ -1133,16 +1250,17 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
               <Badge variant={TONE_STYLES[overview.tone].badge}>{overview.label}</Badge>
               <InfoTip label="AI 투자 가설 모니터의 범위">
                 하이퍼스케일러 CAPEX와 DRAM 수급을 핵심 관측축으로 두고, HBM·수출·기업
-                공시·완제품 재고를 확인축으로 사용합니다. 전력 수요는 후속 맥락이며 자동
+                공시·완제품 재고를 확인축으로 사용합니다. 전력 수요, 계통 운영, 발전·저장
+                건설, 공급측 접속대기와 송전 투자는 후속 인프라 투자 근거이며 자동
                 거시 레짐이나 포트폴리오 비중을 직접 바꾸지 않습니다.
               </InfoTip>
             </div>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              AI 투자 지속성에서 메모리 병목, 확인·상충 증거, 후속 전력 수요까지 한 흐름으로
+              AI 투자 지속성에서 메모리 병목, 확인·상충 증거, 후속 전력 투자 근거까지 한 흐름으로
               점검합니다.
             </p>
             <p className={`mt-2 text-sm font-medium ${TONE_STYLES[overview.tone].text}`}>
-              현재 요약 · {overview.detail}
+              현재 요약 · {overview.detail} · 전력 {powerStateLabel(power.state)}
             </p>
           </div>
         </div>
@@ -1154,7 +1272,7 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
               가설 전달 단계
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              투자 확대가 메모리 병목과 실적 확인을 거쳐 전력 수요로 이어지는지를 단계별로 봅니다.
+              투자 확대가 메모리 병목과 실적 확인을 거쳐 전력 수요·설비 투자로 이어지는지를 단계별로 봅니다.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 xl:gap-4">
@@ -1202,12 +1320,14 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
             <ThesisPipelineStep
               id="power"
               step={4}
-              title="상업용 전력판매"
-              role="후행 인프라 맥락"
+              title="전력 인프라"
+              role="후속 인프라 투자 근거"
               state={powerStateLabel(power.state)}
-              detail={`${signed(power.metrics.commercial_sales.yoy_3m_avg)}% · 3개월 평균 YoY · 데이터센터 전용 아님`}
+              detail={powerDemand && powerTransmission
+                ? `수요 ${signed(powerDemand.national_yoy_84d)}% · 송전투자 3년 ${signed(powerTransmission.metrics.like_for_like_three_year_cagr_pct?.value)}%`
+                : `${signed(power.metrics.commercial_sales.yoy_3m_avg)}% · 상업용 3개월 평균 YoY`}
               tone={powerTone}
-              asOf={power.decision_as_of_date || power.metrics.commercial_sales.observation_date}
+              asOf={powerDemand?.observation_date || power.decision_as_of_date || power.metrics.commercial_sales.observation_date}
               active={activeStage === "power"}
               panelId="ai-thesis-power-panel"
               onToggle={() => toggleStage("power")}
@@ -1545,45 +1665,90 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
           hidden={activeStage !== "power"}
         >
           <div className="mb-3">
-            <h3 id="ai-thesis-power-title" className="text-sm font-semibold">후행 전력 수요 맥락</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              EIA 상업용 전력판매는 데이터센터 전용 수요가 아니며, AI·DRAM 판정 뒤에 확인하는 후행 맥락입니다.
+            <div className="flex items-center gap-1">
+              <h3 id="ai-thesis-power-title" className="scroll-mt-20 text-sm font-semibold">후속 전력 인프라 근거</h3>
+              <InfoTip label="전력 인프라 전달경로 해석">
+                다섯 축은 관찰 순서대로 배치했지만 서로 다른 원자료와 판정식을 사용합니다.
+                화살표는 인과관계나 병목 확정을 뜻하지 않으며, 수요 확대가 실제 계통 부담과
+                투자 실행으로 이어지는지를 단계별로 확인하기 위한 읽기 순서입니다.
+              </InfoTip>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              수요 확대가 계통 운영 압력, 발전·저장 건설, 공급측 접속 대기와 송전 투자에서
+              각각 확인되는지 봅니다. AI·DRAM 핵심판정을 대체하지 않습니다.
             </p>
           </div>
           <ThesisEvidenceCard
             id="power-detail"
-            title="미국 상업용 전력판매"
-            role="후행 인프라 맥락 · 데이터센터 전용 아님"
+            title="미국 전력 인프라 전달경로"
+            role="후속 인프라 투자 근거"
             state={powerStateLabel(power.state)}
             tone={powerTone}
             detail={power.reason}
-            asOf={power.decision_as_of_date || power.metrics.commercial_sales.observation_date}
+            asOf={power.decision_as_of_date || powerDemand?.observation_date || power.metrics.commercial_sales.observation_date}
             className="w-full"
-            help={<>{power.methodology} {power.limitations} 상업용 판매에는 사무실·상점 등도 포함됩니다. 데이터센터 계통 병목이나 AI 전력수요를 직접 판정하지 않습니다.</>}
+            help={<>{power.methodology} {power.limitations}</>}
           >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-md bg-background/35 px-3 py-3">
-                <p className="text-[11px] text-muted-foreground">총 전력판매</p>
-                <p
-                  className={`mt-1 text-lg font-semibold tabular-nums ${TONE_STYLES[powerMetricTone].text}`}
-                  data-metric-label="총 전력판매"
-                  data-semantic-tone={powerMetricTone}
-                >
-                  {signed(power.metrics.total_sales.yoy_3m_avg)}%
-                </p>
-                <p className="text-[10px] text-muted-foreground">3개월 평균 YoY</p>
-              </div>
-              <div className="rounded-md bg-background/35 px-3 py-3">
-                <p className="text-[11px] text-muted-foreground">상업용 판매</p>
-                <p
-                  className={`mt-1 text-lg font-semibold tabular-nums ${TONE_STYLES[powerMetricTone].text}`}
-                  data-metric-label="상업용 판매"
-                  data-semantic-tone={powerMetricTone}
-                >
-                  {signed(power.metrics.commercial_sales.yoy_3m_avg)}%
-                </p>
-                <p className="text-[10px] text-muted-foreground">3개월 평균 YoY</p>
-              </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5 xl:gap-4">
+              <PowerEvidenceAxis
+                step={1}
+                title="전력 수요 압력"
+                state={powerDemandAxisLabel(powerDemand?.state)}
+                value={`${signed(powerDemand?.national_yoy_84d ?? power.metrics.total_sales.yoy_3m_avg)}%`}
+                detail={`미국 전체 84일 YoY · AI 관찰지역 ${signed(powerDemand?.ai_regions_yoy_84d)}%`}
+                asOf={powerDemand?.observation_date}
+                tone={powerMetricTone}
+                sourceLabel="EIA-930 실제수요"
+                sourceUrl={powerDemand?.source_url || power.source_url}
+              />
+              <PowerEvidenceAxis
+                step={2}
+                title="계통 운영 압력"
+                state={powerOperationsAxisLabel(powerOperations?.state)}
+                value={`${signed(powerOperations?.forecast_surprise_pct)}%`}
+                detail={`실제수요-하루전 예측 · 부담 관찰지역 ${powerOperations?.pressure_region_count ?? "-"}/${powerOperations?.expected_region_count ?? "-"}`}
+                asOf={powerOperations?.observation_date}
+                tone={powerOperationsMetricTone}
+                sourceLabel="EIA-930 운영 프록시"
+                sourceUrl={powerOperations?.source_url || power.source_url}
+              />
+              <PowerEvidenceAxis
+                step={3}
+                title="발전·저장 건설"
+                state={powerSupplyAxisLabel(powerSupply?.state)}
+                value={`${signed(powerSupply?.net_additions_24m_gw)} GW`}
+                detail={`24개월 건설 중 추가-예정 은퇴 · 운영설비 대비 ${signed(powerSupply?.net_pipeline_ratio_24m_pct)}%`}
+                asOf={powerSupply?.observation_date}
+                tone={powerConstructionMetricTone}
+                sourceLabel="EIA-860M 공사단계"
+                sourceUrl={powerSupply?.source_url || power.source_url}
+              />
+              <PowerEvidenceAxis
+                step={4}
+                title="발전 공급 접속 대기"
+                state={interconnectionAxisLabel(powerInterconnection?.state)}
+                value={powerInterconnection?.metrics.active_queue_gw
+                  ? `${powerInterconnection.metrics.active_queue_gw.value.toLocaleString("ko-KR", { maximumFractionDigits: 0 })} GW`
+                  : "-"}
+                detail={`공급측 발전·저장 접속 신청 · 연결계약 체결 비중 ${powerInterconnection?.metrics.ia_executed_share_pct ? `${powerInterconnection.metrics.ia_executed_share_pct.value.toFixed(1)}%` : "-"}`}
+                asOf={powerInterconnection?.observation_date}
+                tone={powerInterconnectionMetricTone}
+                sourceLabel="LBNL Queued Up · 공급측 접속대기"
+                sourceUrl={powerInterconnection?.provenance.source_url}
+              />
+              <PowerEvidenceAxis
+                step={5}
+                title="송전 투자 실행"
+                state={transmissionInvestmentAxisLabel(powerTransmission?.state)}
+                value={powerTransmission?.metrics.like_for_like_three_year_cagr_pct
+                  ? `${signed(powerTransmission.metrics.like_for_like_three_year_cagr_pct.value)}%`
+                  : "-"}
+                detail={`동일 보고자 3년 연평균 · 최근 연간 추가액 ${powerTransmission?.metrics.annual_additions_usd ? billions(powerTransmission.metrics.annual_additions_usd.value / 1_000_000_000) : "-"}`}
+                asOf={powerTransmission?.observation_date}
+                tone={powerTransmissionMetricTone}
+                sourceLabel="PUDL 처리 FERC Form 1 · 송전 투자"
+                sourceUrl={powerTransmission?.provenance.source_url}
+              />
             </div>
           </ThesisEvidenceCard>
         </section>
@@ -1639,7 +1804,9 @@ export function AiThesisMonitor({ data }: { data: RegimeCurrent }) {
               {semiconductor.demand.source_url && <a href={semiconductor.demand.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">관세청 수출</a>}
               <a href={semiconductor.supply.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">KOSIS 생산·재고</a>
               <a href={semiconductor.company_confirmation.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">OpenDART 공시</a>
-              <a href={power.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">EIA 전력</a>
+              <a href={power.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">EIA 전력 수요·운영·설비</a>
+              {powerInterconnection?.provenance.source_url && <a href={powerInterconnection.provenance.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">LBNL 공급측 접속대기</a>}
+              {powerTransmission?.provenance.source_url && <a href={powerTransmission.provenance.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">PUDL 처리 FERC Form 1</a>}
             </div>
           </div>
         </details>

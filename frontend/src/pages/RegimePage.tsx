@@ -5,6 +5,7 @@ import {
   CartesianGrid,
   Bar,
   BarChart,
+  Cell,
   Legend,
   Line,
   LineChart,
@@ -43,7 +44,12 @@ import {
   nandPriceStateLabel,
   plainLanguageStateText,
   policyPressureLabel,
+  powerDemandAxisLabel,
+  powerOperationsAxisLabel,
   powerStateLabel,
+  powerSupplyAxisLabel,
+  interconnectionAxisLabel,
+  transmissionInvestmentAxisLabel,
   rateDriverLabel,
   ratePressureLabel,
   recentRateShockLabel,
@@ -65,7 +71,11 @@ import {
   financialConditionTone,
   memoryPriceTone,
   memorySupplierPriceDeltaTone,
+  powerConstructionTone,
   powerDemandTone,
+  powerInterconnectionTone,
+  powerOperationsTone,
+  powerTransmissionTone,
   regimeLevelTone,
   signalMetricTone,
   signalStatusTone,
@@ -88,7 +98,7 @@ const DOMAIN_TABS = [
   { id: "liquidity", label: "유동성·신용" },
   { id: "ai", label: "AI 투자" },
   { id: "semiconductor", label: "메모리·반도체" },
-  { id: "power", label: "전력 수요·공급" },
+  { id: "power", label: "전력 인프라" },
 ];
 const MACRO_DOMAIN_TABS = DOMAIN_TABS.slice(0, 5);
 const THESIS_DOMAIN_TABS = DOMAIN_TABS.slice(5);
@@ -1764,8 +1774,40 @@ function SemiconductorDashboard({
   );
 }
 
-function PowerDashboard({ data }: { data: RegimeCurrent["power_cycle"] }) {
+function PowerValueCard({
+  label,
+  value,
+  unit = "%",
+  digits = 1,
+  showSign = false,
+  tone = "neutral",
+}: {
+  label: string;
+  value?: number | null;
+  unit?: string;
+  digits?: number;
+  showSign?: boolean;
+  tone?: SemanticTone;
+}) {
+  return (
+    <div className="rounded-md bg-muted/50 px-3 py-2">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className={`mt-0.5 text-sm font-medium tabular-nums ${TONE_STYLES[tone].text}`}>
+        {value == null
+          ? "-"
+          : `${showSign ? signed(value, digits) : value.toFixed(digits)}${unit}`}
+      </p>
+    </div>
+  );
+}
+
+export function PowerDashboard({ data }: { data: RegimeCurrent["power_cycle"] }) {
   const metrics = data.metrics;
+  const demand = data.demand_axis;
+  const operations = data.operations_axis;
+  const supply = data.supply_axis;
+  const interconnection = data.interconnection_axis;
+  const transmission = data.transmission_investment_axis;
   const dates = new Set(
     [metrics.total_sales, metrics.commercial_sales, metrics.industrial_sales, metrics.generation]
       .flatMap((metric) => metric.history.map((point) => point.date)),
@@ -1780,87 +1822,497 @@ function PowerDashboard({ data }: { data: RegimeCurrent["power_cycle"] }) {
   const capacity = metrics.capacity.history.map((point) => ({
     date: point.date, capacity: point.value / 1000,
   }));
-  const tone = thesisSignalTone(data.state);
-  const demandTone = powerDemandTone(data.state, !data.is_stale);
+  if (!demand || !supply) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>AI 전력 인프라 전달경로</CardTitle>
+          <p className="text-sm text-muted-foreground">새 전력 판정자료를 불러오는 중입니다.</p>
+        </CardHeader>
+      </Card>
+    );
+  }
+  const tone = powerDemandTone(data.state, !data.is_stale);
+  const demandTone = powerDemandTone(demand.state, !data.is_stale);
+  const operationsTone = powerOperationsTone(operations?.state, !operations?.is_stale);
+  const supplyTone = powerConstructionTone(supply.state, !supply.is_stale);
+  const interconnectionTone = powerInterconnectionTone(
+    interconnection?.state,
+    !interconnection?.is_stale,
+  );
+  const transmissionTone = powerTransmissionTone(
+    transmission?.state,
+    !transmission?.is_stale,
+  );
+  const demandHistory = demand.yoy_history.slice(-180);
+  const operationsHistory = operations?.history.slice(-180) || [];
+  const regionBars = demand.regions
+    .filter((item) => item.yoy_84d != null)
+    .map((item) => ({ ...item, value: item.yoy_84d as number }));
+  const mixLabels: Record<string, string> = {
+    solar: "태양광", battery: "배터리", wind: "풍력", gas: "가스", other: "기타",
+  };
+  const mixColors: Record<string, string> = {
+    solar: REGIME_SERIES_COLORS.violet,
+    battery: REGIME_SERIES_COLORS.cyan,
+    wind: REGIME_SERIES_COLORS.blue,
+    gas: REGIME_SERIES_COLORS.pink,
+    other: "#64748b",
+  };
+  const mixRow = Object.fromEntries(
+    supply.mix.map((item) => [item.id, item.value_gw || 0]),
+  );
+  const pipelineTotal = supply.mix.reduce((sum, item) => sum + (item.value_gw || 0), 0);
+  const percentage = (value: number | null, digits = 1) =>
+    value == null ? "-" : `${signed(value, digits)}%`;
+  const gigawatts = (value: number | null, showSign = false) =>
+    value == null ? "-" : `${showSign ? signed(value, 1) : value.toFixed(1)} GW`;
+  const metricValue = (
+    metric: { value: number; unit: string } | null | undefined,
+    divisor = 1,
+    digits = 1,
+    unit?: string,
+  ) => {
+    if (metric == null) return "-";
+    const displayUnit = unit ?? ({
+      percent: "%",
+      years: "년",
+      projects: "개",
+      reporters: "개사",
+      USD: "달러",
+    } as Record<string, string>)[metric.unit] ?? ` ${metric.unit}`;
+    const spacing = displayUnit.startsWith(" ") || ["%", "년", "개", "개사"].includes(displayUnit)
+      ? ""
+      : " ";
+    return `${(metric.value / divisor).toLocaleString("ko-KR", {
+        maximumFractionDigits: digits,
+        minimumFractionDigits: digits,
+      })}${spacing}${displayUnit}`;
+  };
+  const usdBillions = (metric: { value: number } | null | undefined) =>
+    metric == null ? "-" : `$${(metric.value / 1_000_000_000).toFixed(1)}B`;
+  const queueHistory = (interconnection?.history || []).slice(-12);
+  const transmissionHistory = (transmission?.history || []).slice(-12).map((point) => ({
+    ...point,
+    additions_billion: point.additions_usd == null ? null : point.additions_usd / 1_000_000_000,
+  }));
+  const flowAxes = [
+    {
+      title: "전력 수요 압력",
+      state: demand.is_stale ? "수요자료 갱신 지연" : powerDemandAxisLabel(demand.state),
+      reason: demand.reason,
+      date: demand.observation_date,
+      tone: demandTone,
+      scope: "실제 수요",
+    },
+    {
+      title: "계통 운영 압력",
+      state: operations?.is_stale
+        ? "운영자료 갱신 지연"
+        : powerOperationsAxisLabel(operations?.state),
+      reason: operations?.reason || "운영 프록시를 아직 수집하지 않았습니다.",
+      date: operations?.observation_date,
+      tone: operationsTone,
+      scope: "운영 프록시",
+    },
+    {
+      title: "발전·저장 건설",
+      state: supply.is_stale ? "설비자료 갱신 지연" : powerSupplyAxisLabel(supply.state),
+      reason: supply.reason,
+      date: supply.observation_date,
+      tone: supplyTone,
+      scope: "공사단계 설비",
+    },
+    {
+      title: "발전 공급 접속 대기",
+      state: interconnection?.is_stale
+        ? "접속자료 갱신 지연"
+        : interconnectionAxisLabel(interconnection?.state),
+      reason: interconnection?.reason || "공급측 접속 대기자료를 아직 수집하지 않았습니다.",
+      date: interconnection?.observation_date,
+      tone: interconnectionTone,
+      scope: "공급측 대기열",
+    },
+    {
+      title: "송전 투자 실행",
+      state: transmission?.is_stale
+        ? "투자자료 갱신 지연"
+        : transmissionInvestmentAxisLabel(transmission?.state),
+      reason: transmission?.reason || "송전 투자자료를 아직 수집하지 않았습니다.",
+      date: transmission?.observation_date,
+      tone: transmissionTone,
+      scope: "회계상 투자",
+    },
+  ];
   return (
     <div className="space-y-6">
       <div className="px-1">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 className="text-xl font-semibold">미국 전력 수요·공급 맥락</h2>
+          <h2 className="scroll-mt-24 text-xl font-semibold">AI 전력 인프라 전달경로</h2>
           <Badge className="max-w-full whitespace-normal text-right leading-4" variant={TONE_STYLES[tone].badge}>
             {powerStateLabel(data.state)}
           </Badge>
-          <InfoTip label="전력 데이터의 판정 범위">{data.methodology} {data.limitations}</InfoTip>
+          <InfoTip label="전력 투자 근거 판정 방식">{data.methodology} {data.limitations}</InfoTip>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{data.reason}</p>
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">{data.reason}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          수요가 계통 부담과 실제 투자로 이어지는지를 단계별로 확인합니다 · 종합 기준일 {data.decision_as_of_date || data.as_of_date || "미수집"}
+        </p>
       </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: "총 전력판매", metric: metrics.total_sales, tone: demandTone },
-          { label: "상업용 판매", metric: metrics.commercial_sales, tone: demandTone },
-          { label: "산업용 판매", metric: metrics.industrial_sales, tone: "neutral" as const },
-          { label: "순발전량", metric: metrics.generation, tone: "neutral" as const },
-        ].map(({ label, metric: item, tone: metricTone }) => {
-          return (
-            <Card key={label}>
-              <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">{label}</CardTitle></CardHeader>
-              <CardContent>
-                <p
-                  className={`text-2xl font-semibold tabular-nums ${TONE_STYLES[metricTone].text}`}
-                  data-metric-label={label}
-                  data-semantic-tone={metricTone}
-                >
-                  {item.yoy_3m_avg == null ? "-" : `${item.yoy_3m_avg > 0 ? "+" : ""}${item.yoy_3m_avg.toFixed(1)}%`}
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">3개월 평균 YoY · {item.observation_date || "미수집"}</p>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-        <Card>
-          <CardHeader><CardTitle>월간 전력판매와 순발전량</CardTitle><p className="text-sm text-muted-foreground">EIA · TWh</p></CardHeader>
-          <CardContent>
-            {monthly.length ? (
-              <div className="h-96">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={monthly} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
-                    <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={32} tick={{ fontSize: 11 }} />
-                    <YAxis width={52} tick={{ fontSize: 11 }} />
-                    <Tooltip labelFormatter={(label) => `관측월 ${label}`} formatter={(value: number, name: string) => [`${Number(value).toFixed(1)} TWh`, name === "total" ? "총판매" : name === "commercial" ? "상업용" : name === "industrial" ? "산업용" : "순발전"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
-                    <Legend formatter={(value) => value === "total" ? "총판매" : value === "commercial" ? "상업용" : value === "industrial" ? "산업용" : "순발전"} />
-                    <Line type="monotone" dataKey="generation" stroke={REGIME_SERIES_COLORS.blue} dot={false} strokeWidth={2} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="total" stroke={REGIME_SERIES_COLORS.violet} dot={false} strokeWidth={2} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="commercial" stroke={REGIME_SERIES_COLORS.cyan} dot={false} strokeWidth={1.7} strokeDasharray="5 3" isAnimationActive={false} />
-                    <Line type="monotone" dataKey="industrial" stroke={REGIME_SERIES_COLORS.pink} dot={false} strokeWidth={1.7} strokeDasharray="2 3" isAnimationActive={false} />
-                  </LineChart>
-                </ResponsiveContainer>
+      <div className="rounded-xl border border-border/70 bg-card/30 p-3 sm:p-4">
+        <div className="grid gap-3 lg:grid-cols-5">
+          {flowAxes.map((axis, index) => (
+            <div
+              key={axis.title}
+              className={`relative min-w-0 rounded-lg border p-4 ${TONE_STYLES[axis.tone].panel}`}
+              data-power-flow-axis={index + 1}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                    {index + 1}단계 · {axis.scope}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold leading-5">{axis.title}</p>
+                </div>
+                {index < flowAxes.length - 1 && (
+                  <ArrowRight className="absolute -right-[18px] top-1/2 z-10 hidden h-4 w-4 -translate-y-1/2 text-muted-foreground lg:block" />
+                )}
               </div>
-            ) : <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">EIA 데이터를 아직 수집하지 않았습니다.</div>}
-          </CardContent>
-        </Card>
+              <Badge className="mt-3 max-w-full whitespace-normal text-left leading-4" variant={TONE_STYLES[axis.tone].badge}>
+                {axis.state}
+              </Badge>
+              <p className="mt-3 line-clamp-3 text-xs leading-5 text-muted-foreground" title={axis.reason}>
+                {axis.reason}
+              </p>
+              <p className="mt-3 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+                기준 {axis.date || "미수집"}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3 px-1">
+          <div>
+            <p className="text-xs font-medium text-primary">1단계 · 실제 수요</p>
+            <h3 className="mt-1 text-lg font-semibold">전력 수요 압력</h3>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">{demand.reason}</p>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <Badge variant={TONE_STYLES[demandTone].badge}>{powerDemandAxisLabel(demand.state)}</Badge>
+            <p className="text-xs text-muted-foreground">EIA-930 · {demand.observation_date || "미수집"}</p>
+          </div>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <ChangeMetric label="미국 84일 YoY" value={demand.national_yoy_84d} tone={demandTone} />
+          <ChangeMetric label="AI 관찰지역 84일 YoY" value={demand.ai_regions_yoy_84d} tone={demandTone} />
+          <ChangeMetric label="AI 지역 초과 성장" value={demand.ai_excess_growth_pp} unit="%p" tone={demandTone} />
+          <div className="rounded-md bg-muted/50 px-3 py-2">
+            <p className="text-[11px] text-muted-foreground">2% 이상 증가 지역</p>
+            <p className={`mt-0.5 text-sm font-medium tabular-nums ${TONE_STYLES[demandTone].text}`}>
+              {demand.regional_expansion_share == null
+                ? "-"
+                : `${regionBars.filter((item) => item.value >= 2).length}/${demand.expected_region_count || regionBars.length} · ${(demand.regional_expansion_share * 100).toFixed(0)}%`}
+            </p>
+          </div>
+        </div>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)]">
         <Card>
-          <CardHeader><CardTitle>미국 순하계 설비용량</CardTitle><p className="text-sm text-muted-foreground">EIA 연간 · GW</p></CardHeader>
+          <CardHeader>
+            <CardTitle>최근 전력수요 방향</CardTitle>
+            <p className="text-sm text-muted-foreground">전년 같은 요일 대비 28일 이동 YoY · EIA-930 실제 수요</p>
+          </CardHeader>
           <CardContent>
-            {capacity.length ? (
+            {demandHistory.length ? (
               <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={capacity} margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
+                  <LineChart data={demandHistory} margin={{ top: 8, right: 16, bottom: 8, left: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
-                    <XAxis dataKey="date" tickFormatter={(value) => String(value).slice(0, 4)} tick={{ fontSize: 11 }} />
-                    <YAxis width={58} tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
-                    <Tooltip labelFormatter={(label) => `연도 ${String(label).slice(0, 4)}`} formatter={(value: number) => [`${Number(value).toFixed(1)} GW`, "설비용량"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
-                    <Line type="monotone" dataKey="capacity" stroke={REGIME_SERIES_COLORS.blue} dot={{ r: 2 }} strokeWidth={2} isAnimationActive={false} />
+                    <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={32} tick={{ fontSize: 11 }} />
+                    <YAxis width={48} tick={{ fontSize: 11 }} tickFormatter={(value) => `${value}%`} domain={["auto", "auto"]} />
+                    <Tooltip labelFormatter={(label) => `관측일 ${label}`} formatter={(value: number, name: string) => [`${signed(Number(value), 1)}%`, name === "national" ? "미국 전체" : "AI 인프라 관찰지역"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                    <Legend formatter={(value) => value === "national" ? "미국 전체" : "AI 인프라 관찰지역"} />
+                    <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" opacity={0.45} />
+                    <Line type="monotone" dataKey="national" stroke={REGIME_SERIES_COLORS.blue} dot={false} strokeWidth={2} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="ai_regions" stroke={REGIME_SERIES_COLORS.cyan} dot={false} strokeWidth={2.4} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
-            ) : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">설비용량 데이터를 아직 수집하지 않았습니다.</div>}
-            <a href={data.source_url} target="_blank" rel="noreferrer" className="mt-4 inline-block text-xs text-primary hover:underline">EIA 원본 데이터 안내</a>
+            ) : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">EIA-930 일간 수요를 아직 수집하지 않았습니다.</div>}
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">AI 인프라 관찰지역은 중부대서양·텍사스·남동부·북서부·남서부·캐롤라이나 합계입니다. 데이터센터 전용 부하는 아니며 날씨 보정 전입니다.</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>지역별 수요 확산</CardTitle>
+            <p className="text-sm text-muted-foreground">최근 84일 YoY · AI 관찰지역은 청록색</p>
+          </CardHeader>
+          <CardContent>
+            {regionBars.length ? (
+              <div className="h-[420px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={regionBars} layout="vertical" margin={{ top: 0, right: 14, bottom: 4, left: 2 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} horizontal={false} />
+                    <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={(value) => `${value}%`} />
+                    <YAxis type="category" dataKey="name" width={84} tick={{ fontSize: 10 }} />
+                    <ReferenceLine x={0} stroke="hsl(var(--muted-foreground))" opacity={0.5} />
+                    <Tooltip formatter={(value: number) => [`${signed(Number(value), 1)}%`, "84일 YoY"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                    <Bar dataKey="value" radius={[0, 3, 3, 0]} maxBarSize={18} isAnimationActive={false}>
+                      {regionBars.map((item) => <Cell key={item.id} fill={item.is_ai_proxy ? REGIME_SERIES_COLORS.cyan : REGIME_SERIES_COLORS.blue} fillOpacity={item.is_ai_proxy ? 0.95 : 0.55} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">지역 수요자료를 아직 수집하지 않았습니다.</div>}
           </CardContent>
         </Card>
       </div>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3 px-1">
+          <div>
+            <p className="text-xs font-medium text-primary">2단계 · 운영 프록시</p>
+            <h3 className="mt-1 text-lg font-semibold">계통 운영 압력</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">EIA-930 · {operations?.observation_date || "미수집"}</p>
+        </div>
+        <Card className={TONE_STYLES[operationsTone].panel}>
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">수요예측 오차와 지역 수급 대응</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">{operations?.reason || "운영자료를 아직 수집하지 않았습니다."}</p>
+              </div>
+              <Badge variant={TONE_STYLES[operationsTone].badge}>
+                {powerOperationsAxisLabel(operations?.state)}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <PowerValueCard label={`${operations?.window_days || 28}일 수요예측 초과`} value={operations?.forecast_surprise_pct} showSign tone={operationsTone} />
+              <PowerValueCard label="예측 절대오차" value={operations?.forecast_abs_error_pct} />
+              <PowerValueCard label="관찰지역 발전량/수요" value={operations?.generation_coverage_pct} />
+              <PowerValueCard label="순수입 의존도" value={operations?.net_import_share_pct} tone={operationsTone} />
+              <div className="rounded-md bg-muted/50 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground">부담 관찰지역</p>
+                <p className={`mt-0.5 text-sm font-medium tabular-nums ${TONE_STYLES[operationsTone].text}`}>
+                  {operations?.pressure_region_count == null
+                    ? "-"
+                    : `${operations.pressure_region_count}/${operations.expected_region_count}`}
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-5 xl:grid-cols-2">
+              <div className="rounded-lg border border-border/70 p-3">
+                <p className="mb-3 text-sm font-medium">실제 수요와 예측의 차이</p>
+                {operationsHistory.length ? (
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={operationsHistory} margin={{ top: 8, right: 12, bottom: 6, left: 2 }}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                        <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={28} tick={{ fontSize: 10 }} />
+                        <YAxis width={42} tick={{ fontSize: 10 }} tickFormatter={(value) => `${value}%`} />
+                        <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" opacity={0.5} />
+                        <Tooltip labelFormatter={(label) => `관측일 ${label}`} formatter={(value: number, name: string) => [`${signed(Number(value), 1)}%`, name === "forecast_surprise_pct" ? "수요예측 초과" : "예측 절대오차"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                        <Line type="monotone" dataKey="forecast_surprise_pct" stroke={REGIME_SERIES_COLORS.pink} dot={false} strokeWidth={2} isAnimationActive={false} />
+                        <Line type="monotone" dataKey="forecast_abs_error_pct" stroke={REGIME_SERIES_COLORS.violet} dot={false} strokeDasharray="4 3" isAnimationActive={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">운영 이력이 부족합니다.</div>}
+              </div>
+              <div className="rounded-lg border border-border/70 p-3">
+                <p className="mb-3 text-sm font-medium">지역 순수입 의존도</p>
+                {operationsHistory.length ? (
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={operationsHistory} margin={{ top: 8, right: 12, bottom: 6, left: 2 }}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                        <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={28} tick={{ fontSize: 10 }} />
+                        <YAxis width={42} tick={{ fontSize: 10 }} tickFormatter={(value) => `${value}%`} domain={[0, "auto"]} />
+                        <Tooltip labelFormatter={(label) => `관측일 ${label}`} formatter={(value: number) => [`${Number(value).toFixed(1)}%`, "순수입 의존도"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                        <Line type="monotone" dataKey="net_import_share_pct" stroke={REGIME_SERIES_COLORS.cyan} dot={false} strokeWidth={2} isAnimationActive={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">운영 이력이 부족합니다.</div>}
+              </div>
+            </div>
+            <p className="mt-4 text-xs leading-5 text-muted-foreground">
+              실제 수요·당일 예측·지역 발전·순수입으로 계산한 운영 압력 프록시입니다. 예비율이나 송전 병목을 직접 측정한 값은 아닙니다.
+            </p>
+            {operations?.source_url && <a href={operations.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-primary hover:underline">EIA-930 운영 원자료</a>}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3 px-1">
+          <div>
+            <p className="text-xs font-medium text-primary">3단계 · 공사단계 설비</p>
+            <h3 className="mt-1 text-lg font-semibold">발전·저장 건설</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">EIA-860M · {supply.observation_date || "미수집"}</p>
+        </div>
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle>24개월 발전·저장 공사단계 설비</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">공사 중·공사 완료 설비만 포함 · EIA-860M · {supply.observation_date || "미수집"}</p>
+              <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">{supply.reason}</p>
+            </div>
+            <Badge variant={TONE_STYLES[supplyTone].badge}>{supply.is_stale ? "설비자료 갱신 지연" : powerSupplyAxisLabel(supply.state)}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {pipelineTotal > 0 ? (
+            <div className="h-36">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={[mixRow]} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 4 }}>
+                  <XAxis type="number" tick={{ fontSize: 11 }} unit=" GW" />
+                  <YAxis type="category" hide />
+                  <Tooltip formatter={(value: number, name: string) => [`${Number(value).toFixed(1)} GW`, mixLabels[name] || name]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                  <Legend formatter={(value) => mixLabels[value] || value} />
+                  {supply.mix.map((item) => <Bar key={item.id} dataKey={item.id} stackId="pipeline" fill={mixColors[item.id] || "#64748b"} isAnimationActive={false} />)}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">EIA-860M 설비자료를 아직 수집하지 않았습니다.</div>}
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">현재 가동용량</p><p className="mt-0.5 text-sm font-medium tabular-nums">{supply.operating_capacity_gw == null ? "-" : `${supply.operating_capacity_gw.toFixed(1)} GW`}</p></div>
+            <PowerValueCard label="건설 중 설비" value={supply.committed_additions_24m_gw} unit=" GW" tone={supplyTone} />
+            <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">예정 은퇴</p><p className="mt-0.5 text-sm font-medium tabular-nums">{supply.retirements_24m_gw == null ? "-" : `${supply.retirements_24m_gw.toFixed(1)} GW`}</p></div>
+            <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">순설비 확충</p><p className={`mt-0.5 text-sm font-medium tabular-nums ${TONE_STYLES[supplyTone].text}`}>{gigawatts(supply.net_additions_24m_gw, true)}</p></div>
+            <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">가동용량 대비 순확충</p><p className={`mt-0.5 text-sm font-medium tabular-nums ${TONE_STYLES[supplyTone].text}`}>{percentage(supply.net_pipeline_ratio_24m_pct)}</p></div>
+            <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">태양광·풍력·배터리 비중</p><p className="mt-0.5 text-sm font-medium tabular-nums text-info">{supply.variable_storage_share_24m_pct == null ? "-" : `${supply.variable_storage_share_24m_pct.toFixed(1)}%`}</p></div>
+          </div>
+          <p className="mt-4 text-xs leading-5 text-muted-foreground">순하계 명목용량 기준입니다. 태양광·풍력·배터리의 MW는 같은 양의 확정 공급력을 뜻하지 않으며, 접속 가능 여부는 다음 단계에서 별도로 봅니다.</p>
+          <div className="mt-3 flex flex-wrap gap-4 text-xs">
+            <a href={demand.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">EIA-930 수요 원자료</a>
+            <a href={supply.source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">EIA-860M 설비 원자료</a>
+          </div>
+        </CardContent>
+      </Card>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3 px-1">
+          <div>
+            <p className="text-xs font-medium text-primary">4단계 · 공급측 대기열</p>
+            <h3 className="mt-1 text-lg font-semibold">발전 공급 접속 대기</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">LBNL Queued Up · {interconnection?.observation_date || "미수집"}</p>
+        </div>
+        <Card className={TONE_STYLES[interconnectionTone].panel}>
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle>발전·저장 프로젝트 계통 접속 대기열</CardTitle>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">{interconnection?.reason || "접속 대기자료를 아직 수집하지 않았습니다."}</p>
+              </div>
+              <Badge variant={TONE_STYLES[interconnectionTone].badge}>{interconnectionAxisLabel(interconnection?.state)}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">활성 접속 대기</p><p className="mt-0.5 text-sm font-semibold tabular-nums">{metricValue(interconnection?.metrics.active_queue_gw)}</p></div>
+              <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">접속계약 체결 비중</p><p className={`mt-0.5 text-sm font-semibold tabular-nums ${TONE_STYLES[interconnectionTone].text}`}>{metricValue(interconnection?.metrics.ia_executed_share_pct)}</p></div>
+              <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">활성 대기기간 중앙값</p><p className="mt-0.5 text-sm font-semibold tabular-nums">{metricValue(interconnection?.metrics.median_active_age_years)}</p></div>
+              <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">최근 접수→상업운전 중앙 기간</p><p className="mt-0.5 text-sm font-semibold tabular-nums">{metricValue(interconnection?.metrics.recent_ir_to_cod_median_years)}</p></div>
+            </div>
+            <div className="mt-5 rounded-lg border border-border/70 p-3">
+              <p className="mb-3 text-sm font-medium">연도별 접수·완료·철회 기록 · GW</p>
+              {queueHistory.length ? (
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={queueHistory} margin={{ top: 8, right: 12, bottom: 6, left: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                      <XAxis dataKey="date" tickFormatter={(value) => String(value).slice(0, 4)} tick={{ fontSize: 10 }} />
+                      <YAxis width={58} tick={{ fontSize: 10 }} tickFormatter={(value) => `${value}`} />
+                      <Tooltip labelFormatter={(label) => `기준연도 ${String(label).slice(0, 4)}`} formatter={(value: number, name: string) => [`${Number(value).toLocaleString("ko-KR", { maximumFractionDigits: 1 })} GW`, name === "active_requests_gw" ? "해당 연도 접수 후 현재 활성" : name === "completed_gw" ? "해당 연도 상업운전 완료" : "해당 연도 철회"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                      <Legend formatter={(value) => value === "active_requests_gw" ? "접수 후 현재 활성" : value === "completed_gw" ? "상업운전 완료" : "철회"} />
+                      <Bar dataKey="active_requests_gw" fill={REGIME_SERIES_COLORS.blue} maxBarSize={24} isAnimationActive={false} />
+                      <Bar dataKey="completed_gw" fill={REGIME_SERIES_COLORS.cyan} maxBarSize={24} isAnimationActive={false} />
+                      <Bar dataKey="withdrawn_gw" fill={REGIME_SERIES_COLORS.pink} maxBarSize={24} isAnimationActive={false} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : <div className="flex h-52 items-center justify-center text-sm text-muted-foreground">접속 대기 이력이 부족합니다.</div>}
+            </div>
+            <p className="mt-4 text-xs leading-5 text-muted-foreground">
+              발전·저장 공급 프로젝트가 송전망에 연결되기까지의 대기열입니다. 데이터센터 부하의 접속 대기열은 아닙니다. 활성 총량에는 LBNL의 하이브리드 저장용량 보정치가 포함됩니다.
+            </p>
+            {interconnection?.provenance.source_url && <a href={interconnection.provenance.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-primary hover:underline">LBNL Queued Up 원자료</a>}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3 px-1">
+          <div>
+            <p className="text-xs font-medium text-primary">5단계 · 회계상 투자</p>
+            <h3 className="mt-1 text-lg font-semibold">송전 투자 실행</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">FERC Form 1 · {transmission?.observation_date || "미수집"}</p>
+        </div>
+        <Card className={TONE_STYLES[transmissionTone].panel}>
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle>미국 전력사업자 송전설비 증가액</CardTitle>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">{transmission?.reason || "송전 투자자료를 아직 수집하지 않았습니다."}</p>
+              </div>
+              <Badge variant={TONE_STYLES[transmissionTone].badge}>{transmissionInvestmentAxisLabel(transmission?.state)}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">최근 연간 증가액</p><p className={`mt-0.5 text-sm font-semibold tabular-nums ${TONE_STYLES[transmissionTone].text}`}>{usdBillions(transmission?.metrics.annual_additions_usd)}</p></div>
+              <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">동일 보고사 3년 CAGR</p><p className={`mt-0.5 text-sm font-semibold tabular-nums ${TONE_STYLES[transmissionTone].text}`}>{metricValue(transmission?.metrics.like_for_like_three_year_cagr_pct)}</p></div>
+              <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">최근 보고 사업자</p><p className="mt-0.5 text-sm font-semibold tabular-nums">{metricValue(transmission?.metrics.reporter_count, 1, 0)}</p></div>
+              <div className="rounded-md bg-muted/50 px-3 py-2"><p className="text-[11px] text-muted-foreground">현재 보고사의 전년 비교 가능률</p><p className="mt-0.5 text-sm font-semibold tabular-nums">{metricValue(transmission?.metrics.current_reporter_prior_year_coverage_pct)}</p></div>
+            </div>
+            <div className="mt-5 rounded-lg border border-border/70 p-3">
+              <p className="mb-3 text-sm font-medium">연간 송전설비 증가액 · 십억달러</p>
+              {transmissionHistory.length ? (
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={transmissionHistory} margin={{ top: 8, right: 12, bottom: 6, left: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
+                      <XAxis dataKey="date" tickFormatter={(value) => String(value).slice(0, 4)} tick={{ fontSize: 10 }} />
+                      <YAxis width={54} tick={{ fontSize: 10 }} tickFormatter={(value) => `$${value}`} />
+                      <Tooltip labelFormatter={(label) => `회계연도 ${String(label).slice(0, 4)}`} formatter={(value: number) => [`$${Number(value).toFixed(1)}B`, "송전설비 증가액"]} contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} />
+                      <Bar dataKey="additions_billion" fill={REGIME_SERIES_COLORS.cyan} maxBarSize={36} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : <div className="flex h-52 items-center justify-center text-sm text-muted-foreground">송전 투자 이력이 부족합니다.</div>}
+            </div>
+            <p className="mt-4 text-xs leading-5 text-muted-foreground">
+              PUDL이 정리한 FERC Form 1 명목 회계자료입니다. 보고사 표본의 설비 증가액이며 미국 전체 송전투자의 완전한 총계로 해석하지 않습니다.
+            </p>
+            {transmission?.provenance.source_url && <a href={transmission.provenance.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-primary hover:underline">PUDL · FERC Form 1 자료 안내</a>}
+          </CardContent>
+        </Card>
+      </section>
+
+      <details className="group rounded-lg border border-border/70 bg-card/40">
+        <summary className="cursor-pointer list-none px-5 py-4 text-sm font-medium [&::-webkit-details-marker]:hidden">월간 후행 총량·연간 가동설비 추이 보기</summary>
+        <div className="grid gap-6 border-t border-border/70 p-5 xl:grid-cols-2">
+          <div>
+            <p className="mb-3 text-sm font-medium">월간 판매·발전량 · TWh</p>
+            {monthly.length ? <div className="h-64"><ResponsiveContainer width="100%" height="100%"><LineChart data={monthly}><CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} /><XAxis dataKey="date" tickFormatter={formatDate} minTickGap={28} tick={{ fontSize: 10 }} /><YAxis width={48} tick={{ fontSize: 10 }} /><Tooltip contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} /><Line type="monotone" dataKey="generation" name="순발전" stroke={REGIME_SERIES_COLORS.blue} dot={false} isAnimationActive={false} /><Line type="monotone" dataKey="total" name="총판매" stroke={REGIME_SERIES_COLORS.violet} dot={false} isAnimationActive={false} /><Line type="monotone" dataKey="commercial" name="상업용" stroke={REGIME_SERIES_COLORS.cyan} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div> : <p className="text-sm text-muted-foreground">미수집</p>}
+          </div>
+          <div>
+            <p className="mb-3 text-sm font-medium">연간 순하계 설비용량 · GW</p>
+            {capacity.length ? <div className="h-64"><ResponsiveContainer width="100%" height="100%"><LineChart data={capacity}><CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} /><XAxis dataKey="date" tickFormatter={(value) => String(value).slice(0, 4)} tick={{ fontSize: 10 }} /><YAxis width={52} tick={{ fontSize: 10 }} domain={["auto", "auto"]} /><Tooltip contentStyle={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 8 }} /><Line type="monotone" dataKey="capacity" name="설비용량" stroke={REGIME_SERIES_COLORS.blue} dot={{ r: 2 }} isAnimationActive={false} /></LineChart></ResponsiveContainer></div> : <p className="text-sm text-muted-foreground">미수집</p>}
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
@@ -2040,9 +2492,9 @@ export function RegimePage() {
 
         <TabsContent value="indicators" className="mt-0">
           <Tabs defaultValue="market" className="space-y-6">
-            <div className="sticky top-16 z-10 -mx-1 overflow-x-auto border-b border-border/70 bg-background/95 px-1 py-3 backdrop-blur">
-              <div className="flex w-max items-end gap-5">
-                <div>
+            <div className="sticky top-16 z-10 -mx-1 border-b border-border/70 bg-background/95 px-1 py-3 backdrop-blur">
+              <div className="grid gap-2 sm:flex sm:w-max sm:items-end sm:gap-5">
+                <div className="max-w-full overflow-x-auto sm:overflow-visible">
                   <p className="mb-1.5 px-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                     거시·시장
                   </p>
@@ -2054,8 +2506,8 @@ export function RegimePage() {
                     ))}
                   </TabsList>
                 </div>
-                <div className="h-9 w-px bg-border" />
-                <div>
+                <div className="hidden h-9 w-px bg-border sm:block" />
+                <div className="max-w-full overflow-x-auto sm:overflow-visible">
                   <p className="mb-1.5 px-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                     AI 투자 가설
                   </p>

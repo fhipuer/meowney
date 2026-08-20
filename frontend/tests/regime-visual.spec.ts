@@ -28,7 +28,7 @@ test('regime current and indicator drill-down remain readable', async ({ page })
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/regime')
   await expect(page.getByRole('heading', { name: '투자 레짐' })).toBeVisible()
-  await expect(page.getByText('v1.15.0', { exact: true })).toBeVisible()
+  await expect(page.getByText('v1.17.0', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '상세점검용 데이터' })).toHaveCount(0)
   await expect(page.getByText(/events: partial/)).toHaveCount(0)
   await expect(page.getByText('미국 거시 판단', { exact: true })).toBeVisible()
@@ -67,8 +67,21 @@ test('regime current and indicator drill-down remain readable', async ({ page })
   await page.mouse.move(0, 0)
   await expectNoPageOverflow(page)
   if (capture) {
-    await page.screenshot({ path: '../.local-run/regime-v1150-current-desktop.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/regime-v1170-current-desktop.png', fullPage: true })
   }
+
+  const powerStage = page.locator('[data-thesis-stage="power"]')
+  await powerStage.click()
+  await expect(page.getByText('후속 전력 인프라 근거', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-power-axis]')).toHaveCount(5)
+  await expectNoElementOverflow(page.locator('[data-power-axis-content]'))
+  await expectNoPageOverflow(page)
+  if (capture) {
+    await page.getByText('후속 전력 인프라 근거', { exact: true }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: '../.local-run/regime-v1170-current-power-viewport.png' })
+    await page.screenshot({ path: '../.local-run/regime-v1170-current-power-expanded.png', fullPage: true })
+  }
+  await powerStage.click()
 
   await page.getByRole('tab', { name: '지표', exact: true }).click()
   await page.getByRole('tab', { name: 'AI 투자', exact: true }).click()
@@ -142,6 +155,29 @@ test('regime current and indicator drill-down remain readable', async ({ page })
     await page.screenshot({ path: '../.local-run/regime-v1150-company-viewport.png' })
   }
 
+  await page.getByRole('tab', { name: '전력 인프라', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'AI 전력 인프라 전달경로', exact: true })).toBeVisible()
+  await expect(page.getByText('1단계 · 실제 수요', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('2단계 · 운영 프록시', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('3단계 · 공사단계 설비', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('4단계 · 공급측 대기열', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('5단계 · 회계상 투자', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('최근 전력수요 방향', { exact: true })).toBeVisible()
+  await expect(page.getByText('지역별 수요 확산', { exact: true })).toBeVisible()
+  await expect(page.getByText('24개월 발전·저장 공사단계 설비', { exact: true })).toBeVisible()
+  await expect(page.getByText('발전·저장 프로젝트 계통 접속 대기열', { exact: true })).toBeVisible()
+  await expect(page.getByText('미국 전력사업자 송전설비 증가액', { exact: true })).toBeVisible()
+  await expect(page.getByText(/예비율이나 송전 병목을 직접 측정한 값은 아닙니다/)).toBeVisible()
+  await expect(page.locator('[data-power-flow-axis]')).toHaveCount(5)
+  await expectNoPageOverflow(page)
+  if (capture) {
+    await page.getByRole('heading', { name: 'AI 전력 인프라 전달경로', exact: true }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: '../.local-run/regime-v1170-power-top-viewport.png' })
+    await page.screenshot({ path: '../.local-run/regime-v1170-power-desktop.png', fullPage: true })
+    await page.getByText('최근 전력수요 방향', { exact: true }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: '../.local-run/regime-v1170-power-viewport.png' })
+  }
+
   const historyTab = page.getByRole('tab', { name: '기록', exact: true })
   await historyTab.click()
   await expect(historyTab).toHaveAttribute('aria-selected', 'true')
@@ -174,8 +210,20 @@ test('regime current view has no global overflow on mobile', async ({ page }) =>
   await expectNoElementOverflow(page.locator('[data-financial-card]'))
   await expectNoPageOverflow(page)
   if (capture) {
-    await page.screenshot({ path: '../.local-run/regime-v1150-current-mobile.png', fullPage: true })
+    await page.screenshot({ path: '../.local-run/regime-v1170-current-mobile.png', fullPage: true })
   }
+
+  const mobilePowerStage = page.locator('[data-thesis-stage="power"]')
+  await mobilePowerStage.click()
+  await expect(page.locator('[data-power-axis]')).toHaveCount(5)
+  await expectNoElementOverflow(page.locator('[data-power-axis-content]'))
+  await expectNoPageOverflow(page)
+  if (capture) {
+    await page.getByText('후속 전력 인프라 근거', { exact: true }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: '../.local-run/regime-v1170-current-power-mobile-viewport.png' })
+    await page.screenshot({ path: '../.local-run/regime-v1170-current-power-mobile.png', fullPage: true })
+  }
+  await mobilePowerStage.click()
 
   await page.getByRole('tab', { name: '지표', exact: true }).click()
   await page.getByRole('tab', { name: 'AI 투자', exact: true }).click()
@@ -202,6 +250,19 @@ test('regime current view has no global overflow on mobile', async ({ page }) =>
   await expectNoPageOverflow(page)
   if (capture) {
     await page.screenshot({ path: '../.local-run/regime-v1150-semiconductor-mobile.png', fullPage: true })
+  }
+
+  await page.getByRole('tab', { name: '전력 인프라', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'AI 전력 인프라 전달경로', exact: true })).toBeVisible()
+  await expect(page.getByText('1단계 · 실제 수요', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('24개월 발전·저장 공사단계 설비', { exact: true })).toBeVisible()
+  await expect(page.getByText('발전·저장 프로젝트 계통 접속 대기열', { exact: true })).toBeVisible()
+  await expect(page.getByText('미국 전력사업자 송전설비 증가액', { exact: true })).toBeVisible()
+  await expectNoPageOverflow(page)
+  if (capture) {
+    await page.getByRole('heading', { name: 'AI 전력 인프라 전달경로', exact: true }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: '../.local-run/regime-v1170-power-mobile-top-viewport.png' })
+    await page.screenshot({ path: '../.local-run/regime-v1170-power-mobile.png', fullPage: true })
   }
 
   await page.getByRole('tab', { name: '기록', exact: true }).click()

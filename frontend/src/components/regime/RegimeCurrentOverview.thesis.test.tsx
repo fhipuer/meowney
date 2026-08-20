@@ -200,11 +200,67 @@ describe("AiThesisMonitor", () => {
         },
       },
       power_cycle: {
-        state: "상업용 수요 우세",
-        reason: "상업용 판매 증가율이 전체보다 높습니다.",
-        methodology: "전년동월 비교",
-        limitations: "계통 병목 판정 아님",
+        state: "전력망 투자 가설 강화",
+        reason: "수요 확대, 운영 부담과 송전 투자 실행이 독립적으로 확인됩니다.",
+        methodology: "수요·운영·건설·접속대기·송전투자를 단계별로 판정",
+        limitations: "각 축은 병목을 단독 확정하지 않음",
         source_url: "https://example.com/eia",
+        decision_as_of_date: "2026-08-18",
+        is_stale: false,
+        demand_axis: {
+          state: "전력 수요 확대",
+          observation_date: "2026-08-18",
+          national_yoy_84d: 2.5,
+          ai_regions_yoy_84d: 3.8,
+          source_url: "https://example.com/eia930",
+        },
+        operations_axis: {
+          state: "부담 신호 관찰",
+          observation_date: "2026-08-18",
+          forecast_surprise_pct: 1.9,
+          pressure_region_count: 2,
+          expected_region_count: 6,
+          is_stale: false,
+          source_url: "https://example.com/eia930",
+        },
+        supply_axis: {
+          state: "건설 진행",
+          observation_date: "2026-06-30",
+          net_additions_24m_gw: 63.4,
+          net_pipeline_ratio_24m_pct: 4.9,
+          is_stale: false,
+          source_url: "https://example.com/eia860m",
+        },
+        interconnection_axis: {
+          state: "접속 대기 부담 높음",
+          reason: "공급측 발전·저장 접속 신청이 큽니다.",
+          observation_date: "2025-12-31",
+          is_stale: false,
+          metrics: {
+            active_queue_gw: { value: 2061.3, unit: "GW", observation_date: "2025-12-31" },
+            ia_executed_share_pct: { value: 24.3, unit: "%", observation_date: "2025-12-31" },
+          },
+          provenance: {
+            provider: "Lawrence Berkeley National Laboratory",
+            source_url: "https://example.com/lbnl",
+            scope_note: "공급측 발전·저장 접속 신청",
+          },
+        },
+        transmission_investment_axis: {
+          state: "송전 투자 확대",
+          reason: "동일 보고자 기준 송전 투자 증가가 이어집니다.",
+          observation_date: "2025-12-31",
+          is_stale: false,
+          metrics: {
+            annual_additions_usd: { value: 35_315_000_000, unit: "USD", observation_date: "2025-12-31" },
+            like_for_like_three_year_cagr_pct: { value: 13, unit: "%", observation_date: "2025-12-31" },
+          },
+          provenance: {
+            provider: "PUDL / Catalyst Cooperative",
+            source_url: "https://example.com/pudl",
+            scope_note: "처리된 FERC Form 1 Schedule 204",
+          },
+        },
         metrics: {
           total_sales: metric(2, 2.5),
           commercial_sales: metric(5, 5.5),
@@ -219,7 +275,7 @@ describe("AiThesisMonitor", () => {
     expect(html).toContain("DRAM 수급 핵심축");
     expect(html).toContain("한국 반도체 완제품 재고");
     expect(html).toContain("국내 2사 실적 확인");
-    expect(html).toContain("미국 상업용 전력판매");
+    expect(html).toContain("미국 전력 인프라 전달경로");
     expect(html).toContain("서로 엇갈리는 근거");
     expect(html).toContain("재고 부담");
     expect(html).toContain("90백분위");
@@ -234,7 +290,25 @@ describe("AiThesisMonitor", () => {
     expect(html).toContain("재고 절대액은 증가했지만");
     expect(html).toContain("판정 미사용");
     expect(html).toContain("서로 엇갈리는 근거");
-    expect(html).toContain("후행 전력 수요 맥락");
+    expect(html).toContain("후속 전력 인프라 근거");
+    expect(html).toContain("전력 수요 압력");
+    expect(html).toContain("계통 운영 압력");
+    expect(html).toContain("발전·저장 건설");
+    expect(html).toContain("발전 공급 접속 대기");
+    expect(html).toContain("송전 투자 실행");
+    expect(html).toContain("2,061 GW");
+    expect(html).toContain("+13.0%");
+    expect(html).toContain("$35.31B");
+    expect(html).toContain("LBNL Queued Up · 공급측 접속대기");
+    expect(html).toContain("PUDL 처리 FERC Form 1 · 송전 투자");
+    expect(html).not.toContain("계통 병목 확정");
+    expect(html).toContain('data-power-axis="1" data-semantic-tone="positive"');
+    expect(html).toContain('data-power-axis="2" data-semantic-tone="caution"');
+    expect(html).toContain('data-power-axis="3" data-semantic-tone="positive"');
+    expect(html).toContain('data-power-axis="4" data-semantic-tone="negative"');
+    expect(html).toContain('data-power-axis="5" data-semantic-tone="positive"');
+    expect(html).toContain("+3.8%");
+    expect(html).toContain("+63.4 GW");
     expect(html).toContain("가설 전달 단계");
     expect(html).toContain("AI 투자 상세");
     expect(html).toContain("광의 DRAM 수급과 HBM 간접 확인");
