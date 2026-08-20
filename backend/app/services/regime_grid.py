@@ -44,6 +44,18 @@ PUDL_DATA_URL = "https://docs.catalyst.coop/pudl/en/stable/data_access.html"
 LBNL_FEED_ID = "lbnl_interconnection_queue"
 PUDL_FEED_ID = "pudl_ferc1_transmission_investment"
 REFRESH_HOURS = 720
+GRID_HTTP_HEADERS = {
+    # LBNL's public download host is protected by Cloudflare and rejects the
+    # default httpx user agent from some residential/NAS networks.  A regular
+    # browser user agent keeps the public workbook reachable without cookies,
+    # credentials, or a mirror.
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/140.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*;q=0.8",
+}
 LBNL_SCOPE_NOTE = (
     "발전·저장설비의 계통연계 대기열이며 데이터센터 부하 접속 대기열이 아닙니다."
 )
@@ -660,7 +672,11 @@ class GridInfrastructureService:
             return {"status": "cached", "saved": 0}
 
         attempted = utc_now()
-        async with httpx.AsyncClient(timeout=240, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=240,
+            follow_redirects=True,
+            headers=GRID_HTTP_HEADERS,
+        ) as client:
             names = list(jobs)
             results = await asyncio.gather(
                 *(

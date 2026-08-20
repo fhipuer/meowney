@@ -169,6 +169,7 @@ class FakeRepo:
 async def test_grid_refresh_preserves_one_good_axis_when_other_source_fails(monkeypatch):
     service = GridInfrastructureService()
     service.repo = FakeRepo()
+    client_options = {}
 
     async def lbnl(_client):
         return [{
@@ -189,7 +190,11 @@ async def test_grid_refresh_preserves_one_good_axis_when_other_source_fails(monk
 
     monkeypatch.setattr(service, "_fetch_lbnl", lbnl)
     monkeypatch.setattr(service, "_fetch_pudl", pudl)
-    monkeypatch.setattr("app.services.regime_grid.httpx.AsyncClient", lambda **_: FakeClient())
+    def fake_client(**kwargs):
+        client_options.update(kwargs)
+        return FakeClient()
+
+    monkeypatch.setattr("app.services.regime_grid.httpx.AsyncClient", fake_client)
 
     result = await service.refresh(force=True)
 
@@ -198,6 +203,7 @@ async def test_grid_refresh_preserves_one_good_axis_when_other_source_fails(monk
     assert result["sources"]["lbnl"]["status"] == "success"
     assert result["sources"]["pudl"]["status"] == "failed"
     assert service.repo.series("us_interconnection_active_queue_total_gw")[-1]["value"] == 2000
+    assert client_options["headers"]["User-Agent"].startswith("Mozilla/5.0")
 
 
 def test_grid_summary_keeps_provenance_scope_and_raw_history():

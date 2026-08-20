@@ -2,7 +2,7 @@
 
 > 개인 자산 포트폴리오, 일별 자산 추이와 리밸런싱을 한곳에서 관리하는 대시보드
 
-**버전**: 1.17.0
+**버전**: 1.17.1
 
 ## 주요 기능
 
@@ -17,7 +17,7 @@
 - FRED 기반 미국 주요 거시 발표 일정과 SEC XBRL 기반 4개사 AI CAPEX 캐시·판정
 - TrendForce 공개 DRAM Contract·Spot 가격 저빈도 캐시와 메모리 가격 사이클
 - KOSIS·관세청·OpenDART 기반 한국 반도체 수요·공급·기업 확인 판정
-- EIA-930 지역 실제수요와 EIA-860M 건설·은퇴 설비를 결합한 AI 전력 투자 근거 판정
+- EIA·LBNL·PUDL을 결합한 AI 전력 인프라 5단계 전달경로 판정
 
 ## 아키텍처
 
@@ -28,7 +28,7 @@ Browser
             ├─ SQLite: 포트폴리오와 히스토리
             ├─ FRED / U.S. Treasury / yfinance: 거시·금리·시장 데이터 수집
             ├─ KOSIS / 관세청 / OpenDART: 반도체 수요·공급·공시
-            ├─ EIA-930 / EIA-860M: 지역 전력수요·발전설비 파이프라인
+            ├─ EIA / LBNL / PUDL: 전력수요·계통운영·접속대기·송전투자
             ├─ SQLite: 원자료·수집상태·레짐 관측값 캐시
             └─ APScheduler: 일일 스냅샷
 ```
@@ -146,6 +146,11 @@ NAS 내부 백업만으로는 장치 고장에 대비할 수 없으므로 `backu
 - [SQLite 운영 및 Supabase 이관](docs/local-database.md)
 - [기능 명세](docs/FEATURE_SPEC.md)
 - [디자인 가이드](DESIGN.md)
+
+## v1.17.1 주요 변경
+
+- LBNL 공개 XLSX가 NAS 네트워크에서 기본 HTTP 클라이언트를 거부하던 문제를 호환 User-Agent로 보정
+- 로그인·쿠키·미러 없이 공식 Berkeley Lab 원자료를 계속 사용
 
 ## v1.17.0 주요 변경
 
