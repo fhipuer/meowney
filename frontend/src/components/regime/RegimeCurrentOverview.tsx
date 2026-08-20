@@ -72,6 +72,23 @@ import { CompanyFilingCard } from "./CompanyFilingCard";
 import type { RegimeCurrent, RegimeLevel } from "@/types";
 
 const LEVELS: RegimeLevel[] = ["유지", "경계", "약화", "전환"];
+const FEED_DISPLAY_NAMES: Record<string, string> = {
+  macro: "미국 거시지표",
+  treasury: "미국 국채금리",
+  ai_capex: "하이퍼스케일러 CAPEX",
+  memory: "메모리 공개가격",
+  kosis: "한국 산업지표",
+  customs: "한국 수출입",
+  opendart: "국내 기업 공시",
+  eia: "미국 전력지표",
+  lbnl_queue: "발전 공급 접속 대기",
+  transmission_investment: "송전 투자",
+};
+const FEED_STATUS_LABELS: Record<string, string> = {
+  failed: "최근 갱신 실패",
+  partial: "일부 항목 갱신 지연",
+  configuration_required: "연결 설정 필요",
+};
 export const FINANCIAL_TRANSMISSION_HELP: Record<string, string> = {
   "정책 긴축":
     "기준금리에서 Core PCE 전년비를 뺀 실질 정책금리 대용치로 단기금리가 수요를 얼마나 누르는지 봅니다. 0%p 미만은 수요 억제력이 낮고, 0~1%p는 약한 억제, 1%p 이상은 뚜렷한 억제로 표시합니다. 이 값만으로 침체를 판정하지는 않습니다.",
@@ -232,6 +249,15 @@ export function DecisionHeader({ data }: { data: RegimeCurrent }) {
     : [];
   const eventSchedule = firstEvent ? formatRegimeEventSchedule(firstEvent) : null;
   const showCandidate = data.candidate_regime !== data.automatic_regime;
+  const delayedReferenceFeeds = Object.entries(data.feed_health || {})
+    .filter(([name, feed]) =>
+      name !== "events"
+      && feed
+      && ["failed", "partial", "configuration_required"].includes(feed.status),
+    )
+    .map(([name, feed]) =>
+      `${FEED_DISPLAY_NAMES[name] || name} ${FEED_STATUS_LABELS[feed?.status || ""] || "상태 확인 필요"}`,
+    );
   return (
     <Card className={data.needs_new_review ? "border-red-400/50" : ""}>
       <CardContent className="p-5 sm:p-7">
@@ -336,6 +362,16 @@ export function DecisionHeader({ data }: { data: RegimeCurrent }) {
           <span>판정입력 {macroCoverage.usable}/{macroCoverage.total}</span>
           <span>핵심 관측 최신 {data.data_quality.observation_range?.to || "-"}</span>
           <span>계산 {data.evaluated_at ? new Date(data.evaluated_at).toLocaleString("ko-KR") : "-"}</span>
+          {data.data_quality.status === "충분" && delayedReferenceFeeds.length > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <span>자료원 상태 · {delayedReferenceFeeds.join(" · ")}</span>
+              <InfoTip label="보조자료 갱신 상태">
+                현재 판정에 필요한 핵심 입력과 정상 캐시는 확보됐습니다. 이 표시는
+                일부 원본의 최신 수집 상태를 기록하기 위한 참고정보이며, 지금
+                상세점검이 필요하다는 뜻은 아닙니다.
+              </InfoTip>
+            </span>
+          )}
         </div>
         {data.review_acknowledged && (
           <p className="mt-5 border-t pt-4 text-xs text-muted-foreground">

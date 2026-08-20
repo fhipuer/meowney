@@ -56,6 +56,22 @@ describe("current overview semantics", () => {
     expect(html).not.toContain("점=현재 수준");
   });
 
+  it("keeps non-blocking source delays in the compact metadata row", () => {
+    const data = {
+      ...base,
+      feed_health: {
+        events: { status: "success" },
+        macro: { status: "partial" },
+      },
+    } as unknown as RegimeCurrent;
+
+    const html = renderToStaticMarkup(<DecisionHeader data={data} />);
+
+    expect(html).toContain("자료원 상태 · 미국 거시지표 일부 항목 갱신 지연");
+    expect(html).toContain("보조자료 갱신 상태");
+    expect(html).not.toContain("일부 데이터 원본 갱신 지연");
+  });
+
   it("does not present one high watch signal as an immediate review instruction", () => {
     const data = {
       ...base,

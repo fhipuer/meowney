@@ -187,23 +187,6 @@ export function signalRuleHelp(signal: RegimeSignal) {
   return "판정 기간과 개선·악화 방향은 지표별 규칙을 따릅니다. 아래 판정 근거에서 이번 계산에 사용된 기간과 값을 확인할 수 있습니다.";
 }
 
-const FEED_DISPLAY_NAMES: Record<string, string> = {
-  macro: "미국 거시지표",
-  treasury: "미국 국채금리",
-  ai_capex: "하이퍼스케일러 CAPEX",
-  memory: "메모리 공개가격",
-  kosis: "한국 산업지표",
-  customs: "한국 수출입",
-  opendart: "국내 기업 공시",
-  eia: "미국 전력지표",
-};
-
-const FEED_STATUS_LABELS: Record<string, string> = {
-  failed: "최근 갱신 실패",
-  partial: "일부 항목만 갱신",
-  configuration_required: "연결 설정 필요",
-};
-
 const formatDate = (value: string) => value.slice(2, 7).replace("-", ".");
 const formatNumber = (value: number) =>
   Math.abs(value) >= 1000
@@ -2391,13 +2374,7 @@ export function RegimePage() {
     },
   });
   const data = current.data;
-  const unhealthyFeeds = data
-    ? Object.entries(data.feed_health || {}).filter(([name, feed]) =>
-        name !== "events"
-        && feed
-        && ["failed", "partial", "configuration_required"].includes(feed.status),
-      )
-    : [];
+  const blockingDataIssue = data?.data_quality.status === "판정 불가";
 
   return (
     <div className="space-y-8 pb-14 pt-3">
@@ -2431,34 +2408,12 @@ export function RegimePage() {
           </Button>
         </div>
       </div>
-      {data?.last_fetch?.status === "failed" && (
+      {blockingDataIssue && (
         <Alert variant="destructive">
-          <AlertTitle>최근 갱신 실패</AlertTitle>
-          <AlertDescription>
-            마지막 정상 캐시를 표시합니다. {data.last_fetch.error}
-          </AlertDescription>
-        </Alert>
-      )}
-      {unhealthyFeeds.length > 0 && (
-        <Alert>
           <Database className="h-4 w-4" />
-          <AlertTitle>일부 데이터 원본 갱신 지연</AlertTitle>
+          <AlertTitle>핵심 판정자료 부족</AlertTitle>
           <AlertDescription>
-            {unhealthyFeeds
-              .map(([name, feed]) =>
-                `${FEED_DISPLAY_NAMES[name] || name} · ${FEED_STATUS_LABELS[feed?.status || ""] || "상태 확인 필요"}`,
-              )
-              .join(" · ")}
-            . 기존 정상 수집분을 표시하며, 기준일과 최신성은 해당 영역에서 확인할 수 있습니다.
-          </AlertDescription>
-        </Alert>
-      )}
-      {data?.is_stale && (
-        <Alert>
-          <Database className="h-4 w-4" />
-          <AlertTitle>오래된 캐시 사용 중</AlertTitle>
-          <AlertDescription>
-            하나 이상의 미국 판정입력이 허용 최신성 범위를 벗어났습니다.
+            {data.data_quality.reasons.join(" · ")}. 현재 자동 판정의 범위가 제한됩니다.
           </AlertDescription>
         </Alert>
       )}
