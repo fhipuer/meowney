@@ -10,14 +10,14 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 
-DECISION_BRIEF_SCHEMA_VERSION = "1.1.0"
+DECISION_BRIEF_SCHEMA_VERSION = "1.2.0"
 
 SIGNAL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "시장·환율·원자재",
         (
             "market_kospi", "market_sp500", "market_nasdaq", "market_vix",
-            "market_usdkrw", "market_dollar", "market_wti", "market_copper",
+            "market_usdkrw", "market_dollar", "market_wti", "market_ovx", "market_copper",
             "market_gold", "market_silver", "market_gold_silver_ratio",
         ),
     ),
@@ -34,7 +34,7 @@ SIGNAL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "물가",
-        ("cpi", "core_cpi", "pce", "core_pce", "ppi", "wages"),
+        ("cpi", "core_cpi", "pce", "core_pce", "ppi", "ppi_commodities", "wages"),
     ),
     (
         "금리",
@@ -141,7 +141,7 @@ def _append_signal_table(lines: list[str], title: str, ids: Iterable[str], signa
         lines.append(
             f"| {_text(item.get('name'))} | {_value_with_unit(item.get('value'), item.get('unit'))} "
             f"| {_metric_summary(item)} | {status} · {_text(item.get('reason'))} "
-            f"| {_text(item.get('observation_date'))} | {_text(item.get('source'))} |"
+            f"| {_text(item.get('observation_date'))} | {_text(item.get('source'))} {_text(item.get('source_key'))} |"
         )
     lines.append("")
 
@@ -189,7 +189,7 @@ def _append_regime_summary(lines: list[str], current: dict[str, Any]) -> None:
         f"- 핵심 관측 범위: {_text(observation_range.get('from'))} ~ {_text(observation_range.get('to'))}",
         f"- 마지막 수집시각: {_text(data_quality.get('last_fetched_at'))}",
         f"- 규칙 버전: {_text(current.get('rule_version'))}",
-        f"- 데이터 품질: {_text(data_quality.get('status'))} · coverage {_coverage(data_quality.get('overall_coverage'))}",
+        f"- 판정입력 상태: {_text(data_quality.get('status'))} · 가용률 {_coverage(data_quality.get('overall_coverage'))}",
         "",
         "### 조기점검 및 자동판정",
         "",
@@ -198,6 +198,19 @@ def _append_regime_summary(lines: list[str], current: dict[str, Any]) -> None:
         f"- 최신 데이터 후보 레짐: {_text(current.get('candidate_regime'))}",
         f"- 마지막 공식 Snapshot: {_text((current.get('previous_snapshot') or {}).get('created_at'))}",
     ]
+    energy = current.get("energy_shock") or {}
+    ai = current.get("ai_capex") or {}
+    semiconductor = current.get("semiconductor_cycle") or {}
+    if energy or ai or semiconductor:
+        lines += [
+            "",
+            "### 서로 분리해 읽을 판정 계층",
+            "",
+            f"- 미국 거시 레짐: {_text(current.get('automatic_regime'))} · 후보 {_text(current.get('candidate_regime'))}",
+            f"- 에너지 가격·공급충격: {_text(energy.get('state'))} · {_text(energy.get('reason'))}",
+            f"- AI 슈퍼사이클 근거: CAPEX {_text(ai.get('state'))} · 메모리 {_text(semiconductor.get('state'))}",
+            "- 위 세 계층은 자산 매수·매도 추천이 아니며 서로 다른 근거로 판정합니다.",
+        ]
     for reason in current.get("review_reasons") or []:
         lines.append(f"- 점검 사유: {_text(reason)}")
     for change in (current.get("changes_since_snapshot") or []) + (current.get("thesis_changes_since_snapshot") or []):
@@ -269,6 +282,26 @@ def _append_financial_conditions(lines: list[str], current: dict[str, Any]) -> N
     ]
 
 
+def _append_energy_shock(lines: list[str], current: dict[str, Any]) -> None:
+    energy = current.get("energy_shock") or {}
+    if not energy:
+        return
+    components = energy.get("components") or {}
+    wti = components.get("wti") or {}
+    ovx = components.get("ovx") or {}
+    inventory = components.get("inventory") or {}
+    lines += [
+        "### 에너지 가격·공급충격 조기경보",
+        "",
+        f"- 판정: {_text(energy.get('state'))} · {_text(energy.get('reason'))}",
+        f"- WTI: ${_number(wti.get('value'), 2)} · 5관측일 {_percent(wti.get('change_5d'), 1, signed=True)} · 20관측일 {_percent(wti.get('change_20d'), 1, signed=True)} · 12개월 {_percent(wti.get('change_12m'), 1, signed=True)}",
+        f"- OVX: {_number(ovx.get('value'), 1)} · 최근 1년 {_number(ovx.get('percentile_1y'), 0)}백분위",
+        f"- 미국 상업용 원유재고(SPR 제외): {_number(inventory.get('value'), 0)}천 배럴 · 4주 {_percent(inventory.get('change_4w'), 1, signed=True)} · 52주 {_percent(inventory.get('change_52w'), 1, signed=True)}",
+        f"- 한계: {_text(energy.get('limitations'))}",
+        "",
+    ]
+
+
 def _append_ai_thesis(lines: list[str], current: dict[str, Any]) -> None:
     ai = current.get("ai_capex") or {}
     memory = current.get("memory_cycle") or {}
@@ -290,6 +323,19 @@ def _append_ai_thesis(lines: list[str], current: dict[str, Any]) -> None:
                 f"| {_money_billions(company.get('ttm'))} | {_text(status.get('status'))} |"
             )
         lines.append("")
+
+    sustainability = ai.get("sustainability") or {}
+    ttm_cash = sustainability.get("ttm") or {}
+    if ttm_cash.get("complete"):
+        lines += [
+            "#### CAPEX 지속 가능성 보조축",
+            "",
+            f"- 4사 TTM 현금 CAPEX/영업현금흐름: {_percent(ttm_cash.get('capex_to_operating_cash_flow_pct'), 1)}",
+            f"- 4사 TTM 현금 CAPEX/매출: {_percent(ttm_cash.get('capex_to_revenue_pct'), 1)}",
+            f"- 4사 TTM 잉여현금흐름 대용치: {_money_billions(ttm_cash.get('free_cash_flow_proxy'))}",
+            "- 이 보조축은 투자 확대의 지속 가능성을 확인하며 CAPEX 확대 판정을 덮어쓰지 않습니다.",
+            "",
+        ]
 
     lines += [
         f"- DRAM 가격 표본: {_text(memory.get('state'))} · {_text(memory.get('reason'))}",
@@ -395,30 +441,29 @@ def _append_ai_thesis(lines: list[str], current: dict[str, Any]) -> None:
                 f"AI 관찰지역 {_percent(demand_axis.get('ai_regions_yoy_84d'), 1, signed=True)} · "
                 f"2% 이상 증가 지역 {_percent(regional_share_pct, 0)} "
                 f"| {_text(demand_axis.get('observation_date'))} |",
-                f"| 계통 운영 압력 프록시 | {_text(operations_axis.get('state'))} "
-                f"| 실제-익일예측 {_percent(operations_axis.get('forecast_surprise_pct'), 1, signed=True)} · "
-                f"순발전/수요 {_percent(operations_axis.get('generation_coverage_pct'), 1)} · "
-                f"순유입 의존 {_percent(operations_axis.get('net_import_share_pct'), 1)} "
-                f"| {_text(operations_axis.get('observation_date'))} |",
                 f"| 발전·저장 건설 | {_text(supply_axis.get('state'))} "
                 f"| 24개월 건설 중 {_number(supply_axis.get('committed_additions_24m_gw'), 1, signed=True)} GW · "
                 f"예정 은퇴 {_number(supply_axis.get('retirements_24m_gw'), 1, signed=True)} GW · "
                 f"순확충 {_number(supply_axis.get('net_additions_24m_gw'), 1, signed=True)} GW "
                 f"({_percent(supply_axis.get('net_pipeline_ratio_24m_pct'), 1, signed=True)}) "
                 f"| {_text(supply_axis.get('observation_date'))} |",
-                f"| 발전 공급 접속 대기 | {_text(interconnection_axis.get('state'))} "
-                f"| 활성 {_number(axis_value(queue_metrics, 'active_queue_gw'), 1)} GW · "
-                f"연결계약 단계 {_percent(axis_value(queue_metrics, 'ia_executed_share_pct'), 1)} · "
-                f"중앙 대기 {_number(axis_value(queue_metrics, 'median_active_age_years'), 1)}년 "
-                f"| {_text(interconnection_axis.get('observation_date'))} |",
                 f"| 송전 투자 실행 | {_text(transmission_axis.get('state'))} "
                 f"| 연간 ${_number(transmission_billions, 1)}B · "
                 f"동일 보고자 3년 CAGR {_percent(axis_value(transmission_metrics, 'like_for_like_three_year_cagr_pct'), 1, signed=True)} "
                 f"| {_text(transmission_axis.get('observation_date'))} |",
                 "",
-                "전력 판정 제한: AI 관찰지역은 데이터센터 전용 부하가 아니며, LBNL 대기열은 발전·저장 공급측 접속 요청입니다. EIA 명목 MW는 송전 연결 가능량이나 확정 공급력을 뜻하지 않습니다. 지역간 순유입도 예비율 부족이나 데이터센터 연결 지연을 직접 뜻하지 않습니다.",
+                "전력 판정 제한: AI 관찰지역은 데이터센터 전용 부하가 아니며, EIA 명목 MW는 송전 연결 가능량이나 확정 공급력을 뜻하지 않습니다.",
                 "",
             ]
+            if operations_axis or interconnection_axis:
+                lines += [
+                    "#### 부록 · 간접 전력 운영·접속 프록시",
+                    "",
+                    f"- 계통 운영: {_text(operations_axis.get('state'))} · 실제-익일예측 {_percent(operations_axis.get('forecast_surprise_pct'), 1, signed=True)} · 순유입 의존 {_percent(operations_axis.get('net_import_share_pct'), 1)}",
+                    f"- 발전·저장 공급측 접속 대기: {_text(interconnection_axis.get('state'))} · 활성 {_number(axis_value(queue_metrics, 'active_queue_gw'), 1)} GW · 연결계약 단계 {_percent(axis_value(queue_metrics, 'ia_executed_share_pct'), 1)}",
+                    "- 두 값은 데이터센터 송전 연결 지연을 직접 측정하지 않으므로 기본 투자 근거보다 낮은 가중치로 읽습니다.",
+                    "",
+                ]
         metrics = power.get("metrics") or {}
         if metrics:
             labels = {
@@ -487,6 +532,7 @@ def build_regime_quantitative_markdown(current: dict[str, Any]) -> str:
     _append_regime_summary(lines, current)
     _append_macro_environment(lines, current)
     _append_financial_conditions(lines, current)
+    _append_energy_shock(lines, current)
     _append_ai_thesis(lines, current)
     _append_quality_and_events(lines, current)
     return "\n".join(lines).rstrip() + "\n"

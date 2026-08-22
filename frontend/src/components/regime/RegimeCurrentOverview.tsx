@@ -83,6 +83,7 @@ const FEED_DISPLAY_NAMES: Record<string, string> = {
   eia: "미국 전력지표",
   lbnl_queue: "발전 공급 접속 대기",
   transmission_investment: "송전 투자",
+  energy: "원유 가격·재고",
 };
 const FEED_STATUS_LABELS: Record<string, string> = {
   failed: "최근 갱신 실패",
@@ -102,6 +103,8 @@ export const FINANCIAL_TRANSMISSION_HELP: Record<string, string> = {
     "10Y-3M 스프레드의 최근 21관측일 평균으로 향후 12개월 침체확률을 계산합니다. 10Y-2Y는 확인자료로만 사용합니다. 현재 역전이 끝났더라도 과거 역전 뒤 침체가 나타나는 시차를 고려해 최대 252관측일 동안 영향을 관찰합니다.",
   "신용·금융여건":
     "HY(하이일드)·IG(투자등급) OAS는 국채보다 회사채가 더 부담하는 금리이고, NFCI는 0이 장기 평균입니다. 스프레드가 넓어지거나 NFCI가 0 위로 오르면 기업 자금조달이 어려워집니다. ‘자금조달 여건 양호’는 신용시장만 설명하며 Fed 정책금리가 낮다는 뜻은 아닙니다.",
+  "에너지 가격·공급충격":
+    "WTI의 5·20·63·252관측일 변화, 원유 변동성 OVX, EIA 미국 상업용 원유재고의 4·52주 변화를 분리해 봅니다. 유가와 변동성만 높으면 경계로 표시하고, 재고 감소까지 함께 확인돼야 공급충격으로 판정합니다. 에너지 자산 추천이 아니라 성장·물가에 전달될 충격의 조기경보입니다.",
 };
 export type CurrentOverviewProps = {
   data: RegimeCurrent;
@@ -238,6 +241,7 @@ export function DecisionHeader({ data }: { data: RegimeCurrent }) {
   const automaticTone = regimeLevelTone(data.automatic_regime);
   const candidateTone = regimeLevelTone(data.candidate_regime);
   const qualityTone = dataQualityTone(data.data_quality.status);
+  const qualityDimensions = data.data_quality.dimensions;
   const thesis = aiThesisOverview(data);
   const aggregate = data.ai_capex.aggregate;
   const breadth = data.ai_capex.breadth;
@@ -330,6 +334,17 @@ export function DecisionHeader({ data }: { data: RegimeCurrent }) {
               최근 압력 · {momentumDirectionLabel(pressure?.direction || legacyDirection)}
             </p>
             <p className="mt-3 text-xs leading-5 text-muted-foreground">{environment}</p>
+            {data.energy_shock && (
+              <div className="mt-4 rounded-lg border bg-muted/20 px-3 py-3">
+                <p className="text-[11px] text-muted-foreground">에너지 가격·공급충격</p>
+                <p className={`mt-1 text-sm font-semibold ${TONE_STYLES[data.energy_shock.tone].text}`}>
+                  {data.energy_shock.state}
+                </p>
+                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                  WTI 20관측일 {signed(data.energy_shock.components.wti.change_20d)}% · OVX {data.energy_shock.components.ovx.value?.toFixed(1) ?? "-"} · 재고 4주 {signed(data.energy_shock.components.inventory.change_4w)}%
+                </p>
+              </div>
+            )}
           </section>
 
           <section className="border-t border-border/80 bg-card p-5 sm:p-6 lg:border-l lg:border-t-0" data-current-summary="ai">
@@ -352,6 +367,11 @@ export function DecisionHeader({ data }: { data: RegimeCurrent }) {
               <p className="mt-1 text-[11px] text-muted-foreground">
                 {breadth?.positive_count ?? 0}/{breadth?.expected_count ?? data.ai_capex.companies?.length ?? 0}개사 증가 · 기준 {data.ai_capex.decision_as_of || aggregate?.latest_period || "미수집"}
               </p>
+              {data.ai_capex.sustainability?.ttm.complete && (
+                <p className="mt-2 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+                  TTM CAPEX/영업현금흐름 {data.ai_capex.sustainability.ttm.capex_to_operating_cash_flow_pct?.toFixed(0) ?? "-"}% · 잉여현금흐름 대용치 {billions(data.ai_capex.sustainability.ttm.free_cash_flow_proxy != null ? data.ai_capex.sustainability.ttm.free_cash_flow_proxy / 1_000_000_000 : null)}
+                </p>
+              )}
             </div>
           </section>
         </div>
@@ -359,7 +379,8 @@ export function DecisionHeader({ data }: { data: RegimeCurrent }) {
           <span>
             자료 <strong className={TONE_STYLES[qualityTone].text}>{dataQualityLabel(data.data_quality.status)}</strong>
           </span>
-          <span>판정입력 {macroCoverage.usable}/{macroCoverage.total}</span>
+          <span>{qualityDimensions?.decision_inputs.label || `판정입력 ${macroCoverage.usable}/${macroCoverage.total}`}</span>
+          {qualityDimensions?.freshness && <span>{qualityDimensions.freshness.label}</span>}
           <span>핵심 관측 최신 {data.data_quality.observation_range?.to || "-"}</span>
           <span>계산 {data.evaluated_at ? new Date(data.evaluated_at).toLocaleString("ko-KR") : "-"}</span>
           {data.data_quality.status === "충분" && delayedReferenceFeeds.length > 0 && (
@@ -774,6 +795,7 @@ export function FinancialTransmission({ data }: { data: RegimeCurrent }) {
   const curve = conditions?.yield_curve;
   const duration = conditions?.duration_stress;
   const duration20 = duration?.change_20d?.changes;
+  const energy = data.energy_shock;
   const durationLevelTone: SemanticTone =
     duration?.level_label === "장기채 부담 높음"
       ? "negative"
@@ -845,6 +867,14 @@ export function FinancialTransmission({ data }: { data: RegimeCurrent }) {
       count("liquidity"),
       financialConditionTone(conditions?.credit.label),
     ],
+    ...(energy ? [[
+      "에너지 가격·공급충격",
+      energy.state,
+      `WTI $${energy.components.wti.value?.toFixed(2) ?? "-"} · 20관측일 ${signed(energy.components.wti.change_20d)}% / OVX ${energy.components.ovx.value?.toFixed(1) ?? "-"}`,
+      `상업용 원유재고 4주 ${signed(energy.components.inventory.change_4w)}% · ${energy.components.inventory.physical_tightening ? "재고 감소 확인" : "공급 부족 확인 안 됨"} · 기준 ${energy.as_of_date || "-"}`,
+      count("energy"),
+      energy.tone,
+    ] as [string, string, string, string, number, SemanticTone]] : []),
   ] as Array<[string, string, string, string, number, SemanticTone]>;
   const tonePriority: Record<SemanticTone, number> = {
     negative: 5,
@@ -884,12 +914,11 @@ export function FinancialTransmission({ data }: { data: RegimeCurrent }) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-1">
-          <CardTitle>금융 전달경로</CardTitle>
+          <CardTitle>거시 전달경로</CardTitle>
           <InfoTip label="거시 전달경로 모니터 설명">
-            단기 정책금리, 장기 실질금리, 최근 금리 변화, 수익률곡선과
-            신용시장이 실물경제와 위험자산에 어떤 부담을 주는지 구분해서
-            보여줍니다. 각 카드의 큰 문장은 현재 경제적 의미이며 내부 모델의
-            원래 분류명은 계산과 기록에 그대로 보존됩니다.
+            단기 정책금리, 장기 실질금리, 수익률곡선, 신용시장과 에너지
+            공급충격이 성장·물가에 전달하는 부담을 구분해 보여줍니다. 에너지는
+            별도 조기경보이며 미국 거시 4개 영역 점수에 기계적으로 중복 합산하지 않습니다.
           </InfoTip>
         </div>
       </CardHeader>

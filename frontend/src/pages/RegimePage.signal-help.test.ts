@@ -14,6 +14,10 @@ describe("regime indicator rule help", () => {
     expect(signalRuleHelp(signal("us_claims"))).toContain("최근 13주");
     expect(signalRuleHelp(signal("us_claims"))).toContain("전년 대비 52주");
     expect(signalRuleHelp(signal("us3m"))).toContain("SGOV ETF 자체");
+    expect(signalRuleHelp(signal("us_payrolls"))).toContain("3개월 월평균");
+    expect(signalRuleHelp(signal("us_payrolls"))).toContain("하향·상향 수정");
+    expect(signalRuleHelp(signal("ppi"))).toContain("최종수요 PPI");
+    expect(signalRuleHelp(signal("ppi_commodities"))).toContain("자동 물가 점수에 합산하지 않습니다");
   });
 
   it("does not treat every increase as the same direction", () => {

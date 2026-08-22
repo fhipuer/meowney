@@ -48,6 +48,8 @@ def test_indicator_semantics_separates_raw_direction_from_interpretation():
         "interpretation_lens": "macro",
         "tone_policy": "higher_adverse",
         "proxy_for": None,
+        "seasonal_adjustment": None,
+        "statistical_scope": None,
     }
     assert indicator_semantics("market_gold")["tone_policy"] == "semantic_only"
     assert indicator_semantics("market_gold")["interpretation_lens"] == "market_context"
@@ -77,6 +79,15 @@ def test_payroll_decision_chart_uses_monthly_change_and_three_month_average():
 
     assert chart["points"][-1]["monthly_change"] == 90
     assert chart["points"][-1]["average_3m"] == 96.667
+
+
+def test_payroll_display_metrics_use_jobs_added_not_level_percentage_change():
+    metrics = display_metrics("us_payrolls", "monthly", [1000, 1100, 1220, 1300, 1390])
+
+    assert metrics == [
+        {"label": "최근 월 증가", "value": 90, "unit": "천명", "kind": "delta"},
+        {"label": "3개월 평균", "value": 96.7, "unit": "천명", "kind": "delta"},
+    ]
 
 
 def test_unemployment_metrics_and_chart_use_percentage_point_change():

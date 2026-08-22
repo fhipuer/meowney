@@ -60,6 +60,7 @@ export const REGIME_SERIES_COLORS = {
 
 const HIGHER_SUPPORTIVE_SIGNALS = new Set([
   "us_gdp",
+  "us_payrolls",
   "us_indpro",
   "kr_gdp",
   "kr_indpro",

@@ -487,6 +487,7 @@ export interface RegimeSignal {
   name: string;
   unit?: string;
   source: string;
+  source_key?: string;
   frequency?: string;
   direction?: "up_good" | "up_bad" | "neutral";
   observation_date?: string;
@@ -514,6 +515,19 @@ export interface RegimeSignal {
   release_date?: string | null;
   vintage_kind?: string;
   vintage_history_available?: boolean;
+  revision_summary?: {
+    observation_count: number;
+    net_delta: number;
+    latest_delta: number;
+    methodology?: string;
+    observations: Array<{
+      observation_date: string;
+      release_vintage: string;
+      initial_change: number;
+      revised_change: number;
+      revision_delta: number;
+    }>;
+  };
   is_stale?: boolean;
   age_days?: number | null;
   max_age_days?: number;
@@ -522,6 +536,8 @@ export interface RegimeSignal {
   interpretation_lens?: "macro" | "macro_context" | "market_context";
   tone_policy?: "higher_supportive" | "higher_adverse" | "semantic_only";
   proxy_for?: string | null;
+  seasonal_adjustment?: "seasonally_adjusted" | "not_seasonally_adjusted" | null;
+  statistical_scope?: string | null;
 }
 
 export type ReviewUrgency = "required" | "watch" | "not_needed";
@@ -946,6 +962,18 @@ export interface LongEndRateChangeWindow {
   };
 }
 
+export interface CapexCashContext {
+  complete: boolean;
+  coverage_count?: number;
+  expected_count?: number;
+  capex?: number | null;
+  operating_cash_flow?: number | null;
+  revenue?: number | null;
+  free_cash_flow_proxy?: number | null;
+  capex_to_operating_cash_flow_pct?: number | null;
+  capex_to_revenue_pct?: number | null;
+}
+
 export interface RegimeCurrent {
   id: string;
   evaluated_at: string;
@@ -1022,6 +1050,14 @@ export interface RegimeCurrent {
       expected_count: number;
       company_yoy: number[];
     };
+    sustainability?: {
+      period: string | null;
+      role: "sustainability_context";
+      used_in_capex_state: false;
+      limitations: string;
+      quarter: CapexCashContext;
+      ttm: CapexCashContext;
+    };
     companies: Array<{
       id: string;
       name: string;
@@ -1037,6 +1073,13 @@ export interface RegimeCurrent {
         derivation?: string;
         source_accessions?: string[];
       }>;
+      financial_context?: {
+        period: string | null;
+        role: "sustainability_context";
+        methodology: string;
+        quarter: CapexCashContext;
+        ttm: CapexCashContext;
+      };
       fetch_status: { status: string; last_success_at?: string } | null;
     }>;
   };
@@ -1071,6 +1114,45 @@ export interface RegimeCurrent {
   };
   semiconductor_cycle: SemiconductorCycle;
   power_cycle: PowerCycle;
+  energy_shock: {
+    state: string;
+    reason: string;
+    tone: "negative" | "caution" | "neutral";
+    severity: "high" | "medium" | "none";
+    role: "macro_early_warning";
+    asset_recommendation: false;
+    coverage: number;
+    as_of_date: string | null;
+    methodology: string;
+    limitations: string;
+    components: {
+      wti: {
+        value: number | null;
+        observation_date: string | null;
+        change_5d: number | null;
+        change_20d: number | null;
+        change_63d: number | null;
+        change_12m: number | null;
+        fresh: boolean;
+      };
+      ovx: {
+        value: number | null;
+        observation_date: string | null;
+        percentile_1y: number | null;
+        fresh: boolean;
+      };
+      inventory: {
+        value: number | null;
+        unit: "thousand barrels";
+        observation_date: string | null;
+        change_4w: number | null;
+        change_52w: number | null;
+        physical_tightening: boolean;
+        inventory_build: boolean;
+        fresh: boolean;
+      };
+    };
+  };
   review_urgency: ReviewUrgency;
   review_reasons: string[];
   triggers: RegimeTrigger[];
@@ -1271,9 +1353,45 @@ export interface RegimeCurrent {
     scope: "us_macro_decision_inputs";
     observation_range: { from: string | null; to: string | null };
     last_fetched_at: string | null;
+    dimensions?: {
+      decision_inputs: {
+        available: number;
+        total: number;
+        ratio: number;
+        label: string;
+      };
+      freshness: {
+        fresh: number;
+        total: number;
+        ratio: number;
+        label: string;
+      };
+      source_refresh: {
+        status: string;
+        label: string;
+        last_attempted_at?: string | null;
+        last_success_at?: string | null;
+        uses_cached_fallback: boolean;
+      };
+      series_contract: {
+        declared: number;
+        total: number;
+        label: string;
+        official_value_crosscheck: string;
+      };
+      revision_history: {
+        available: number;
+        total: number;
+        label: string;
+      };
+      anomaly_validation: {
+        status: "rule_based_partial";
+        label: string;
+      };
+    };
   };
   feed_health: Record<
-    "macro" | "events" | "ai_capex" | "memory" | "kosis" | "customs" | "opendart" | "eia",
+    "macro" | "events" | "ai_capex" | "memory" | "kosis" | "customs" | "opendart" | "eia" | "energy",
     RegimeFeedHealth | null
   >;
 }
@@ -1339,6 +1457,7 @@ export interface RegimeSnapshot {
   memory_cycle?: RegimeCurrent["memory_cycle"];
   semiconductor_cycle?: RegimeCurrent["semiconductor_cycle"];
   power_cycle?: RegimeCurrent["power_cycle"];
+  energy_shock?: RegimeCurrent["energy_shock"];
   input_fingerprint?: string | null;
   assessment_fingerprint?: string | null;
   snapshot_schema_version?: string;

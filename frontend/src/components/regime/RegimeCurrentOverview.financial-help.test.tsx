@@ -79,6 +79,16 @@ describe("FinancialTransmission help", () => {
         driver: "혼합",
         nominal_change: 0.06,
       },
+      energy_shock: {
+        state: "가격·변동성 경계",
+        tone: "caution",
+        as_of_date: "2026-08-18",
+        components: {
+          wti: { value: 86.48, change_20d: 2.5 },
+          ovx: { value: 49.6 },
+          inventory: { change_4w: 4.2, physical_tightening: false },
+        },
+      },
     } as unknown as RegimeCurrent;
 
     const html = renderToStaticMarkup(<FinancialTransmission data={data} />);
@@ -89,6 +99,9 @@ describe("FinancialTransmission help", () => {
     expect(html).toContain('aria-label="30년물 현재 부담·추가 충격 설명"');
     expect(html).toContain('aria-label="수익률곡선 선행위험 설명"');
     expect(html).toContain('aria-label="신용·금융여건 설명"');
+    expect(html).toContain('aria-label="에너지 가격·공급충격 설명"');
+    expect(html).toContain("거시 전달경로");
+    expect(html).toContain("공급 부족 확인 안 됨");
     expect(html).toContain("단기금리가 수요를 약하게 억제");
     expect(html).toContain("투자·차입에 뚜렷한 부담");
     expect(html).toContain("최근 추가 금리 충격 거의 없음");
@@ -101,5 +114,6 @@ describe("FinancialTransmission help", () => {
     expect(FINANCIAL_TRANSMISSION_HELP["30년물 현재 부담·추가 충격"]).toContain("최근 3회 중 2회");
     expect(FINANCIAL_TRANSMISSION_HELP["수익률곡선 선행위험"]).toContain("10Y-3M");
     expect(FINANCIAL_TRANSMISSION_HELP["신용·금융여건"]).toContain("NFCI는 0이 장기 평균");
+    expect(FINANCIAL_TRANSMISSION_HELP["에너지 가격·공급충격"]).toContain("공급충격");
   });
 });

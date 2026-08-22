@@ -15,6 +15,7 @@ from app.db.sqlite_client import SQLiteClient
 
 
 FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
+FRED_VINTAGE_DATES_URL = "https://api.stlouisfed.org/fred/series/vintagedates"
 
 
 def _iso_date(value: Any, field: str) -> str:
@@ -46,6 +47,23 @@ def initial_release_params(series_id: str, api_key: str, *, limit: int = 100_000
         "sort_order": "asc",
         "limit": limit,
         "offset": offset,
+    }
+
+
+def recent_vintage_params(
+    series_id: str, api_key: str, vintage_dates: list[str], observation_start: str,
+) -> dict[str, Any]:
+    """Request comparable same-vintage levels for recent revision analysis."""
+
+    return {
+        "series_id": series_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "output_type": 2,
+        "vintage_dates": ",".join(vintage_dates),
+        "observation_start": observation_start,
+        "sort_order": "asc",
+        "limit": 100_000,
     }
 
 
@@ -90,6 +108,47 @@ def parse_initial_release_observations(indicator_id: str, payload: dict[str, Any
             available_until=available_until,
             fetched_at=fetched_at,
         ))
+    return result
+
+
+def parse_vintage_date_observations(
+    indicator_id: str,
+    source_key: str,
+    payload: dict[str, Any],
+    fetched_at: str,
+) -> list[VintageObservation]:
+    """Normalize FRED output_type=2 columns into append-only vintage rows."""
+
+    datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+    prefix = f"{source_key}_"
+    result: list[VintageObservation] = []
+    for item in payload.get("observations", []):
+        observation_date = _iso_date(item.get("date"), "observation date")
+        vintage_values = []
+        for key, raw_value in item.items():
+            if not key.startswith(prefix):
+                continue
+            try:
+                value = float(raw_value)
+                available_from = _iso_date(
+                    datetime.strptime(key.removeprefix(prefix), "%Y%m%d").date().isoformat(),
+                    "vintage date",
+                )
+            except (TypeError, ValueError):
+                continue
+            vintage_values.append((available_from, value))
+        for available_from, value in sorted(vintage_values):
+            result.append(VintageObservation(
+                indicator_id=indicator_id,
+                observation_date=observation_date,
+                value=value,
+                available_from=available_from,
+                available_until=None,
+                fetched_at=fetched_at,
+                # output_type=2 does not itself identify the first release.
+                # The dedicated output_type=4 ingest owns the "initial" label.
+                vintage_kind="revision",
+            ))
     return result
 
 

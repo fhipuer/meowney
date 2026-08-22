@@ -1,7 +1,9 @@
 from datetime import date
 
 from app.services.regime_sec import (
+    build_aggregate_financial_context,
     build_capex_aggregate,
+    build_capex_financial_context,
     classify_ai_capex,
     normalize_quarters,
 )
@@ -181,3 +183,39 @@ def test_capex_aggregate_calculates_ttm_yoy_from_eight_exact_quarters():
 
     assert aggregate["ttm"] == 320
     assert aggregate["ttm_yoy"] == 100
+
+
+def test_capex_financial_context_separates_growth_from_cash_sustainability():
+    periods = ["2025-09-30", "2025-12-31", "2026-03-31", "2026-06-30"]
+    context = build_capex_financial_context(
+        {
+            "capex": [{"period_end": period, "value": 30} for period in periods],
+            "operating_cash_flow": [{"period_end": period, "value": 25} for period in periods],
+            "revenue": [{"period_end": period, "value": 100} for period in periods],
+        },
+        "2026-06-30",
+    )
+
+    assert context["quarter"]["capex_to_operating_cash_flow_pct"] == 120
+    assert context["ttm"]["free_cash_flow_proxy"] == -20
+    assert context["ttm"]["capex_to_revenue_pct"] == 30
+
+
+def test_aggregate_financial_context_never_presents_partial_sum_as_four_company_total():
+    complete = {
+        "complete": True, "capex": 30, "operating_cash_flow": 50, "revenue": 100,
+    }
+    companies = [
+        {"latest_period": "2026-06-30", "financial_context": {"quarter": complete, "ttm": complete}}
+        for _ in range(3)
+    ]
+    companies.append({
+        "latest_period": "2026-06-30",
+        "financial_context": {"quarter": {"complete": False}, "ttm": {"complete": False}},
+    })
+
+    result = build_aggregate_financial_context(companies, "2026-06-30")
+
+    assert result["quarter"] == {
+        "complete": False, "coverage_count": 3, "expected_count": 4,
+    }

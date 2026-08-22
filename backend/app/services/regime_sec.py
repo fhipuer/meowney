@@ -207,6 +207,106 @@ def build_capex_aggregate(
     return aggregate, breadth
 
 
+def _metric_window(
+    rows: list[dict[str, Any]], period: str | None, quarters: int,
+) -> float | None:
+    if not period:
+        return None
+    values = {row["period_end"]: float(row["value"]) for row in rows}
+    required = [_shift_quarter(period, -offset) for offset in range(quarters)]
+    if any(item not in values for item in required):
+        return None
+    return sum(values[item] for item in required)
+
+
+def build_capex_financial_context(
+    metric_histories: dict[str, list[dict[str, Any]]], period: str | None,
+) -> dict[str, Any]:
+    """Separate investment intensity from its cash-flow sustainability context."""
+
+    def horizon(quarters: int) -> dict[str, Any]:
+        capex = _metric_window(metric_histories.get("capex", []), period, quarters)
+        operating_cash_flow = _metric_window(
+            metric_histories.get("operating_cash_flow", []), period, quarters
+        )
+        revenue = _metric_window(metric_histories.get("revenue", []), period, quarters)
+        return {
+            "capex": capex,
+            "operating_cash_flow": operating_cash_flow,
+            "revenue": revenue,
+            "free_cash_flow_proxy": (
+                operating_cash_flow - capex
+                if operating_cash_flow is not None and capex is not None else None
+            ),
+            "capex_to_operating_cash_flow_pct": (
+                capex / operating_cash_flow * 100
+                if capex is not None and operating_cash_flow not in (None, 0) else None
+            ),
+            "capex_to_revenue_pct": (
+                capex / revenue * 100
+                if capex is not None and revenue not in (None, 0) else None
+            ),
+            "complete": all(
+                value is not None for value in (capex, operating_cash_flow, revenue)
+            ),
+        }
+
+    return {
+        "period": period,
+        "quarter": horizon(1),
+        "ttm": horizon(4),
+        "role": "sustainability_context",
+        "methodology": "영업현금흐름 - 현금 CAPEX를 잉여현금흐름 대용치로 계산",
+    }
+
+
+def build_aggregate_financial_context(
+    companies: list[dict[str, Any]], period: str | None,
+) -> dict[str, Any]:
+    """Aggregate ratios only when every company has aligned cash metrics."""
+
+    expected = len(COMPANIES)
+
+    def aggregate(horizon: str) -> dict[str, Any]:
+        rows = [
+            company.get("financial_context", {}).get(horizon, {})
+            for company in companies
+            if company.get("latest_period") == period
+        ]
+        complete = len(rows) == expected and all(row.get("complete") for row in rows)
+        if not complete:
+            return {
+                "complete": False,
+                "coverage_count": sum(bool(row.get("complete")) for row in rows),
+                "expected_count": expected,
+            }
+        capex = sum(float(row["capex"]) for row in rows)
+        operating_cash_flow = sum(float(row["operating_cash_flow"]) for row in rows)
+        revenue = sum(float(row["revenue"]) for row in rows)
+        return {
+            "complete": True,
+            "coverage_count": expected,
+            "expected_count": expected,
+            "capex": capex,
+            "operating_cash_flow": operating_cash_flow,
+            "revenue": revenue,
+            "free_cash_flow_proxy": operating_cash_flow - capex,
+            "capex_to_operating_cash_flow_pct": (
+                capex / operating_cash_flow * 100 if operating_cash_flow else None
+            ),
+            "capex_to_revenue_pct": capex / revenue * 100 if revenue else None,
+        }
+
+    return {
+        "period": period,
+        "quarter": aggregate("quarter"),
+        "ttm": aggregate("ttm"),
+        "role": "sustainability_context",
+        "used_in_capex_state": False,
+        "limitations": "기업 전체 현금흐름이며 AI 전용 수익·비현금 금융리스는 분리하지 않음",
+    }
+
+
 def classify_ai_capex(
     aggregate: dict[str, Any], breadth: dict[str, Any]
 ) -> tuple[str, str, float]:
@@ -356,10 +456,15 @@ class SecCapexService:
         companies = []
         with self.db.connect() as conn:
             for company_id, (name, _cik) in COMPANIES.items():
-                rows = [dict(row) for row in conn.execute(
-                    "SELECT * FROM company_metrics WHERE company_id=? AND metric='capex' ORDER BY period_end DESC LIMIT 16",
-                    (company_id,),
-                ).fetchall()][::-1]
+                metric_histories = {
+                    metric: [dict(row) for row in conn.execute(
+                        "SELECT * FROM company_metrics WHERE company_id=? AND metric=? "
+                        "ORDER BY period_end DESC LIMIT 16",
+                        (company_id, metric),
+                    ).fetchall()][::-1]
+                    for metric in ("capex", "operating_cash_flow", "revenue")
+                }
+                rows = metric_histories["capex"]
                 status = conn.execute("SELECT * FROM company_fetch_status WHERE company_id=?", (company_id,)).fetchone()
                 latest = rows[-1] if rows else None
                 prior_period = None
@@ -371,19 +476,27 @@ class SecCapexService:
                 ttm = sum(row["value"] for row in rows[-4:]) if len(rows) >= 4 else None
                 age_days = (date.today() - date.fromisoformat(latest["period_end"])).days if latest else None
                 is_stale = age_days is None or age_days > 200
+                financial_context = build_capex_financial_context(
+                    metric_histories, latest["period_end"] if latest else None
+                )
                 companies.append({"id": company_id, "name": name, "latest_period": latest["period_end"] if latest else None,
                                   "latest_capex": latest["value"] if latest else None, "yoy": yoy, "ttm": ttm,
                                   "age_days": age_days, "is_stale": is_stale,
                                   "history": [{"period": row["period_end"], "value": row["value"],
                                                "derivation": row["derivation"],
                                                "source_accessions": json.loads(row["source_accessions_json"])} for row in rows],
+                                  "financial_context": financial_context,
                                   "fetch_status": dict(status) if status else None})
         aggregate, breadth = build_capex_aggregate(companies, expected=len(COMPANIES))
         state, reason, coverage = classify_ai_capex(aggregate, breadth)
+        sustainability = build_aggregate_financial_context(
+            companies, aggregate.get("latest_period")
+        )
         periods = [item["latest_period"] for item in companies if item.get("latest_period")]
         return {"state": state, "reason": reason, "coverage": coverage, "companies": companies,
                 "aggregate": aggregate, "breadth": breadth,
+                "sustainability": sustainability,
                 "decision_as_of": aggregate.get("latest_period"),
                 "as_of_range": {"from": min(periods) if periods else None, "to": max(periods) if periods else None},
                 "period_alignment": "exact_period_end",
-                "methodology": "SEC 공시 4사 전체 현금 CAPEX · 동일 분기 완전 집계의 합계 YoY가 주판정 · 합산 TTM과 증가 기업 수는 확인축 · 누적 공시는 직전 누적값 차감 · AI 전용 금액이나 비현금 리스는 분리하지 않음"}
+                "methodology": "SEC 공시 4사 전체 현금 CAPEX · 동일 분기 완전 집계의 합계 YoY가 주판정 · 합산 TTM과 증가 기업 수는 확인축 · 현금흐름 지속 가능성은 별도 보조축 · 누적 공시는 직전 누적값 차감 · AI 전용 금액이나 비현금 리스는 분리하지 않음"}

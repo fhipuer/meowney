@@ -34,9 +34,12 @@ from app.services.regime_catalog import (
 )
 from app.services.regime_fred import fetch_all_pages, history_start
 from app.services.regime_vintage import (
+    FRED_VINTAGE_DATES_URL,
     RegimeVintageRepository,
     initial_release_params,
     parse_initial_release_observations,
+    parse_vintage_date_observations,
+    recent_vintage_params,
 )
 
 
@@ -181,15 +184,63 @@ class RegimeService:
                 except Exception as exc:
                     raise RuntimeError(f"{indicator['id']}.vintage: {type(exc).__name__}") from None
 
+            async def fetch_payroll_revisions(client: httpx.AsyncClient) -> list[Any]:
+                payroll = next(
+                    (item for item in indicators if item["id"] == "us_payrolls"), None
+                )
+                if not payroll:
+                    return []
+                try:
+                    async with semaphore:
+                        response = await client.get(
+                            FRED_VINTAGE_DATES_URL,
+                            params={
+                                "series_id": payroll["source_key"],
+                                "api_key": settings.fred_api_key,
+                                "file_type": "json",
+                                "sort_order": "desc",
+                                "limit": 8,
+                            },
+                        )
+                        response.raise_for_status()
+                        vintage_dates = response.json().get("vintage_dates", [])[:8]
+                        if len(vintage_dates) < 2:
+                            return []
+                        params = recent_vintage_params(
+                            payroll["source_key"],
+                            settings.fred_api_key,
+                            vintage_dates,
+                            (datetime.now(timezone.utc) - timedelta(days=400)).date().isoformat(),
+                        )
+                        observations = await fetch_all_pages(
+                            client,
+                            "https://api.stlouisfed.org/fred/series/observations",
+                            params,
+                        )
+                        return parse_vintage_date_observations(
+                            payroll["id"], payroll["source_key"],
+                            {"observations": observations}, _now(),
+                        )
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"{payroll['id']}.revisions: {type(exc).__name__}"
+                    ) from None
+
             async with httpx.AsyncClient(timeout=60) as client:
-                batches, vintage_batches = await asyncio.gather(
+                batches, vintage_batches, payroll_revision_batch = await asyncio.gather(
                     asyncio.gather(*(fetch_indicator(client, indicator) for indicator in indicators), return_exceptions=True),
                     asyncio.gather(*(fetch_initial_vintage(client, indicator) for indicator in indicators), return_exceptions=True),
+                    fetch_payroll_revisions(client),
+                    return_exceptions=True,
                 )
             errors = [str(result) for result in batches if isinstance(result, Exception)]
             errors.extend(str(result) for result in vintage_batches if isinstance(result, Exception))
+            if isinstance(payroll_revision_batch, Exception):
+                errors.append(str(payroll_revision_batch))
             rows = [row for batch in batches if isinstance(batch, list) for row in batch]
             vintage_rows = [row for batch in vintage_batches if isinstance(batch, list) for row in batch]
+            if isinstance(payroll_revision_batch, list):
+                vintage_rows.extend(payroll_revision_batch)
             outcomes: dict[str, tuple[bool, str | None, str | None]] = {}
             for indicator, result in zip(indicators, batches):
                 if isinstance(result, Exception):
@@ -299,9 +350,20 @@ class RegimeService:
                     "FROM regime_observation_vintages) WHERE rank=1"
                 ).fetchall()
             }
+            payroll_vintages = [dict(row) for row in conn.execute(
+                "SELECT observation_date,value,available_from,vintage_kind FROM regime_observation_vintages "
+                "WHERE indicator_id='us_payrolls' AND observation_date IN ("
+                " SELECT observation_date FROM regime_observation_vintages "
+                " WHERE indicator_id='us_payrolls' GROUP BY observation_date "
+                " ORDER BY observation_date DESC LIMIT 8"
+                ") ORDER BY observation_date,available_from"
+            ).fetchall()]
             for definition in definitions:
                 definition["observations"] = observations[definition["id"]]
                 definition["timing"] = timing.get(definition["id"])
+                definition["vintage_rows"] = (
+                    payroll_vintages if definition["id"] == "us_payrolls" else []
+                )
         return definitions
 
     def _signal(self, indicator: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
@@ -311,7 +373,7 @@ class RegimeService:
         semantics = indicator_semantics(indicator["id"])
         if not values:
             return {
-                **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "frequency", "direction")},
+                **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "source_key", "frequency", "direction")},
                 "status": "unavailable", "score": 0, "reason": "수집된 데이터 없음",
                 "history": [], "display_period": display_period(indicator["frequency"]),
                 "display_metrics": [], "decision_chart": None,
@@ -322,13 +384,20 @@ class RegimeService:
         p1, p3, p12 = FREQUENCY_PERIODS[indicator["frequency"]]
         latest, change1, change3, change12 = values[-1], _change(values, p1), _change(values, p3), _change(values, p12)
         score, reason = self._score(indicator["id"], latest, change3, change12, values, p3, p12)
+        revision_summary = (
+            self._payroll_revision_summary(observations, indicator.get("vintage_rows") or [])
+            if indicator["id"] == "us_payrolls" else None
+        )
+        if revision_summary and revision_summary["net_delta"] <= -100:
+            score = max(-1.5, score - .25)
+            reason += f" · 최근 증가분 수정 {revision_summary['net_delta']:+.0f}천명"
         status = "강함" if score >= 0.75 else "중립" if score > -0.5 else "둔화" if score > -1.5 else "약화"
         freshness = signal_freshness(
             {"observation_date": observations[-1]["observation_date"], "frequency": indicator["frequency"]},
             now,
         )
         signal = {
-            **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "frequency", "direction")},
+            **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "source_key", "frequency", "direction")},
             "observation_date": observations[-1]["observation_date"],
             "fetched_at": observations[-1]["fetched_at"],
             "value": latest,
@@ -355,8 +424,71 @@ class RegimeService:
             **role,
             **semantics,
         }
+        if revision_summary:
+            signal["revision_summary"] = revision_summary
+            signal["display_metrics"].append({
+                "label": "최근 증가분 수정",
+                "value": revision_summary["net_delta"],
+                "unit": "천명",
+                "kind": "delta",
+            })
         signal["usable_for_decision"] = decision_usable(signal, now)
         return signal
+
+    @staticmethod
+    def _payroll_revision_summary(
+        observations: list[dict[str, Any]],
+        vintage_rows: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Compare monthly gains within the same release vintage.
+
+        PAYEMS is a level series.  Summing revisions to adjacent levels would
+        double-count benchmark changes, so each initially reported monthly
+        gain is calculated from two levels that coexisted on one vintage date.
+        """
+
+        current = {
+            str(item["observation_date"]): float(item["value"])
+            for item in observations
+        }
+        dates = sorted(current)
+        by_vintage: dict[str, dict[str, float]] = {}
+        for row in vintage_rows:
+            by_vintage.setdefault(str(row["available_from"]), {})[
+                str(row["observation_date"])
+            ] = float(row["value"])
+        details: list[dict[str, Any]] = []
+        for target_date in dates[-3:]:
+            index = dates.index(target_date)
+            if index == 0:
+                continue
+            previous_date = dates[index - 1]
+            comparable = [
+                (vintage_date, values)
+                for vintage_date, values in sorted(by_vintage.items())
+                if target_date in values and previous_date in values
+            ]
+            if not comparable:
+                continue
+            release_vintage, release_values = comparable[0]
+            initial_change = release_values[target_date] - release_values[previous_date]
+            revised_change = current[target_date] - current[previous_date]
+            details.append({
+                "observation_date": target_date,
+                "release_vintage": release_vintage,
+                "initial_change": round(initial_change, 3),
+                "revised_change": round(revised_change, 3),
+                "revision_delta": round(revised_change - initial_change, 3),
+            })
+        if not details:
+            return None
+        return {
+            "observation_count": len(details),
+            "net_delta": round(sum(item["revision_delta"] for item in details), 3),
+            "latest_delta": details[-1]["revision_delta"],
+            "methodology": "동일 발표 빈티지의 당월·전월 PAYEMS 차이와 최신 수정치 비교",
+            "observations": details,
+        }
 
     @staticmethod
     def _score(key: str, latest: float, c3: float | None, c12: float | None,
@@ -367,7 +499,19 @@ class RegimeService:
             return (-2 if delta3 >= .3 else -1 if delta3 >= .15 else .5, f"3개월 {delta3:+.2f}%p")
         if key == "us_claims":
             return (-2 if (c3 or 0) >= 15 else -1 if (c3 or 0) >= 7 else .5, f"3개월 {c3 or 0:+.1f}%")
-        if key in {"cpi", "core_cpi", "pce", "core_pce", "ppi", "wages"}:
+        if key == "us_payrolls":
+            changes = [values[index] - values[index - 1] for index in range(1, len(values))]
+            latest_change = changes[-1] if changes else 0
+            average_3m = sum(changes[-3:]) / min(3, len(changes)) if changes else 0
+            score = (
+                .75 if average_3m >= 150
+                else .25 if average_3m >= 50
+                else -.25 if average_3m >= 0
+                else -.75 if average_3m > -50
+                else -1.5
+            )
+            return score, f"최근 월 {latest_change:+.0f}천명 · 3개월 평균 {average_3m:+.0f}천명"
+        if key in {"cpi", "core_cpi", "pce", "core_pce", "ppi", "ppi_commodities", "wages"}:
             annualized = ((latest / values[-p3 - 1]) ** (12 / 3) - 1) * 100 if len(values) > p3 and values[-p3 - 1] else 0
             return (-2 if annualized >= 4 else -1 if annualized >= 3 else .75 if annualized < 2.5 else 0,
                     f"3개월 연율 {annualized:.1f}%")
@@ -385,7 +529,7 @@ class RegimeService:
             return (-1.5 if delta3 >= .5 else -.75 if delta3 >= .25 else .25, f"3개월 {delta3:+.2f}%p")
         if key in {"curve2s10s", "curve10y3m"}:
             return (-1 if latest < -.5 else -.5 if latest < 0 else .5, f"현재 {latest:+.2f}%p")
-        direction = 1 if key in {"us_gdp", "us_payrolls", "us_retail", "us_indpro", "fed_assets", "bank_reserves"} else 0
+        direction = 1 if key in {"us_gdp", "us_retail", "us_indpro", "fed_assets", "bank_reserves"} else 0
         if direction:
             return (-1.5 if yoy < -2 else -.75 if yoy < 0 else .75, f"12개월 {yoy:+.1f}%")
         return (0, "중립 규칙")
@@ -633,6 +777,7 @@ class RegimeService:
         from app.services.regime_sec import SecCapexService
         from app.services.regime_memory import MemoryPriceService
         from app.services.regime_thesis import RegimeThesisDataService
+        from app.services.regime_energy import EnergyShockService
 
         evaluation = self.evaluate(persist=False)
         # Thesis summaries are attached before snapshot comparison so the
@@ -645,11 +790,13 @@ class RegimeService:
             evaluation["memory_cycle"]
         )
         evaluation["power_cycle"] = thesis_service.power_summary()
+        energy_service = EnergyShockService()
+        evaluation["energy_shock"] = energy_service.summary(evaluation["signals"])
         with self.db.connect() as conn:
             latest_fetch = conn.execute("SELECT * FROM regime_fetch_runs ORDER BY started_at DESC LIMIT 1").fetchone()
             latest_snapshot = conn.execute(
                 "SELECT created_at,automatic_regime,domains_json,ai_capex_json,memory_cycle_json,"
-                "semiconductor_cycle_json,power_cycle_json "
+                "semiconductor_cycle_json,power_cycle_json,energy_shock_json "
                 "FROM regime_snapshots ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
             prior_evaluation = conn.execute(
@@ -692,6 +839,18 @@ class RegimeService:
             evaluation["thesis_changes_since_snapshot"] = self._thesis_changes(
                 previous_thesis, evaluation
             )
+            previous_energy = (
+                json.loads(latest_snapshot["energy_shock_json"])
+                if latest_snapshot["energy_shock_json"] else None
+            )
+            if (
+                previous_energy
+                and previous_energy.get("state") != evaluation["energy_shock"].get("state")
+            ):
+                evaluation["changes_since_snapshot"].append(
+                    "에너지 가격·공급충격: "
+                    f"{previous_energy.get('state')} → {evaluation['energy_shock'].get('state')}"
+                )
         # Reuse the full-history rate model already calculated for the macro
         # quadrant.  Recomputing from display-truncated signal histories would
         # shorten the 252-observation post-inversion memory by the 21-day
@@ -700,6 +859,12 @@ class RegimeService:
             evaluation["signals"],
             rate_model=evaluation["macro_quadrant"].get("financial_conditions"),
         )
+        energy_trigger = evaluation["energy_shock"].get("trigger")
+        if energy_trigger:
+            triggers.append(energy_trigger)
+            triggers.sort(
+                key=lambda item: (-SEVERITY_RANK[item["severity"]], item["rule_id"])
+            )
         coverage = calculate_coverage(evaluation["signals"])
         urgency, review_reasons = calculate_review_urgency(
             evaluation["automatic_regime"], evaluation["candidate_regime"], triggers, coverage, worsened_domains,
@@ -749,10 +914,13 @@ class RegimeService:
         evaluation["is_stale"] = any(
             domain["stale"] for domain in coverage["domains"].values()
         )
-        evaluation["data_quality"] = self._data_quality(evaluation["signals"], coverage)
+        feed_health = self._feed_health()
+        evaluation["data_quality"] = self._data_quality(
+            evaluation["signals"], coverage, feed_health
+        )
         event_service = RegimeEventService()
         evaluation["upcoming_events"] = event_service.upcoming()
-        evaluation["feed_health"] = self._feed_health()
+        evaluation["feed_health"] = feed_health
         return evaluation
 
     @staticmethod
@@ -794,7 +962,11 @@ class RegimeService:
         return changes
 
     @staticmethod
-    def _data_quality(signals: list[dict[str, Any]], coverage: dict[str, Any]) -> dict[str, Any]:
+    def _data_quality(
+        signals: list[dict[str, Any]],
+        coverage: dict[str, Any],
+        feed_health: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         scoped = [item for item in signals if item.get("domain") in {"growth", "inflation", "rates", "liquidity"}
                   and not item["id"].startswith("kr_") and item.get("usage") == "regime"]
         available = [item for item in scoped if item.get("observation_date")]
@@ -829,6 +1001,23 @@ class RegimeService:
             reasons.append(f"미수집 지표 {len(unavailable)}개")
         if not reasons:
             reasons.append("핵심 데이터가 권장 갱신 범위 내에 있음")
+        total = len(scoped)
+        fresh_count = max(0, len(available) - len(stale))
+        source_state = (feed_health or {}).get("macro") or {}
+        source_status = source_state.get("status") or "unknown"
+        if source_status in {"success", "cached"}:
+            collection_label = "최근 수집 정상"
+        elif source_status in {"partial", "failed"} and not stale and not unavailable:
+            collection_label = "최근 수집 일부 실패·정상 캐시 사용"
+        elif source_status == "configuration_required":
+            collection_label = "수집 설정 필요·기존 캐시 확인"
+        else:
+            collection_label = "최근 수집 상태 확인 필요"
+        contract_count = sum(
+            bool(item.get("source_key") and item.get("frequency") and item.get("unit"))
+            for item in scoped
+        )
+        vintage_count = sum(bool(item.get("vintage_history_available")) for item in scoped)
         return {
             "status": status, "overall_coverage": coverage["overall"], "reasons": reasons,
             "stale": stale, "unavailable": unavailable,
@@ -837,6 +1026,39 @@ class RegimeService:
             "observation_range": {"from": min(observation_dates) if observation_dates else None,
                                   "to": max(observation_dates) if observation_dates else None},
             "last_fetched_at": max(fetched_at) if fetched_at else None,
+            "dimensions": {
+                "decision_inputs": {
+                    "available": len(available), "total": total,
+                    "ratio": round(len(available) / total, 3) if total else 0,
+                    "label": f"판정입력 {len(available)}/{total}",
+                },
+                "freshness": {
+                    "fresh": fresh_count, "total": total,
+                    "ratio": round(fresh_count / total, 3) if total else 0,
+                    "label": f"권장 갱신범위 내 {fresh_count}/{total}",
+                },
+                "source_refresh": {
+                    "status": source_status,
+                    "label": collection_label,
+                    "last_attempted_at": source_state.get("last_attempted_at"),
+                    "last_success_at": source_state.get("last_success_at"),
+                    "uses_cached_fallback": source_status in {"partial", "failed"}
+                    and not stale and not unavailable,
+                },
+                "series_contract": {
+                    "declared": contract_count, "total": total,
+                    "label": f"계열 ID·단위·주기 명시 {contract_count}/{total}",
+                    "official_value_crosscheck": "핵심 계열별 테스트",
+                },
+                "revision_history": {
+                    "available": vintage_count, "total": total,
+                    "label": f"최초 발표 이력 {vintage_count}/{total}",
+                },
+                "anomaly_validation": {
+                    "status": "rule_based_partial",
+                    "label": "규칙·계열 계약 검사 적용 · 전 계열 공식값 자동 대조는 미구현",
+                },
+            },
         }
 
     @staticmethod
@@ -979,6 +1201,7 @@ class RegimeService:
         return result
 
     def _feed_health(self) -> dict[str, Any]:
+        from app.services.regime_energy import EnergyShockService
         from app.services.regime_thesis import RegimeThesisDataService
 
         with self.db.connect() as conn:
@@ -1035,6 +1258,7 @@ class RegimeService:
             "customs": thesis_feeds["customs_memory_exports"],
             "opendart": thesis_feeds["opendart_semiconductor"],
             "eia": thesis_feeds["eia_power"],
+            "energy": EnergyShockService().feed_health(),
             "lbnl_queue": thesis_feeds.get("lbnl_interconnection_queue"),
             "transmission_investment": thesis_feeds.get("pudl_ferc1_transmission_investment"),
         }
@@ -1199,10 +1423,11 @@ class RegimeService:
             "memory_cycle_json": current["memory_cycle"],
             "semiconductor_cycle_json": current["semiconductor_cycle"],
             "power_cycle_json": current["power_cycle"],
+            "energy_shock_json": current["energy_shock"],
             "input_fingerprint": current.get("data_fingerprint"),
             "assessment_fingerprint": current.get("assessment_fingerprint"),
             "feed_health_json": current.get("feed_health"),
-            "snapshot_schema_version": "3",
+            "snapshot_schema_version": "4",
         }
         acknowledgment = self._acknowledgment_payload(current, user_note)
         # Snapshot and its implicit review acknowledgment describe one user
@@ -1295,6 +1520,7 @@ class RegimeService:
             "observation_range_json", "macro_quadrant_json", "ai_capex_json",
             "upcoming_events_json", "memory_cycle_json", "feed_health_json",
             "semiconductor_cycle_json", "power_cycle_json",
+            "energy_shock_json",
         ]
         if include_raw:
             json_fields.insert(0, "raw_data_json")

@@ -35,6 +35,26 @@ def test_semantic_migration_uses_user_facing_indicator_names(tmp_path):
     assert "current_fired_at" in trigger_columns
 
 
+def test_ppi_migration_uses_final_demand_and_preserves_commodity_context(tmp_path):
+    service = service_for(tmp_path)
+    with service.db.connect() as conn:
+        rows = {
+            row["id"]: tuple(row)
+            for row in conn.execute(
+                "SELECT id,name,source_key,weight FROM regime_indicators "
+                "WHERE id IN ('ppi','ppi_commodities','market_ovx')"
+            ).fetchall()
+        }
+
+    assert rows["ppi"] == ("ppi", "미국 최종수요 PPI", "PPIFIS", 1)
+    assert rows["ppi_commodities"] == (
+        "ppi_commodities", "미국 상품 PPI (원자재 단계)", "PPIACO", 0,
+    )
+    assert rows["market_ovx"] == (
+        "market_ovx", "원유 변동성 OVX", "OVXCLS", 0,
+    )
+
+
 def test_thesis_snapshot_changes_compare_each_independent_stage():
     previous = {
         "ai_capex": {"state": "높은 투자 지속"},
@@ -136,6 +156,72 @@ def test_latest_projection_never_borrows_initial_vintage_provenance(tmp_path):
     assert signal["vintage_kind"] == "latest_revised"
     assert signal["available_from"] is None
     assert signal["vintage_history_available"] is True
+
+
+def test_payroll_signal_uses_recent_impulse_and_downward_revisions(tmp_path):
+    service = service_for(tmp_path)
+    add_series(service, "us_payrolls", [160000, 160063, 160083, 160060])
+    definition = next(item for item in service._indicator_rows() if item["id"] == "us_payrolls")
+    dates = [row["observation_date"] for row in definition["observations"]]
+    with service.db.connect() as conn:
+        vintage_pairs = [
+            (dates[1], {dates[0]: 160000, dates[1]: 160172}),
+            (dates[2], {dates[1]: 160063, dates[2]: 160120}),
+            (dates[3], {dates[2]: 160083, dates[3]: 160060}),
+        ]
+        for vintage_date, values in vintage_pairs:
+            for observation_date, value in values.items():
+                conn.execute(
+                    "INSERT INTO regime_observation_vintages("
+                    "id,indicator_id,observation_date,value,available_from,fetched_at,source,vintage_kind"
+                    ") VALUES(?,?,?,?,?,?,?,'revision')",
+                    (
+                        str(uuid4()), "us_payrolls", observation_date, value,
+                        vintage_date, "2026-08-16T00:00:00+00:00", "fred",
+                    ),
+                )
+
+    definition = next(item for item in service._indicator_rows() if item["id"] == "us_payrolls")
+    signal = service._signal(definition)
+
+    assert signal["reason"] == "최근 월 -23천명 · 3개월 평균 +20천명 · 최근 증가분 수정 -146천명"
+    assert signal["status"] == "둔화"
+    assert signal["revision_summary"]["net_delta"] == -146
+
+
+def test_data_quality_separates_availability_freshness_and_refresh_status():
+    signals = [
+        {
+            "id": "core_cpi", "name": "미국 Core CPI", "domain": "inflation",
+            "usage": "regime", "status": "중립", "observation_date": "2026-07-01",
+            "fetched_at": "2026-08-20T00:00:00+00:00", "source_key": "CPILFESL",
+            "frequency": "monthly", "unit": "지수", "vintage_history_available": True,
+        },
+        {
+            "id": "us_indpro", "name": "미국 산업생산", "domain": "growth",
+            "usage": "regime", "status": "unavailable", "source_key": "INDPRO",
+            "frequency": "monthly", "unit": "지수", "vintage_history_available": False,
+        },
+    ]
+    coverage = {
+        "overall": .5,
+        "insufficient_domains": 1,
+        "domains": {
+            "growth": {"stale": [], "coverage": 0, "status": "판정 불가"},
+            "inflation": {"stale": [], "coverage": 1, "status": "충분"},
+        },
+    }
+
+    result = RegimeService._data_quality(
+        signals,
+        coverage,
+        {"macro": {"status": "partial", "last_attempted_at": "2026-08-21T00:00:00Z"}},
+    )
+
+    assert result["dimensions"]["decision_inputs"]["label"] == "판정입력 1/2"
+    assert result["dimensions"]["freshness"]["label"] == "권장 갱신범위 내 1/2"
+    assert result["dimensions"]["source_refresh"]["label"] == "최근 수집 상태 확인 필요"
+    assert result["dimensions"]["anomaly_validation"]["status"] == "rule_based_partial"
 
 
 def add_series(service, indicator_id, values):
@@ -367,7 +453,8 @@ def test_snapshot_keeps_auto_and_user_judgment_separate(tmp_path):
     assert snapshot["review_urgency"] in {"required", "watch", "not_needed"}
     assert snapshot["coverage"] is not None
     assert snapshot["rule_version"]
-    assert snapshot["snapshot_schema_version"] == "3"
+    assert snapshot["snapshot_schema_version"] == "4"
+    assert snapshot["energy_shock"] is not None
     assert snapshot["input_fingerprint"]
     assert snapshot["raw_data"]["schema_version"] == "2"
     assert any(item["id"] == "us_unemployment" for item in snapshot["raw_data"]["indicators"])

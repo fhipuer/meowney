@@ -21,13 +21,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTip } from "@/components/ui/info-tip";
-import { REGIME_SERIES_COLORS } from "@/lib/regime-tone";
-import type { RegimeSignal, RegimeTrigger } from "@/types";
+import { REGIME_SERIES_COLORS, TONE_STYLES } from "@/lib/regime-tone";
+import type { RegimeCurrent, RegimeSignal, RegimeTrigger } from "@/types";
 
 type Props = {
   signals: RegimeSignal[];
   fetchedAt?: string | null;
   triggers?: RegimeTrigger[];
+  energyShock?: RegimeCurrent["energy_shock"];
 };
 
 const META: Record<
@@ -76,6 +77,12 @@ const META: Record<
     icon: Waves,
     group: "real",
   },
+  market_ovx: {
+    short: "OVX",
+    role: "원유 옵션 내재 변동성",
+    icon: Gauge,
+    group: "real",
+  },
   market_copper: {
     short: "구리",
     role: "글로벌 제조업 수요",
@@ -111,6 +118,7 @@ const formatValue = (signal: RegimeSignal) => {
   if (signal.id === "market_usdkrw")
     return signal.value.toLocaleString("ko-KR", { maximumFractionDigits: 1 });
   if (signal.id === "market_wti") return `$${signal.value.toFixed(1)} /배럴`;
+  if (signal.id === "market_ovx") return signal.value.toFixed(1);
   if (signal.id === "market_copper")
     return `$${signal.value.toLocaleString("en-US", { maximumFractionDigits: 0 })} /톤`;
   if (signal.id === "market_gold" || signal.id === "market_silver")
@@ -221,7 +229,7 @@ function normalizedTrend(signals: RegimeSignal[]) {
   );
 }
 
-export function MarketIndicators({ signals, fetchedAt, triggers = [] }: Props) {
+export function MarketIndicators({ signals, fetchedAt, triggers = [], energyShock }: Props) {
   const available = signals.filter(
     (signal) => META[signal.id] && signal.value != null,
   );
@@ -255,6 +263,65 @@ export function MarketIndicators({ signals, fetchedAt, triggers = [] }: Props) {
           </p>
         </div>
       </div>
+
+      {energyShock && (
+        <Card data-energy-shock-summary className={TONE_STYLES[energyShock.tone].panel}>
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-1">
+                  <CardTitle>에너지 가격·공급충격</CardTitle>
+                  <InfoTip label="에너지 충격 판정 방식">
+                    WTI 가격 변화, OVX 변동성, EIA 미국 상업용 원유재고를
+                    분리해 봅니다. 유가만 올랐다고 공급부족으로 확정하지 않으며,
+                    자산 추천이 아닌 거시 물가·성장 충격 조기경보입니다.
+                  </InfoTip>
+                </div>
+                <p className={`mt-2 text-lg font-semibold ${TONE_STYLES[energyShock.tone].text}`}>
+                  {energyShock.state}
+                </p>
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+                  {energyShock.reason}
+                </p>
+              </div>
+              <Badge variant={TONE_STYLES[energyShock.tone].badge}>
+                거시 조기경보
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg border bg-muted/15 p-4">
+                <p className="text-xs text-muted-foreground">WTI 가격 압력</p>
+                <p className="mt-2 text-lg font-semibold tabular-nums">
+                  ${energyShock.components.wti.value?.toFixed(2) ?? "-"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  20관측일 {signed(energyShock.components.wti.change_20d)} · 12개월 {signed(energyShock.components.wti.change_12m)}
+                </p>
+              </div>
+              <div className="rounded-lg border bg-muted/15 p-4">
+                <p className="text-xs text-muted-foreground">OVX 불확실성</p>
+                <p className="mt-2 text-lg font-semibold tabular-nums">
+                  {energyShock.components.ovx.value?.toFixed(1) ?? "-"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  최근 1년 {energyShock.components.ovx.percentile_1y?.toFixed(0) ?? "-"}백분위
+                </p>
+              </div>
+              <div className="rounded-lg border bg-muted/15 p-4">
+                <p className="text-xs text-muted-foreground">상업용 원유재고</p>
+                <p className="mt-2 text-lg font-semibold tabular-nums">
+                  {energyShock.components.inventory.value?.toLocaleString("ko-KR", { maximumFractionDigits: 0 }) ?? "-"}천 배럴
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  4주 {signed(energyShock.components.inventory.change_4w)} · 52주 {signed(energyShock.components.inventory.change_52w)}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

@@ -6,6 +6,8 @@ from app.services.regime_vintage import (
     VintageObservation,
     initial_release_params,
     parse_initial_release_observations,
+    parse_vintage_date_observations,
+    recent_vintage_params,
 )
 
 
@@ -34,6 +36,31 @@ def test_parser_keeps_availability_separate_from_observation_date():
     assert rows[0].available_from == "2026-07-30"
     assert rows[0].release_date is None
     assert rows[0].vintage_kind == "initial"
+
+
+def test_recent_vintage_parser_preserves_same_release_levels():
+    params = recent_vintage_params(
+        "PAYEMS", "test-key", ["2026-07-02", "2026-08-07"], "2026-04-01"
+    )
+    rows = parse_vintage_date_observations(
+        "us_payrolls",
+        "PAYEMS",
+        {"observations": [
+            {
+                "date": "2026-05-01",
+                "PAYEMS_20260702": "158927",
+                "PAYEMS_20260807": "158861",
+            }
+        ]},
+        "2026-08-16T00:00:00+00:00",
+    )
+
+    assert params["output_type"] == 2
+    assert params["vintage_dates"] == "2026-07-02,2026-08-07"
+    assert [(row.available_from, row.value, row.vintage_kind) for row in rows] == [
+        ("2026-07-02", 158927, "revision"),
+        ("2026-08-07", 158861, "revision"),
+    ]
 
 
 def test_as_of_excludes_observation_before_it_was_available(tmp_path):

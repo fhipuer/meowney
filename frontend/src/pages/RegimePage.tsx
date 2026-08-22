@@ -149,6 +149,12 @@ export function signalRuleHelp(signal: RegimeSignal) {
     return "최근 3개월 실업률 변화로 판정합니다. 실업률 상승은 악화 방향, 하락은 개선 방향입니다.";
   if (signal.id === "us_claims")
     return "미국 신규실업수당의 4주 평균입니다. 성장·고용 영역은 최근 13주 변화율을 사용하고, 조기경보는 전년 대비 52주 변화가 +15% 이상인지 별도로 확인합니다. 상승은 악화 방향입니다.";
+  if (signal.id === "us_payrolls")
+    return "비농업 고용의 최근 월 증감과 최근 3개월 월평균 증가를 사용합니다. 최초 발표 이력이 있으면 최근 3개월 하향·상향 수정 합계도 함께 확인합니다. 12개월 누적 고용이 양수라는 이유만으로 강함으로 판정하지 않습니다.";
+  if (signal.id === "ppi")
+    return "BLS 헤드라인과 같은 최종수요 PPI(PPIFIS)의 최근 3개월 연율을 사용합니다. 상품 PPI 원자재 단계(PPIACO)는 별도 맥락 지표로 표시하며 자동 물가 점수에 합산하지 않습니다.";
+  if (signal.id === "ppi_commodities")
+    return "원자재 단계 상품가격을 보여주는 비계절조정 상품 PPI(PPIACO)입니다. 공급단 물가 맥락을 확인하지만 최종수요 PPI와 같은 값으로 해석하거나 자동 물가 점수에 합산하지 않습니다.";
   if (
     ["cpi", "core_cpi", "pce", "core_pce", "ppi", "wages"].includes(signal.id)
   )
@@ -176,7 +182,6 @@ export function signalRuleHelp(signal: RegimeSignal) {
   if (
     [
       "us_gdp",
-      "us_payrolls",
       "us_retail",
       "us_indpro",
       "fed_assets",
@@ -272,7 +277,7 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
               )}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              {signal.source.toUpperCase()} · 관측{" "}
+              {signal.source.toUpperCase()}{signal.source_key ? ` ${signal.source_key}` : ""} · 관측{" "}
               {signal.observation_date || "미수집"} · {signal.display_period}
             </p>
           </div>
@@ -1006,6 +1011,61 @@ export function AiCapexDashboard({
           )}
         </CardContent>
       </Card>
+      {data.sustainability && (
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-1">
+                  <CardTitle>현금 CAPEX 지속 가능성 보조축</CardTitle>
+                  <InfoTip label="CAPEX 지속 가능성 계산">
+                    이미 수집한 SEC 현금흐름표와 매출을 이용해 CAPEX/영업현금흐름,
+                    CAPEX/매출, 영업현금흐름-CAPEX를 계산합니다. 기업 전체 값이며
+                    AI 전용 수익성과 비현금 금융리스는 분리하지 않습니다.
+                  </InfoTip>
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  투자 확대와 이를 감당할 현금창출력을 분리해 확인합니다.
+                </p>
+              </div>
+              <Badge variant="outline">CAPEX 확대 판정과 별도</Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {data.sustainability.ttm.complete ? (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground">TTM CAPEX / 영업현금흐름</p>
+                  <p className="mt-2 text-xl font-semibold tabular-nums">
+                    {data.sustainability.ttm.capex_to_operating_cash_flow_pct?.toFixed(1) ?? "-"}%
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">현금창출력 대비 투자 부담</p>
+                </div>
+                <div className="rounded-lg border bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground">TTM CAPEX / 매출</p>
+                  <p className="mt-2 text-xl font-semibold tabular-nums">
+                    {data.sustainability.ttm.capex_to_revenue_pct?.toFixed(1) ?? "-"}%
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">사업 규모 대비 투자 강도</p>
+                </div>
+                <div className="rounded-lg border bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground">TTM 잉여현금흐름 대용치</p>
+                  <p className="mt-2 text-xl font-semibold tabular-nums">
+                    {data.sustainability.ttm.free_cash_flow_proxy == null
+                      ? "-"
+                      : `$${(data.sustainability.ttm.free_cash_flow_proxy / 1e9).toFixed(1)}B`}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">영업현금흐름 - 현금 CAPEX</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                같은 기준분기의 4사 현금흐름·매출이 모두 확보되면 합산 보조축을 표시합니다.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {data.companies.map((company) => (
           <Card key={company.id}>
@@ -2383,11 +2443,11 @@ export function RegimePage() {
           <div className="mb-2 flex items-center gap-1 text-xs font-medium text-primary">
             <span>포트폴리오 조기점검</span>
             <InfoTip label="투자 레짐 판정 체계">
-              현재 투자 가설 판정은 미국 거시 수준·최근 지표 방향·금융여건을
-              같은 규칙으로 계산하고 여러 독립 발표에서 재확인한 결과입니다.
-              전환 후보는 최신 자료로 먼저 계산된 값이며, 같은 방향이 반복 확인되기
-              전에는 현재 판정을 바꾸지 않습니다. 데이터 품질은 자료가 얼마나
-              빠짐없이 수집됐는지를 뜻하며 예측 적중률이 아닙니다.
+              미국 거시 자동 레짐은 성장·물가·금리·신용으로 계산합니다. 에너지
+              가격·공급충격은 거시 조기경보로, AI 설비투자·메모리·전력은 이번
+              AI 슈퍼사이클 가설의 독립 근거로 표시합니다. 어느 값도 자산 매매를
+              자동 지시하지 않습니다. 자료 상태는 판정입력 가용성과 최신성을
+              뜻하며 예측 적중률이 아닙니다.
             </InfoTip>
           </div>
           <h1 className="text-3xl font-bold">투자 레짐</h1>
@@ -2485,6 +2545,7 @@ export function RegimePage() {
                 }
                 fetchedAt={data?.data_quality.last_fetched_at}
                 triggers={data?.triggers || []}
+                energyShock={data?.energy_shock}
               />
             </TabsContent>
             {DOMAIN_TABS.filter((tab) => tab.id !== "market").map((tab) => {

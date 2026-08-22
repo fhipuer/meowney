@@ -17,6 +17,7 @@ from app.services.regime_events import RegimeEventService
 from app.services.regime_sec import SecCapexService
 from app.services.regime_memory import MemoryPriceService
 from app.services.regime_thesis import RegimeThesisDataService
+from app.services.regime_energy import EnergyShockService
 from app.services.regime_treasury import TreasuryYieldService
 
 
@@ -189,6 +190,7 @@ async def refresh_regime_sources():
         "SEC CAPEX": SecCapexService().refresh(),
         "메모리": MemoryPriceService().refresh(),
         "반도체·전력": RegimeThesisDataService().refresh(),
+        "에너지 공급충격": EnergyShockService().refresh(),
     }
     results = await asyncio.gather(*jobs.values(), return_exceptions=True)
     for name, result in zip(jobs, results):

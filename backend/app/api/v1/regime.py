@@ -12,6 +12,7 @@ from app.services.regime_sec import SecCapexService
 from app.services.regime_memory import MemoryPriceService
 from app.services.regime_thesis import RegimeThesisDataService
 from app.services.regime_treasury import TreasuryYieldService
+from app.services.regime_energy import EnergyShockService
 
 
 router = APIRouter()
@@ -34,19 +35,20 @@ async def get_current_regime():
 @router.post("/refresh")
 async def refresh_regime_data(force: bool = False):
     try:
-        macro, treasury, events, ai_capex, memory_prices, thesis_data = await asyncio.gather(
+        macro, treasury, events, ai_capex, memory_prices, thesis_data, energy = await asyncio.gather(
             RegimeService().refresh(force=force),
             TreasuryYieldService().refresh(force=force),
             RegimeEventService().refresh(),
             SecCapexService().refresh(force=force),
             MemoryPriceService().refresh(force=force),
             RegimeThesisDataService().refresh(force=force),
+            EnergyShockService().refresh(force=force),
             return_exceptions=True,
         )
         def outcome(value):
             return {"status": "failed", "error": str(value)} if isinstance(value, Exception) else value
-        macro, treasury, events, ai_capex, memory_prices, thesis_data = map(
-            outcome, (macro, treasury, events, ai_capex, memory_prices, thesis_data)
+        macro, treasury, events, ai_capex, memory_prices, thesis_data, energy = map(
+            outcome, (macro, treasury, events, ai_capex, memory_prices, thesis_data, energy)
         )
         # Both feeds refresh concurrently. Rebuild the composite once with the
         # memory result from this same request so the response cannot mix a new
@@ -57,7 +59,7 @@ async def refresh_regime_data(force: bool = False):
                     memory_prices["memory_cycle"]
                 )
             )
-        outcomes = (macro, treasury, events, ai_capex, memory_prices, thesis_data)
+        outcomes = (macro, treasury, events, ai_capex, memory_prices, thesis_data, energy)
         statuses = [item.get("status", "failed") for item in outcomes]
         healthy = {"success", "cached"}
         overall = (
@@ -67,7 +69,8 @@ async def refresh_regime_data(force: bool = False):
         )
         return {
             "macro": macro, "treasury": treasury, "events": events, "ai_capex": ai_capex,
-            "memory_prices": memory_prices, "thesis_data": thesis_data, "status": overall,
+            "memory_prices": memory_prices, "thesis_data": thesis_data, "energy": energy,
+            "status": overall,
         }
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"외부 데이터 갱신 실패: {exc}") from exc

@@ -125,6 +125,24 @@ def current_fixture():
             "companies": [
                 {"name": "Microsoft", "latest_period": "2026-Q2", "latest_capex": 25_000_000_000, "yoy": 45.2, "ttm": 82_000_000_000, "history": [{"period": "old", "value": 999999}], "fetch_status": {"status": "success"}}
             ],
+            "sustainability": {
+                "ttm": {
+                    "complete": True,
+                    "capex_to_operating_cash_flow_pct": 92.5,
+                    "capex_to_revenue_pct": 18.2,
+                    "free_cash_flow_proxy": 12_000_000_000,
+                }
+            },
+        },
+        "energy_shock": {
+            "state": "가격·변동성 경계",
+            "reason": "유가와 변동성은 높지만 재고 감소 확인은 부족",
+            "limitations": "미국 재고는 글로벌 수급의 일부",
+            "components": {
+                "wti": {"value": 86.48, "change_5d": 1.2, "change_20d": 2.5, "change_12m": 35.8},
+                "ovx": {"value": 49.6, "percentile_1y": 88},
+                "inventory": {"value": 428_815, "change_4w": 4.2, "change_52w": 1.9},
+            },
         },
         "memory_cycle": {
             "state": "가격 상승",
@@ -206,6 +224,9 @@ def test_quantitative_brief_contains_decision_data_and_provenance_without_histor
     assert "미국 국채 30Y" in markdown
     assert "30Y TIPS 3.06%" in markdown
     assert "Microsoft" in markdown and "$25.0B" in markdown
+    assert "서로 분리해 읽을 판정 계층" in markdown
+    assert "에너지 가격·공급충격: 가격·변동성 경계" in markdown
+    assert "TTM 현금 CAPEX/영업현금흐름: 92.5%" in markdown
     assert "DRAM 칩 수출액" in markdown and "+420.0%" in markdown
     assert "SK하이닉스" in markdown and "+35.0%" in markdown
     assert "상업용 전력판매" in markdown

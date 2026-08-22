@@ -15,7 +15,7 @@ from typing import Any, Callable
 from app.services.regime_rates import calculate_rate_model
 
 
-QUADRANT_VERSION = "2026-08-us-macro-q4-rates-v4"
+QUADRANT_VERSION = "2026-08-us-macro-q5-rates-v4"
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
 
 

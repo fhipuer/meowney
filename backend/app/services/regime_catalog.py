@@ -12,7 +12,9 @@ RATE_IDS = {
     "tips10y", "tips30y", "bei10y", "term_premium",
 }
 SPREAD_IDS = {"curve10y3m", "curve2s10s", "hy_oas", "ig_oas"}
-INFLATION_INDEX_IDS = {"cpi", "core_cpi", "pce", "core_pce", "ppi", "wages"}
+INFLATION_INDEX_IDS = {
+    "cpi", "core_cpi", "pce", "core_pce", "ppi", "ppi_commodities", "wages",
+}
 
 CORE_IDS = {
     "us_unemployment", "us_claims", "us_payrolls", "us_indpro",
@@ -25,7 +27,7 @@ TRIGGER_ONLY_IDS = {
 }
 CONTEXT_IDS = {
     "fed_assets", "bank_reserves", "reverse_repo", "market_kospi",
-    "market_dollar", "market_wti", "market_copper",
+    "market_dollar", "market_wti", "market_ovx", "market_copper",
     "market_gold", "market_silver", "market_gold_silver_ratio",
     "us3m", "us2y", "term_premium", "pce",
 }
@@ -36,10 +38,10 @@ US_INDICATOR_IDS = {
     "fedfunds", "us3m", "us2y", "us10y", "us30y", "tips10y", "tips30y",
     "bei10y", "term_premium", "curve10y3m", "curve2s10s", "hy_oas",
     "ig_oas", "nfci", "fed_assets", "bank_reserves", "reverse_repo",
-    "market_sp500", "market_nasdaq", "market_vix",
+    "market_sp500", "market_nasdaq", "market_vix", "market_ovx",
 }
 
-HIGHER_SUPPORTIVE_IDS = {"us_gdp", "us_indpro", "kr_gdp", "kr_indpro"}
+HIGHER_SUPPORTIVE_IDS = {"us_gdp", "us_payrolls", "us_indpro", "kr_gdp", "kr_indpro"}
 HIGHER_ADVERSE_IDS = {"us_unemployment", "us_claims", "hy_oas", "ig_oas"}
 
 
@@ -83,11 +85,21 @@ def indicator_semantics(indicator_id: str) -> dict[str, str | None]:
     else:
         tone_policy = "semantic_only"
 
+    series_contracts = {
+        "ppi": ("seasonally_adjusted", "BLS 최종수요 PPI"),
+        "ppi_commodities": ("not_seasonally_adjusted", "BLS 원자재 단계 상품 PPI"),
+        "us_payrolls": ("seasonally_adjusted", "BLS 비농업 고용 수준"),
+    }
+    seasonal_adjustment, statistical_scope = series_contracts.get(
+        indicator_id, (None, None)
+    )
     return {
         "country": country,
         "interpretation_lens": lens,
         "tone_policy": tone_policy,
         "proxy_for": "SGOV 단기국채 금리환경" if indicator_id == "us3m" else None,
+        "seasonal_adjustment": seasonal_adjustment,
+        "statistical_scope": statistical_scope,
     }
 
 
@@ -235,6 +247,20 @@ def display_metrics(indicator_id: str, frequency: str, values: list[float]) -> l
             for label, period in (("1개월", 1), ("3개월", 3), ("1년", 12))
             if len(values) > period
         ]
+    if indicator_id == "us_payrolls":
+        changes = [values[index] - values[index - 1] for index in range(1, len(values))]
+        if not changes:
+            return []
+        result = [{
+            "label": "최근 월 증가", "value": round(changes[-1], 1),
+            "unit": "천명", "kind": "delta",
+        }]
+        if len(changes) >= 3:
+            result.append({
+                "label": "3개월 평균", "value": round(sum(changes[-3:]) / 3, 1),
+                "unit": "천명", "kind": "delta",
+            })
+        return result
     if indicator_id in RATE_IDS or indicator_id in SPREAD_IDS:
         periods = (21, 63, 252) if frequency == "daily" else (1, 3, 12)
         labels = ("1개월", "3개월", "1년")
