@@ -33,6 +33,14 @@ def daily_signal(
     }
 
 
+def monthly_signal(key: str, values: list[float], *, start_year: int = 2025) -> dict:
+    history = []
+    for index, value in enumerate(values):
+        year, month_index = divmod(start_year * 12 + index, 12)
+        history.append({"date": f"{year:04d}-{month_index + 1:02d}-01", "value": value})
+    return {"id": key, "name": key, "frequency": "monthly", "history": history}
+
+
 def rates_fixture(*, curve: list[float] | None = None) -> list[dict]:
     points = len(curve) if curve is not None else 90
     return [
@@ -73,6 +81,22 @@ def test_ny_fed_probability_matches_published_chart_example() -> None:
 def test_recession_probability_is_monotonic_as_curve_inverts() -> None:
     assert recession_probability_12m(-1.0) > recession_probability_12m(0.0)
     assert recession_probability_12m(0.0) > recession_probability_12m(1.0)
+
+
+def test_policy_layer_prefers_current_target_range_over_monthly_effective_average() -> None:
+    fixture = rates_fixture() + [
+        daily_signal("fed_target_lower", [3.75]),
+        daily_signal("fed_target_upper", [4.00]),
+        monthly_signal("fedfunds", [3.63]),
+        monthly_signal("core_pce", [100 + index * .25 for index in range(13)]),
+    ]
+
+    policy = calculate_rate_model(fixture)["policy"]
+
+    assert policy["policy_rate_basis"] == "target_range_midpoint"
+    assert policy["target_midpoint"] == 3.875
+    assert policy["fed_funds"] == 3.875
+    assert policy["effective_fed_funds_monthly_average"] == 3.63
 
 
 def test_one_day_raw_inversion_does_not_become_a_monthly_curve_signal() -> None:

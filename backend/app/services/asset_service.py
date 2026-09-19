@@ -113,6 +113,8 @@ class AssetService:
             insert_data["category_id"] = str(data.category_id)
         if data.current_value is not None:
             insert_data["current_value"] = str(data.current_value)
+        if data.purchase_exchange_rate is not None:
+            insert_data["purchase_exchange_rate"] = str(data.purchase_exchange_rate)
 
         result = self.db.table("assets").insert(insert_data).execute()
         return result.data[0]

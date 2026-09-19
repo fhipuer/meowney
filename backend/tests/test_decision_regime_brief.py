@@ -221,6 +221,9 @@ def test_quantitative_brief_contains_decision_data_and_provenance_without_histor
     assert "최신 데이터 후보 레짐: 경계" in markdown
     assert "미국 Core CPI" in markdown
     assert "전년 대비 3.20%" in markdown
+    assert "외부 공식 확인 항목" in markdown
+    assert "ISM 제조업 PMI 공식 보고서" in markdown
+    assert "external_verification_required" in markdown
     assert "미국 국채 30Y" in markdown
     assert "30Y TIPS 3.06%" in markdown
     assert "Microsoft" in markdown and "$25.0B" in markdown
@@ -238,6 +241,22 @@ def test_quantitative_brief_contains_decision_data_and_provenance_without_histor
     assert "WTI unavailable" in markdown
     assert "999,999" not in markdown
     assert len(markdown) < 50_000
+
+
+def test_quantitative_brief_distinguishes_fed_target_range_from_effective_average():
+    fixture = current_fixture()
+    fixture["macro_quadrant"]["financial_conditions"]["policy"].update({
+        "target_lower": 3.75,
+        "target_upper": 4.0,
+        "target_midpoint": 3.875,
+        "effective_fed_funds_monthly_average": 3.63,
+    })
+
+    markdown = build_regime_quantitative_markdown(fixture)
+
+    assert "목표범위 3.75%~4.00%" in markdown
+    assert "중간값 3.875%" in markdown
+    assert "실효금리 월평균 3.63%" in markdown
 
 
 def test_quantitative_brief_handles_sparse_optional_sections():

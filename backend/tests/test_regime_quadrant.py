@@ -17,7 +17,7 @@ def monthly_dates(count=60):
 
 
 def series(key, values, *, frequency="monthly"):
-    dates = monthly_dates(len(values))
+    dates = monthly_dates(len(values) * 3)[::3] if frequency == "quarterly" else monthly_dates(len(values))
     return {"id": key, "name": key, "frequency": frequency, "history": [
         {"date": day, "value": value} for day, value in zip(dates, values)
     ]}

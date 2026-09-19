@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -139,6 +139,35 @@ def test_tickerless_gold_keeps_meaningful_position_and_price_fields():
     assert "- 보유 수량: 10" in gold_section
     assert "- 평균 구매가격: 90,000원" in gold_section
     assert "- 현재 가격: 100,000원" in gold_section
+
+
+def test_mixed_naive_stock_and_aware_krx_gold_timestamps_are_comparable():
+    stock = asset(price_as_of=datetime(2026, 9, 5, 6, 15))
+    gold_time = datetime(
+        2026, 9, 4, 15, 30, tzinfo=timezone(timedelta(hours=9))
+    )
+    gold = asset(
+        "gold",
+        "KRX 미니금",
+        ticker="M04020100",
+        asset_type="gold",
+        price_status="close",
+        price_as_of=gold_time,
+    )
+
+    markdown = render(
+        [
+            {
+                "name": "성장 및 실물 자산",
+                "target_percentage": 100,
+                "items": [{"asset_id": "a1"}, {"asset_id": "gold"}],
+            }
+        ],
+        [stock, gold],
+    )
+
+    expected = gold_time.astimezone().isoformat(timespec="seconds")
+    assert f"포트폴리오 가격 기준일시: {expected}" in markdown
 
 
 def test_missing_price_blocks_download_instead_of_turning_it_into_zero():

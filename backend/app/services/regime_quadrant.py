@@ -13,60 +13,60 @@ from datetime import date
 from typing import Any, Callable
 
 from app.services.regime_rates import calculate_rate_model
+from app.services.regime_periods import annualized_change, dated_values, period_delta, period_percent_change
 
 
-QUADRANT_VERSION = "2026-08-us-macro-q5-rates-v4"
+QUADRANT_VERSION = "2026-09-us-macro-q6-calendar-rates-v5"
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
 
 
-def _pct(values: list[float], periods: int) -> float | None:
-    if len(values) <= periods or values[-periods - 1] == 0:
-        return None
-    return (values[-1] / values[-periods - 1] - 1) * 100
+def _pct(rows: list[dict[str, Any]], frequency: str, periods: int) -> float | None:
+    return period_percent_change(rows, frequency, periods)
 
 
-def _delta(values: list[float], periods: int) -> float | None:
-    return values[-1] - values[-periods - 1] if len(values) > periods else None
+def _delta(rows: list[dict[str, Any]], frequency: str, periods: int) -> float | None:
+    return period_delta(rows, frequency, periods)
 
 
-def _annualized(values: list[float], periods: int) -> float | None:
-    if len(values) <= periods or values[-periods - 1] <= 0:
-        return None
-    return ((values[-1] / values[-periods - 1]) ** (12 / periods) - 1) * 100
+def _annualized(rows: list[dict[str, Any]], periods: int) -> float | None:
+    return annualized_change(rows, "monthly", periods)
 
 
-def _quarterly_annualized(values: list[float], periods: int = 1) -> float | None:
-    if len(values) <= periods or values[-periods - 1] <= 0:
-        return None
-    return ((values[-1] / values[-periods - 1]) ** (4 / periods) - 1) * 100
+def _quarterly_annualized(rows: list[dict[str, Any]], periods: int = 1) -> float | None:
+    return annualized_change(rows, "quarterly", periods)
 
 
-def _payroll_impulse(values: list[float]) -> float | None:
+def _payroll_impulse(rows: list[dict[str, Any]]) -> float | None:
     """Recent three-month average monthly job gain, in thousands."""
+    values = dated_values(rows)
     if len(values) < 4:
         return None
-    return sum(values[index] - values[index - 1] for index in range(len(values) - 3, len(values))) / 3
+    changes = [
+        period_delta(rows, "monthly", 1, end_index=index)
+        for index in range(len(values) - 3, len(values))
+    ]
+    return sum(changes) / 3 if all(value is not None for value in changes) else None
 
 
-def _negative_delta(periods: int) -> Callable[[list[float]], float | None]:
-    return lambda values: -value if (value := _delta(values, periods)) is not None else None
+def _negative_delta(frequency: str, periods: int) -> Callable[[list[dict[str, Any]]], float | None]:
+    return lambda rows: -value if (value := _delta(rows, frequency, periods)) is not None else None
 
 
-def _negative_pct(periods: int) -> Callable[[list[float]], float | None]:
-    return lambda values: -value if (value := _pct(values, periods)) is not None else None
+def _negative_pct(frequency: str, periods: int) -> Callable[[list[dict[str, Any]]], float | None]:
+    return lambda rows: -value if (value := _pct(rows, frequency, periods)) is not None else None
 
 
 # Equal-cluster weighting limits duplicated evidence. CPI/PCE trend is one
 # cluster, labor inflation another; labor and real activity are also separated.
-GROWTH_MOMENTUM_RULES: dict[str, tuple[str, float, Callable[[list[float]], float | None]]] = {
-    "us_unemployment": ("labor", .50, _negative_delta(3)),
-    "us_claims": ("labor", .50, _negative_pct(13)),
+GROWTH_MOMENTUM_RULES: dict[str, tuple[str, float, Callable[[list[dict[str, Any]]], float | None]]] = {
+    "us_unemployment": ("labor", .50, _negative_delta("monthly", 3)),
+    "us_claims": ("labor", .50, _negative_pct("weekly", 13)),
     "us_payrolls": ("labor", .50, _payroll_impulse),
     "us_retail": ("activity", .50, lambda values: _annualized(values, 3)),
     "us_indpro": ("activity", .50, lambda values: _annualized(values, 3)),
     "us_gdp": ("activity", .50, _quarterly_annualized),
 }
-INFLATION_MOMENTUM_RULES: dict[str, tuple[str, float, Callable[[list[float]], float | None]]] = {
+INFLATION_MOMENTUM_RULES: dict[str, tuple[str, float, Callable[[list[dict[str, Any]]], float | None]]] = {
     "core_cpi": ("underlying", .50, lambda values: _annualized(values, 3)),
     "core_pce": ("underlying", .50, lambda values: _annualized(values, 3)),
     "cpi": ("supply", .25, lambda values: _annualized(values, 3)),
@@ -89,10 +89,10 @@ def _robust_z(current: float, history: list[float]) -> float | None:
     return max(-3.0, min(3.0, (current - median) / scale))
 
 
-def _metric_history(values: list[float], transform: Callable[[list[float]], float | None]) -> list[float]:
+def _metric_history(rows: list[dict[str, Any]], transform: Callable[[list[dict[str, Any]]], float | None]) -> list[float]:
     result = []
-    for end in range(2, len(values) + 1):
-        transformed = transform(values[:end])
+    for end in range(2, len(rows) + 1):
+        transformed = transform(rows[:end])
         if transformed is not None and math.isfinite(transformed):
             result.append(transformed)
     return result
@@ -114,9 +114,8 @@ def _momentum_axis(signals: dict[str, dict[str, Any]], rules: dict, cutoff: date
     for key, (cluster, weight, transform) in rules.items():
         signal = signals.get(key)
         rows = _rows_until(signal, cutoff) if signal else []
-        values = [float(row["value"]) for row in rows]
-        transformed = transform(values)
-        history = _metric_history(values, transform)
+        transformed = transform(rows)
+        history = _metric_history(rows, transform)
         z = _robust_z(transformed, history[:-1]) if transformed is not None else None
         if z is None or not rows:
             continue
@@ -154,8 +153,8 @@ def _momentum_axis(signals: dict[str, dict[str, Any]], rules: dict, cutoff: date
             "confidence": quality, "confidence_label": label}
 
 
-def _last_values(signals: dict[str, dict[str, Any]], key: str) -> list[float]:
-    return [float(row["value"]) for row in signals.get(key, {}).get("history", [])]
+def _last_rows(signals: dict[str, dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    return signals.get(key, {}).get("history", [])
 
 
 def _level_component(key: str, label: str, value: float | None, neutral: float, scale: float,
@@ -169,23 +168,25 @@ def _level_component(key: str, label: str, value: float | None, neutral: float, 
 def _level_axis(signals: dict[str, dict[str, Any]], kind: str) -> dict[str, Any]:
     components: list[dict[str, Any] | None]
     if kind == "growth":
-        unemployment = _last_values(signals, "us_unemployment")
-        claims = _last_values(signals, "us_claims")
-        payrolls = _last_values(signals, "us_payrolls")
+        unemployment = _last_rows(signals, "us_unemployment")
+        claims = _last_rows(signals, "us_claims")
+        payrolls = _last_rows(signals, "us_payrolls")
+        unemployment_values = dated_values(unemployment)
+        claims_values = dated_values(claims)
         components = [
-            _level_component("us_unemployment", "실업률", unemployment[-1] if unemployment else None, 4.5, 1.0, -1, .30),
-            _level_component("us_claims", "신규실업수당", claims[-1] if claims else None, 260000, 80000, -1, .20),
+            _level_component("us_unemployment", "실업률", unemployment_values[-1][1] if unemployment_values else None, 4.5, 1.0, -1, .30),
+            _level_component("us_claims", "신규실업수당", claims_values[-1][1] if claims_values else None, 260000, 80000, -1, .20),
             _level_component("us_payrolls", "월간 고용 3개월 평균", _payroll_impulse(payrolls), 100, 150, 1, .20),
-            _level_component("us_gdp", "실질 GDP 성장률", _quarterly_annualized(_last_values(signals, "us_gdp")), 1.5, 2.0, 1, .20),
-            _level_component("us_indpro", "산업생산 YoY", _pct(_last_values(signals, "us_indpro"), 12), 0, 3.0, 1, .10),
+            _level_component("us_gdp", "실질 GDP 성장률", _quarterly_annualized(_last_rows(signals, "us_gdp")), 1.5, 2.0, 1, .20),
+            _level_component("us_indpro", "산업생산 YoY", _pct(_last_rows(signals, "us_indpro"), "monthly", 12), 0, 3.0, 1, .10),
         ]
     else:
         components = [
-            _level_component("core_pce", "Core PCE YoY", _pct(_last_values(signals, "core_pce"), 12), 2.0, 1.5, 1, .35),
-            _level_component("core_cpi", "Core CPI YoY", _pct(_last_values(signals, "core_cpi"), 12), 2.0, 1.5, 1, .30),
-            _level_component("wages", "임금 YoY", _pct(_last_values(signals, "wages"), 12), 3.5, 1.5, 1, .20),
-            _level_component("cpi", "CPI YoY", _pct(_last_values(signals, "cpi"), 12), 2.0, 2.0, 1, .10),
-            _level_component("ppi", "PPI YoY", _pct(_last_values(signals, "ppi"), 12), 2.0, 4.0, 1, .05),
+            _level_component("core_pce", "Core PCE YoY", _pct(_last_rows(signals, "core_pce"), "monthly", 12), 2.0, 1.5, 1, .35),
+            _level_component("core_cpi_nsa", "Core CPI 공식 YoY", _pct(_last_rows(signals, "core_cpi_nsa"), "monthly", 12), 2.0, 1.5, 1, .30),
+            _level_component("wages", "임금 YoY", _pct(_last_rows(signals, "wages"), "monthly", 12), 3.5, 1.5, 1, .20),
+            _level_component("cpi_nsa", "CPI 공식 YoY", _pct(_last_rows(signals, "cpi_nsa"), "monthly", 12), 2.0, 2.0, 1, .10),
+            _level_component("ppi", "PPI YoY", _pct(_last_rows(signals, "ppi"), "monthly", 12), 2.0, 4.0, 1, .05),
         ]
     usable = [item for item in components if item]
     if not usable:
@@ -202,8 +203,8 @@ def _level_axis(signals: dict[str, dict[str, Any]], kind: str) -> dict[str, Any]
 
 def _financial_conditions(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
     def latest(key: str) -> float | None:
-        values = _last_values(signals, key)
-        return values[-1] if values else None
+        values = dated_values(_last_rows(signals, key))
+        return values[-1][1] if values else None
     rate_model = calculate_rate_model(list(signals.values()))
     hy, ig, nfci = (latest(key) for key in ("hy_oas", "ig_oas", "nfci"))
     credit_parts = [value for value in (

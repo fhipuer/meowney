@@ -55,6 +55,84 @@ def test_ppi_migration_uses_final_demand_and_preserves_commodity_context(tmp_pat
     )
 
 
+def test_dxy_migration_adds_display_only_market_index(tmp_path):
+    service = service_for(tmp_path)
+    with service.db.connect() as conn:
+        row = conn.execute(
+            "SELECT id,name,source,source_key,weight FROM regime_indicators "
+            "WHERE id='market_dxy'"
+        ).fetchone()
+
+    assert tuple(row) == (
+        "market_dxy", "ICE 미국 달러지수 DXY", "yfinance", "DX-Y.NYB", 0,
+    )
+
+
+def test_data_integrity_migration_separates_policy_and_official_cpi_series(tmp_path):
+    service = service_for(tmp_path)
+    with service.db.connect() as conn:
+        rows = {
+            row["id"]: tuple(row)
+            for row in conn.execute(
+                "SELECT id,name,source_key,unit FROM regime_indicators "
+                "WHERE id IN ('fedfunds','fed_target_lower','fed_target_upper',"
+                "'cpi_nsa','core_cpi_nsa','bank_reserves')"
+            ).fetchall()
+        }
+
+    assert rows["fedfunds"] == (
+        "fedfunds", "실효 연방기금금리 (월평균)", "FEDFUNDS", "%",
+    )
+    assert rows["fed_target_lower"][2] == "DFEDTARL"
+    assert rows["fed_target_upper"][2] == "DFEDTARU"
+    assert rows["cpi_nsa"][2] == "CPIAUCNS"
+    assert rows["core_cpi_nsa"][2] == "CPILFENS"
+    assert rows["bank_reserves"][3] == "백만 달러"
+
+
+def test_bank_reserves_preserves_raw_unit_and_displays_trillions(tmp_path):
+    service = service_for(tmp_path)
+    service.db.table("regime_observations").insert({
+        "id": str(uuid4()), "indicator_id": "bank_reserves",
+        "observation_date": date.today().isoformat(), "value": 3_013_794,
+        "fetched_at": datetime.now().astimezone().isoformat(), "source": "fred",
+    }).execute()
+
+    definition = next(item for item in service._indicator_rows() if item["id"] == "bank_reserves")
+    signal = service._signal(definition)
+
+    assert signal["value"] == 3_013_794
+    assert signal["unit"] == "백만 달러"
+    assert signal["display_value"] == 3.014
+    assert signal["display_unit"] == "조 달러"
+
+
+def test_primary_cpi_signal_uses_official_nsa_yoy_metric(tmp_path):
+    service = service_for(tmp_path)
+    fetched_at = datetime.now().astimezone().isoformat()
+    rows = [
+        ("cpi", "2026-05-01", 330.0),
+        ("cpi", "2026-06-01", 331.0),
+        ("cpi", "2026-07-01", 332.0),
+        ("cpi", "2026-08-01", 334.131),
+        ("cpi_nsa", "2025-08-01", 323.291),
+        ("cpi_nsa", "2026-08-01", 334.131),
+    ]
+    with service.db.connect() as conn:
+        conn.executemany(
+            "INSERT INTO regime_observations(id,indicator_id,observation_date,value,fetched_at,source) "
+            "VALUES(?,?,?,?,?,'fred')",
+            [(str(uuid4()), indicator_id, when, value, fetched_at) for indicator_id, when, value in rows],
+        )
+
+    evaluation = service.evaluate(persist=False)
+    signal = next(item for item in evaluation["signals"] if item["id"] == "cpi")
+
+    assert signal["official_yoy"] == 3.4
+    assert signal["display_metrics"][0]["label"] == "공식 전년동월비"
+    assert signal["display_metrics"][0]["source_indicator_id"] == "cpi_nsa"
+
+
 def test_thesis_snapshot_changes_compare_each_independent_stage():
     previous = {
         "ai_capex": {"state": "높은 투자 지속"},
@@ -267,7 +345,7 @@ def test_rate_model_is_connected_to_canonical_rate_domain(tmp_path):
     conditions = evaluation["macro_quadrant"]["financial_conditions"]
     rates_domain = next(item for item in evaluation["domains"] if item["id"] == "rates")
 
-    assert conditions["rates"]["version"] == "2026-08-rates-v4"
+    assert conditions["rates"]["version"] == "2026-09-rates-v5-target-range"
     assert conditions["duration_stress"]["label"] == "판정 불가"
     assert conditions["rates"]["score"] == pytest.approx(53.4)
     assert conditions["long_rates"]["term_premium_role"] == "decomposition_context"

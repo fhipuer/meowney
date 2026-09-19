@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
+
+from app.services.regime_periods import (
+    annualized_change,
+    dated_values,
+    period_delta,
+    period_percent_change,
+)
 
 
 DISPLAY_POINTS = {"daily": 252, "weekly": 104, "monthly": 60, "quarterly": 40}
@@ -10,11 +18,13 @@ DISPLAY_POINTS = {"daily": 252, "weekly": 104, "monthly": 60, "quarterly": 40}
 RATE_IDS = {
     "fedfunds", "us3m", "us2y", "us10y", "us30y",
     "tips10y", "tips30y", "bei10y", "term_premium",
+    "fed_target_lower", "fed_target_upper",
 }
 SPREAD_IDS = {"curve10y3m", "curve2s10s", "hy_oas", "ig_oas"}
 INFLATION_INDEX_IDS = {
     "cpi", "core_cpi", "pce", "core_pce", "ppi", "ppi_commodities", "wages",
 }
+OFFICIAL_CPI_IDS = {"cpi_nsa", "core_cpi_nsa"}
 
 CORE_IDS = {
     "us_unemployment", "us_claims", "us_payrolls", "us_indpro",
@@ -27,9 +37,10 @@ TRIGGER_ONLY_IDS = {
 }
 CONTEXT_IDS = {
     "fed_assets", "bank_reserves", "reverse_repo", "market_kospi",
-    "market_dollar", "market_wti", "market_ovx", "market_copper",
+    "market_dxy", "market_dollar", "market_wti", "market_ovx", "market_copper",
     "market_gold", "market_silver", "market_gold_silver_ratio",
-    "us3m", "us2y", "term_premium", "pce",
+    "us3m", "us2y", "term_premium", "pce", "cpi_nsa", "core_cpi_nsa",
+    "fed_target_lower", "fed_target_upper",
 }
 
 US_INDICATOR_IDS = {
@@ -39,6 +50,7 @@ US_INDICATOR_IDS = {
     "bei10y", "term_premium", "curve10y3m", "curve2s10s", "hy_oas",
     "ig_oas", "nfci", "fed_assets", "bank_reserves", "reverse_repo",
     "market_sp500", "market_nasdaq", "market_vix", "market_ovx",
+    "cpi_nsa", "core_cpi_nsa", "fed_target_lower", "fed_target_upper",
 }
 
 HIGHER_SUPPORTIVE_IDS = {"us_gdp", "us_payrolls", "us_indpro", "kr_gdp", "kr_indpro"}
@@ -55,7 +67,7 @@ def indicator_role(indicator_id: str) -> dict[str, str]:
     return {"decision_role": "corroborative", "usage": "regime"}
 
 
-def indicator_semantics(indicator_id: str) -> dict[str, str | None]:
+def indicator_semantics(indicator_id: str) -> dict[str, Any]:
     """Return presentation metadata without encoding it in a display name.
 
     Raw direction and economic meaning are deliberately separate.  Market
@@ -86,6 +98,10 @@ def indicator_semantics(indicator_id: str) -> dict[str, str | None]:
         tone_policy = "semantic_only"
 
     series_contracts = {
+        "cpi": ("seasonally_adjusted", "BLS CPI 계절조정 지수 · 단기 모멘텀"),
+        "core_cpi": ("seasonally_adjusted", "BLS Core CPI 계절조정 지수 · 단기 모멘텀"),
+        "cpi_nsa": ("not_seasonally_adjusted", "BLS 공식 CPI 전년동월비"),
+        "core_cpi_nsa": ("not_seasonally_adjusted", "BLS 공식 Core CPI 전년동월비"),
         "ppi": ("seasonally_adjusted", "BLS 최종수요 PPI"),
         "ppi_commodities": ("not_seasonally_adjusted", "BLS 원자재 단계 상품 PPI"),
         "us_payrolls": ("seasonally_adjusted", "BLS 비농업 고용 수준"),
@@ -93,7 +109,7 @@ def indicator_semantics(indicator_id: str) -> dict[str, str | None]:
     seasonal_adjustment, statistical_scope = series_contracts.get(
         indicator_id, (None, None)
     )
-    return {
+    result = {
         "country": country,
         "interpretation_lens": lens,
         "tone_policy": tone_policy,
@@ -101,6 +117,9 @@ def indicator_semantics(indicator_id: str) -> dict[str, str | None]:
         "seasonal_adjustment": seasonal_adjustment,
         "statistical_scope": statistical_scope,
     }
+    if indicator_id in {"cpi_nsa", "core_cpi_nsa", "fed_target_lower", "fed_target_upper"}:
+        result["presentation_hidden"] = True
+    return result
 
 
 def display_history(observations: list[dict[str, Any]], frequency: str) -> list[dict[str, Any]]:
@@ -118,67 +137,91 @@ def display_period(frequency: str) -> str:
     }.get(frequency, "최근 자료")
 
 
-def _percent_change(values: list[float], periods: int) -> float | None:
-    if len(values) <= periods or values[-periods - 1] == 0:
-        return None
-    return (values[-1] / values[-periods - 1] - 1) * 100
+def _coerce_observations(
+    observations: list[dict[str, Any]] | list[float], frequency: str,
+) -> list[dict[str, Any]]:
+    """Keep the historical helper API while making production rows date-aware."""
 
-
-def _annualized(values: list[float], periods: int = 3) -> float | None:
-    if len(values) <= periods or values[-periods - 1] <= 0:
-        return None
-    return ((values[-1] / values[-periods - 1]) ** (12 / periods) - 1) * 100
+    if not observations or isinstance(observations[0], dict):
+        return observations  # type: ignore[return-value]
+    rows: list[dict[str, Any]] = []
+    for index, value in enumerate(observations):
+        if frequency in {"monthly", "quarterly"}:
+            month_offset = index * (3 if frequency == "quarterly" else 1)
+            ordinal = 2000 * 12 + month_offset
+            year, month_index = divmod(ordinal, 12)
+            when = date(year, month_index + 1, 1)
+        else:
+            when = date(2000, 1, 1) + timedelta(days=index * (7 if frequency == "weekly" else 1))
+        rows.append({"date": when.isoformat(), "value": float(value)})
+    return rows
 
 
 def decision_chart(indicator_id: str, observations: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Return the transformed series that explains the actual decision rule."""
-    values = [float(row["value"]) for row in observations]
-    dates = [row["observation_date"] for row in observations]
+    normalized = [
+        {"date": when.isoformat(), "value": value}
+        for when, value in dated_values(observations)
+    ]
+    values = [row["value"] for row in normalized]
+    dates = [row["date"] for row in normalized]
     points: list[dict[str, Any]] = []
     series: list[dict[str, str]] = []
     title, unit = "", "%"
     references: list[dict[str, Any]] = []
 
-    if indicator_id in INFLATION_INDEX_IDS:
-        title = "전년 대비와 최근 3개월 연율"
-        series = [{"key": "yoy", "label": "YoY"}, {"key": "annualized_3m", "label": "3M 연율"}]
+    if indicator_id in INFLATION_INDEX_IDS | OFFICIAL_CPI_IDS:
+        official_only = indicator_id in OFFICIAL_CPI_IDS
+        title = "공식 전년동월비" if official_only else "전년 대비와 최근 3개월 연율"
+        series = [{"key": "yoy", "label": "YoY"}]
+        if not official_only:
+            series.append({"key": "annualized_3m", "label": "3M 연율"})
         references = [{"value": 2, "label": "물가 목표 2%"}]
-        for index, current in enumerate(values):
+        for index, _current in enumerate(values):
             point: dict[str, Any] = {"date": dates[index]}
-            if index >= 12 and values[index - 12]:
-                point["yoy"] = round((current / values[index - 12] - 1) * 100, 3)
-            if index >= 3 and values[index - 3] > 0:
-                point["annualized_3m"] = round(((current / values[index - 3]) ** 4 - 1) * 100, 3)
+            yoy = period_percent_change(normalized, "monthly", 12, end_index=index)
+            annualized = annualized_change(normalized, "monthly", 3, end_index=index)
+            if yoy is not None:
+                point["yoy"] = round(yoy, 3)
+            if not official_only and annualized is not None:
+                point["annualized_3m"] = round(annualized, 3)
             if len(point) > 1:
                 points.append(point)
     elif indicator_id == "us_gdp":
         title, series = "실질 GDP 성장률", [{"key": "qoq_annualized", "label": "QoQ 연율"}, {"key": "yoy", "label": "YoY"}]
-        for index, current in enumerate(values):
+        for index, _current in enumerate(values):
             point = {"date": dates[index]}
-            if index >= 1 and values[index - 1] > 0:
-                point["qoq_annualized"] = round(((current / values[index - 1]) ** 4 - 1) * 100, 3)
-            if index >= 4 and values[index - 4]:
-                point["yoy"] = round((current / values[index - 4] - 1) * 100, 3)
+            qoq = annualized_change(normalized, "quarterly", 1, end_index=index)
+            yoy = period_percent_change(normalized, "quarterly", 4, end_index=index)
+            if qoq is not None:
+                point["qoq_annualized"] = round(qoq, 3)
+            if yoy is not None:
+                point["yoy"] = round(yoy, 3)
             if len(point) > 1:
                 points.append(point)
     elif indicator_id == "us_payrolls":
         title, unit = "월간 고용 증가와 3개월 평균", "천 명"
         series = [{"key": "monthly_change", "label": "월간 증가"}, {"key": "average_3m", "label": "3M 평균"}]
-        changes = [values[index] - values[index - 1] for index in range(1, len(values))]
+        changes = [period_delta(normalized, "monthly", 1, end_index=index) for index in range(1, len(values))]
         for index, change in enumerate(changes, start=1):
+            if change is None:
+                continue
             point = {"date": dates[index], "monthly_change": round(change, 3)}
-            if index >= 3:
-                point["average_3m"] = round(sum(changes[index - 3:index]) / 3, 3)
+            recent = [item for item in changes[max(0, index - 3):index] if item is not None]
+            if len(recent) == 3:
+                point["average_3m"] = round(sum(recent) / 3, 3)
             points.append(point)
     elif indicator_id in {"us_retail", "us_indpro"}:
         title = "최근 성장 모멘텀"
         series = [{"key": "annualized_3m", "label": "3M 연율"}, {"key": "yoy", "label": "YoY"}]
-        for index, current in enumerate(values):
+        for index, _current in enumerate(values):
             point = {"date": dates[index]}
-            if index >= 3 and values[index - 3] > 0:
-                point["annualized_3m"] = round(((current / values[index - 3]) ** 4 - 1) * 100, 3)
-            if index >= 12 and values[index - 12]:
-                point["yoy"] = round((current / values[index - 12] - 1) * 100, 3)
+            annualized = annualized_change(normalized, "monthly", 3, end_index=index)
+            yoy = period_percent_change(normalized, "monthly", 12, end_index=index)
+            if annualized is not None:
+                point["annualized_3m"] = round(annualized, 3)
+            if yoy is not None:
+                point["yoy"] = round(yoy, 3)
             if len(point) > 1:
                 points.append(point)
     elif indicator_id == "us_unemployment":
@@ -188,10 +231,11 @@ def decision_chart(indicator_id: str, observations: list[dict[str, Any]]) -> dic
             {"value": .15, "label": "주의 +0.15%p"},
             {"value": .30, "label": "악화 +0.30%p"},
         ]
-        points = [
-            {"date": dates[index], "delta_3m": round(value - values[index - 3], 3)}
-            for index, value in enumerate(values) if index >= 3
-        ]
+        points = []
+        for index, _value in enumerate(values):
+            delta = period_delta(normalized, "monthly", 3, end_index=index)
+            if delta is not None:
+                points.append({"date": dates[index], "delta_3m": round(delta, 3)})
     elif indicator_id == "us_claims":
         title, unit = "신규실업수당 13주 변화율", "%"
         series = [{"key": "change_13w", "label": "13W 변화"}]
@@ -238,46 +282,76 @@ def decision_chart(indicator_id: str, observations: list[dict[str, Any]]) -> dic
     } if points else None
 
 
-def display_metrics(indicator_id: str, frequency: str, values: list[float]) -> list[dict[str, Any]]:
-    if not values:
+def display_metrics(
+    indicator_id: str,
+    frequency: str,
+    observations: list[dict[str, Any]] | list[float],
+) -> list[dict[str, Any]]:
+    observations = _coerce_observations(observations, frequency)
+    normalized = [
+        {"date": when.isoformat(), "value": value}
+        for when, value in dated_values(observations)
+    ]
+    values = [row["value"] for row in normalized]
+    if not normalized:
         return []
     if indicator_id == "us_unemployment":
-        return [
-            {"label": label, "value": round(values[-1] - values[-period - 1], 2), "unit": "%p", "kind": "delta"}
-            for label, period in (("1개월", 1), ("3개월", 3), ("1년", 12))
-            if len(values) > period
-        ]
+        result = []
+        for label, period in (("1개월", 1), ("3개월", 3), ("1년", 12)):
+            value = period_delta(normalized, frequency, period)
+            if value is not None:
+                result.append({"label": label, "value": round(value, 2), "unit": "%p", "kind": "delta"})
+        return result
     if indicator_id == "us_payrolls":
-        changes = [values[index] - values[index - 1] for index in range(1, len(values))]
-        if not changes:
+        latest_change = period_delta(normalized, "monthly", 1)
+        if latest_change is None:
             return []
         result = [{
-            "label": "최근 월 증가", "value": round(changes[-1], 1),
+            "label": "최근 월 증가", "value": round(latest_change, 1),
             "unit": "천명", "kind": "delta",
         }]
-        if len(changes) >= 3:
+        recent_changes = [
+            period_delta(normalized, "monthly", 1, end_index=index)
+            for index in range(max(0, len(values) - 3), len(values))
+        ]
+        if len(recent_changes) == 3 and all(value is not None for value in recent_changes):
             result.append({
-                "label": "3개월 평균", "value": round(sum(changes[-3:]) / 3, 1),
+                "label": "3개월 평균",
+                "value": round(sum(float(value) for value in recent_changes if value is not None) / 3, 1),
                 "unit": "천명", "kind": "delta",
             })
         return result
     if indicator_id in RATE_IDS or indicator_id in SPREAD_IDS:
         periods = (21, 63, 252) if frequency == "daily" else (1, 3, 12)
         labels = ("1개월", "3개월", "1년")
-        return [
-            {"label": label, "value": round((values[-1] - values[-period - 1]) * 100, 1), "unit": "bp", "kind": "delta"}
-            for label, period in zip(labels, periods) if len(values) > period
-        ]
-    if indicator_id in INFLATION_INDEX_IDS:
         result = []
-        yoy = _percent_change(values, 12)
-        annualized = _annualized(values)
+        for label, period in zip(labels, periods):
+            value = period_delta(normalized, frequency, period)
+            if value is not None:
+                result.append({
+                    "label": label, "value": round(value * 100, 1),
+                    "unit": "bp", "kind": "delta",
+                })
+        return result
+    if indicator_id == "nfci":
+        return [
+            {"label": label, "value": round(value, 3), "unit": "지수p", "kind": "delta"}
+            for label, period in (("1개월", 4), ("3개월", 13), ("1년", 52))
+            if (value := period_delta(normalized, frequency, period)) is not None
+        ]
+    if indicator_id in INFLATION_INDEX_IDS | OFFICIAL_CPI_IDS:
+        result = []
+        yoy = period_percent_change(normalized, "monthly", 12)
+        annualized = annualized_change(normalized, "monthly", 3)
         if yoy is not None:
-            result.append({"label": "전년 대비", "value": round(yoy, 2), "unit": "%", "kind": "rate"})
-        if annualized is not None:
+            label = "공식 전년동월비" if indicator_id in OFFICIAL_CPI_IDS else "전년 대비"
+            digits = 1 if indicator_id in OFFICIAL_CPI_IDS else 2
+            result.append({"label": label, "value": round(yoy, digits), "unit": "%", "kind": "rate"})
+        if indicator_id not in OFFICIAL_CPI_IDS and annualized is not None:
             result.append({"label": "3개월 연율", "value": round(annualized, 2), "unit": "%", "kind": "rate"})
-        if len(values) > 1:
-            result.append({"label": "직전 발표", "value": round((values[-1] / values[-2] - 1) * 100, 2), "unit": "%", "kind": "rate"})
+        monthly = period_percent_change(normalized, "monthly", 1)
+        if indicator_id not in OFFICIAL_CPI_IDS and monthly is not None:
+            result.append({"label": "직전 발표", "value": round(monthly, 2), "unit": "%", "kind": "rate"})
         return result
     periods = {"daily": (21, 63, 252), "weekly": (4, 13, 52), "monthly": (1, 3, 12), "quarterly": (1, 4, 4)}[frequency]
     labels = ("1개월", "3개월", "1년") if frequency != "quarterly" else ("전분기", "전년", "전년")
@@ -287,7 +361,7 @@ def display_metrics(indicator_id: str, frequency: str, values: list[float]) -> l
         if (label, period) in seen:
             continue
         seen.add((label, period))
-        value = _percent_change(values, period)
+        value = period_percent_change(normalized, frequency, period)
         if value is not None:
             metrics.append({"label": label, "value": round(value, 2), "unit": "%", "kind": "return"})
     return metrics

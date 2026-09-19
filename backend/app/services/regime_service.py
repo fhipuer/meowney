@@ -32,7 +32,19 @@ from app.services.regime_catalog import (
     indicator_role,
     indicator_semantics,
 )
-from app.services.regime_fred import fetch_all_pages, history_start
+from app.services.regime_fred import (
+    fetch_all_pages,
+    fetch_json,
+    history_start,
+    incremental_start,
+    safe_error_message,
+)
+from app.services.regime_periods import (
+    annualized_change,
+    continuity_gaps,
+    period_delta,
+    period_percent_change,
+)
 from app.services.regime_vintage import (
     FRED_VINTAGE_DATES_URL,
     RegimeVintageRepository,
@@ -60,6 +72,10 @@ PIT_TIER1 = {
     "us_gdp", "us_unemployment", "us_payrolls", "us_claims", "us_retail", "us_indpro",
     "cpi", "core_cpi", "pce", "core_pce", "ppi", "wages",
 }
+MODEL_CONTEXT_IDS = {
+    "cpi_nsa", "core_cpi_nsa", "fed_target_lower", "fed_target_upper",
+    "fedfunds", "term_premium", "us3m", "us2y",
+}
 
 
 def _now() -> str:
@@ -71,12 +87,6 @@ def _float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _change(values: list[float], periods: int) -> float | None:
-    if len(values) <= periods or values[-periods - 1] == 0:
-        return None
-    return (values[-1] / values[-periods - 1] - 1) * 100
 
 
 class RegimeService:
@@ -143,7 +153,15 @@ class RegimeService:
             "id": run_id, "source": "fred", "started_at": started_at, "status": "running"
         }).execute()
         try:
-            semaphore = asyncio.Semaphore(6)
+            semaphore = asyncio.Semaphore(3)
+
+            def observation_start(indicator: dict[str, Any]) -> str:
+                if force:
+                    return history_start(indicator["frequency"])
+                state = fetch_status.get(indicator["id"], {})
+                return incremental_start(
+                    indicator["frequency"], state.get("last_observation_date"),
+                )
 
             async def fetch_indicator(client: httpx.AsyncClient, indicator: dict[str, Any]) -> list[tuple]:
                 try:
@@ -151,7 +169,7 @@ class RegimeService:
                         params = {
                             "series_id": indicator["source_key"], "api_key": settings.fred_api_key,
                             "file_type": "json", "sort_order": "asc",
-                            "observation_start": history_start(indicator["frequency"]),
+                            "observation_start": observation_start(indicator),
                         }
                         observations = await fetch_all_pages(
                             client, "https://api.stlouisfed.org/fred/series/observations", params
@@ -164,7 +182,9 @@ class RegimeService:
                                 rows.append((str(uuid4()), indicator["id"], item["date"], value, fetched_at, "fred"))
                         return rows
                 except Exception as exc:
-                    raise RuntimeError(f"{indicator['id']}: {type(exc).__name__}") from None
+                    raise RuntimeError(
+                        f"{indicator['id']}: {safe_error_message(exc, settings.fred_api_key)}"
+                    ) from None
 
             async def fetch_initial_vintage(client: httpx.AsyncClient, indicator: dict[str, Any]) -> list[Any]:
                 if indicator["id"] not in PIT_TIER1:
@@ -172,7 +192,7 @@ class RegimeService:
                 try:
                     async with semaphore:
                         params = initial_release_params(indicator["source_key"], settings.fred_api_key)
-                        params["observation_start"] = history_start(indicator["frequency"])
+                        params["observation_start"] = observation_start(indicator)
                         params.pop("limit", None)
                         params.pop("offset", None)
                         observations = await fetch_all_pages(
@@ -182,7 +202,10 @@ class RegimeService:
                             indicator["id"], {"observations": observations}, _now()
                         )
                 except Exception as exc:
-                    raise RuntimeError(f"{indicator['id']}.vintage: {type(exc).__name__}") from None
+                    raise RuntimeError(
+                        f"{indicator['id']}.vintage: "
+                        f"{safe_error_message(exc, settings.fred_api_key)}"
+                    ) from None
 
             async def fetch_payroll_revisions(client: httpx.AsyncClient) -> list[Any]:
                 payroll = next(
@@ -192,9 +215,10 @@ class RegimeService:
                     return []
                 try:
                     async with semaphore:
-                        response = await client.get(
+                        payload = await fetch_json(
+                            client,
                             FRED_VINTAGE_DATES_URL,
-                            params={
+                            {
                                 "series_id": payroll["source_key"],
                                 "api_key": settings.fred_api_key,
                                 "file_type": "json",
@@ -202,8 +226,7 @@ class RegimeService:
                                 "limit": 8,
                             },
                         )
-                        response.raise_for_status()
-                        vintage_dates = response.json().get("vintage_dates", [])[:8]
+                        vintage_dates = payload.get("vintage_dates", [])[:8]
                         if len(vintage_dates) < 2:
                             return []
                         params = recent_vintage_params(
@@ -223,7 +246,8 @@ class RegimeService:
                         )
                 except Exception as exc:
                     raise RuntimeError(
-                        f"{payroll['id']}.revisions: {type(exc).__name__}"
+                        f"{payroll['id']}.revisions: "
+                        f"{safe_error_message(exc, settings.fred_api_key)}"
                     ) from None
 
             async with httpx.AsyncClient(timeout=60) as client:
@@ -303,24 +327,26 @@ class RegimeService:
             RegimeVintageRepository(self.db).save(vintage_rows, run_id)
             saved = len(rows) + len(metal_rows)
             run_status = "failed" if errors and not rows else "partial" if errors else "success"
+            error_summary = "; ".join(errors)[:1000] if errors else None
             self.db.table("regime_fetch_runs").update({
                 "finished_at": _now(), "status": run_status,
-                "observations_saved": saved, "error": "; ".join(errors[:3]) if errors else None,
+                "observations_saved": saved, "error": error_summary,
             }).eq("id", run_id).execute()
             self._record_feed_status(
-                "macro", run_status, saved, "; ".join(errors[:3]) if errors else None,
+                "macro", run_status, saved, error_summary,
                 successful=bool(rows),
             )
         except Exception as exc:
+            error = safe_error_message(exc, settings.fred_api_key)
             self.db.table("regime_fetch_runs").update({
-                "finished_at": _now(), "status": "failed", "error": str(exc)[:1000]
+                "finished_at": _now(), "status": "failed", "error": error[:1000]
             }).eq("id", run_id).execute()
-            self._record_feed_status("macro", "failed", saved, str(exc)[:800])
+            self._record_feed_status("macro", "failed", saved, error[:800])
             raise
         self.evaluate(persist=True)
         evaluation = self.current(persist_state=True)
         return {"status": run_status, "source": "mixed", "saved": saved,
-                "errors": errors[:3], "evaluation": evaluation}
+                "errors": errors[:10], "evaluation": evaluation}
 
     def _indicator_rows(self) -> list[dict[str, Any]]:
         with self.db.connect() as conn:
@@ -382,8 +408,14 @@ class RegimeService:
                 "usable_for_decision": False, **role, **semantics,
             }
         p1, p3, p12 = FREQUENCY_PERIODS[indicator["frequency"]]
-        latest, change1, change3, change12 = values[-1], _change(values, p1), _change(values, p3), _change(values, p12)
-        score, reason = self._score(indicator["id"], latest, change3, change12, values, p3, p12)
+        latest = values[-1]
+        change1 = period_percent_change(observations, indicator["frequency"], p1)
+        change3 = period_percent_change(observations, indicator["frequency"], p3)
+        change12 = period_percent_change(observations, indicator["frequency"], p12)
+        score, reason = self._score(
+            indicator["id"], latest, change3, change12,
+            observations, indicator["frequency"], p3,
+        )
         revision_summary = (
             self._payroll_revision_summary(observations, indicator.get("vintage_rows") or [])
             if indicator["id"] == "us_payrolls" else None
@@ -396,11 +428,17 @@ class RegimeService:
             {"observation_date": observations[-1]["observation_date"], "frequency": indicator["frequency"]},
             now,
         )
+        gaps = continuity_gaps(observations, indicator["frequency"])
+        display_value, display_unit = latest, indicator["unit"]
+        if indicator["id"] == "bank_reserves":
+            display_value, display_unit = round(latest / 1_000_000, 3), "조 달러"
         signal = {
             **{key: indicator[key] for key in ("id", "domain", "name", "unit", "source", "source_key", "frequency", "direction")},
             "observation_date": observations[-1]["observation_date"],
             "fetched_at": observations[-1]["fetched_at"],
             "value": latest,
+            "display_value": display_value,
+            "display_unit": display_unit,
             "change_1m": change1,
             "change_3m": change3,
             "change_12m": change12,
@@ -409,7 +447,7 @@ class RegimeService:
             "reason": reason,
             "history": display_history(observations, indicator["frequency"]),
             "display_period": display_period(indicator["frequency"]),
-            "display_metrics": display_metrics(indicator["id"], indicator["frequency"], values),
+            "display_metrics": display_metrics(indicator["id"], indicator["frequency"], observations),
             "decision_chart": decision_chart(indicator["id"], observations),
             # regime_observations is the latest-value projection. A separately
             # stored initial vintage must never be presented as provenance for
@@ -421,6 +459,8 @@ class RegimeService:
             "is_stale": not freshness["fresh"],
             "age_days": freshness["age_days"],
             "max_age_days": freshness["max_age_days"],
+            "continuity_gaps": gaps,
+            "has_continuity_gap": bool(gaps),
             **role,
             **semantics,
         }
@@ -492,17 +532,39 @@ class RegimeService:
 
     @staticmethod
     def _score(key: str, latest: float, c3: float | None, c12: float | None,
-               values: list[float], p3: int, p12: int) -> tuple[float, str]:
-        delta3 = latest - values[-p3 - 1] if len(values) > p3 else 0
-        yoy = c12 or 0
+               observations: list[dict[str, Any]] | list[float], frequency: str | int,
+               p3: int) -> tuple[float, str]:
+        legacy_values = bool(observations) and not isinstance(observations[0], dict)
+        if legacy_values:
+            values = [float(value) for value in observations]
+            legacy_period = int(frequency)
+            delta3 = latest - values[-legacy_period - 1] if len(values) > legacy_period else 0
+            rows: list[dict[str, Any]] = []
+            resolved_frequency = "daily"
+        else:
+            rows = observations  # type: ignore[assignment]
+            values = [float(row["value"]) for row in rows]
+            resolved_frequency = str(frequency)
+            delta3 = period_delta(rows, resolved_frequency, p3)
+        yoy = c12
         if key == "us_unemployment":
+            if delta3 is None:
+                return 0, "3개월 비교기간 자료 부족"
             return (-2 if delta3 >= .3 else -1 if delta3 >= .15 else .5, f"3개월 {delta3:+.2f}%p")
         if key == "us_claims":
-            return (-2 if (c3 or 0) >= 15 else -1 if (c3 or 0) >= 7 else .5, f"3개월 {c3 or 0:+.1f}%")
+            if c3 is None:
+                return 0, "13주 비교기간 자료 부족"
+            return (-2 if c3 >= 15 else -1 if c3 >= 7 else .5, f"13주 {c3:+.1f}%")
         if key == "us_payrolls":
-            changes = [values[index] - values[index - 1] for index in range(1, len(values))]
-            latest_change = changes[-1] if changes else 0
-            average_3m = sum(changes[-3:]) / min(3, len(changes)) if changes else 0
+            recent_changes = [
+                period_delta(rows, "monthly", 1, end_index=index)
+                for index in range(max(0, len(values) - 3), len(values))
+            ]
+            if len(recent_changes) < 3 or any(value is None for value in recent_changes):
+                return 0, "최근 3개월 연속 비교자료 부족"
+            changes = [float(value) for value in recent_changes if value is not None]
+            latest_change = changes[-1]
+            average_3m = sum(changes) / 3
             score = (
                 .75 if average_3m >= 150
                 else .25 if average_3m >= 50
@@ -512,7 +574,9 @@ class RegimeService:
             )
             return score, f"최근 월 {latest_change:+.0f}천명 · 3개월 평균 {average_3m:+.0f}천명"
         if key in {"cpi", "core_cpi", "pce", "core_pce", "ppi", "ppi_commodities", "wages"}:
-            annualized = ((latest / values[-p3 - 1]) ** (12 / 3) - 1) * 100 if len(values) > p3 and values[-p3 - 1] else 0
+            annualized = annualized_change(rows, "monthly", 3)
+            if annualized is None:
+                return 0, "3개월 비교기간 자료 부족"
             return (-2 if annualized >= 4 else -1 if annualized >= 3 else .75 if annualized < 2.5 else 0,
                     f"3개월 연율 {annualized:.1f}%")
         if key == "hy_oas":
@@ -521,16 +585,21 @@ class RegimeService:
             return (-1.5 if latest >= 1.5 else -.75 if latest >= 1.2 else .5, f"현재 {latest:.2f}%p")
         if key == "nfci":
             return (-2 if latest >= .5 else -1 if latest >= 0 else .5, f"현재 {latest:.2f}")
-        if key in {"us10y", "us30y", "tips10y", "tips30y", "bei10y", "term_premium", "fedfunds"}:
+        if key in {"us10y", "us30y", "tips10y", "tips30y", "bei10y", "term_premium", "fedfunds",
+                   "fed_target_lower", "fed_target_upper"}:
             if key == "tips10y" and latest >= 2.25:
                 return (-1, f"현재 {latest:.2f}% · 제한적 실질금리")
             if key == "tips30y" and latest >= 3.0:
                 return (-1, f"현재 {latest:.2f}% · 장기 듀레이션 부담 경계")
+            if delta3 is None:
+                return 0, "3개월 비교기간 자료 부족"
             return (-1.5 if delta3 >= .5 else -.75 if delta3 >= .25 else .25, f"3개월 {delta3:+.2f}%p")
         if key in {"curve2s10s", "curve10y3m"}:
             return (-1 if latest < -.5 else -.5 if latest < 0 else .5, f"현재 {latest:+.2f}%p")
         direction = 1 if key in {"us_gdp", "us_retail", "us_indpro", "fed_assets", "bank_reserves"} else 0
         if direction:
+            if yoy is None:
+                return 0, "12개월 비교기간 자료 부족"
             return (-1.5 if yoy < -2 else -.75 if yoy < 0 else .75, f"12개월 {yoy:+.1f}%")
         return (0, "중립 규칙")
 
@@ -546,9 +615,10 @@ class RegimeService:
         inputs = []
         for definition in definitions:
             signal = signal_map[definition["id"]]
-            if signal.get("usage") == "display":
+            if signal.get("usage") == "display" and definition["id"] not in MODEL_CONTEXT_IDS:
                 continue
-            if not include_triggers and signal.get("usage") != "regime":
+            if (not include_triggers and signal.get("usage") != "regime"
+                    and definition["id"] not in MODEL_CONTEXT_IDS):
                 continue
             inputs.append({
                 "id": definition["id"],
@@ -675,12 +745,37 @@ class RegimeService:
         weights = {item["id"]: float(item["weight"]) for item in definitions}
         signals = [self._signal(item, now) for item in definitions]
         signal_map = {item["id"]: item for item in signals}
+        for primary_id, official_id in (("cpi", "cpi_nsa"), ("core_cpi", "core_cpi_nsa")):
+            primary, official = signal_map.get(primary_id), signal_map.get(official_id)
+            if not primary or not official or official.get("status") == "unavailable":
+                continue
+            official_metric = next(
+                (item for item in official.get("display_metrics", [])
+                 if item.get("label") == "공식 전년동월비"),
+                None,
+            )
+            if official_metric:
+                primary["official_yoy"] = official_metric["value"]
+                primary["official_yoy_observation_date"] = official.get("observation_date")
+                primary["official_yoy_basis"] = "BLS 비계절조정 지수의 동일 월 비교"
+                primary["display_metrics"] = [
+                    {**official_metric, "source_indicator_id": official_id},
+                    *[
+                        item for item in primary.get("display_metrics", [])
+                        if item.get("label") != "전년 대비"
+                    ],
+                ]
         macro_input = [
             {"id": item["id"], "name": item["name"], "frequency": item["frequency"],
              "history": [{"date": row["observation_date"], "value": float(row["value"])}
                          for row in item["observations"]]}
             for item in definitions
             if signal_map[item["id"]].get("usable_for_decision")
+            or (
+                item["id"] in {"cpi_nsa", "core_cpi_nsa"}
+                and signal_map[item["id"]].get("status") != "unavailable"
+                and not signal_map[item["id"]].get("is_stale")
+            )
         ]
         financial_input = [
             {"id": item["id"], "name": item["name"], "frequency": item["frequency"],
@@ -976,6 +1071,14 @@ class RegimeService:
             {"id": item["id"], "name": item["name"], "observation_date": item.get("observation_date")}
             for item in signals if item["id"] in stale_ids
         ]
+        gapped = [
+            {
+                "id": item["id"], "name": item["name"],
+                "missing_periods": item.get("continuity_gaps", []),
+                "reason_code": "calendar_period_gap",
+            }
+            for item in scoped if item.get("continuity_gaps")
+        ]
         auxiliary_stale = [
             {
                 "id": item["id"],
@@ -993,12 +1096,18 @@ class RegimeService:
         ]
         observation_dates = [item["observation_date"] for item in available]
         fetched_at = [item["fetched_at"] for item in available if item.get("fetched_at")]
-        status = "판정 불가" if coverage["insufficient_domains"] >= 2 else "제한" if stale or unavailable else "충분"
+        status = (
+            "판정 불가" if coverage["insufficient_domains"] >= 2
+            else "제한" if stale or unavailable or gapped
+            else "충분"
+        )
         reasons = []
         if stale:
             reasons.append(f"오래된 지표 {len(stale)}개")
         if unavailable:
             reasons.append(f"미수집 지표 {len(unavailable)}개")
+        if gapped:
+            reasons.append(f"최근 달력 기간 누락 지표 {len(gapped)}개")
         if not reasons:
             reasons.append("핵심 데이터가 권장 갱신 범위 내에 있음")
         total = len(scoped)
@@ -1020,7 +1129,7 @@ class RegimeService:
         vintage_count = sum(bool(item.get("vintage_history_available")) for item in scoped)
         return {
             "status": status, "overall_coverage": coverage["overall"], "reasons": reasons,
-            "stale": stale, "unavailable": unavailable,
+            "stale": stale, "unavailable": unavailable, "continuity_gaps": gapped,
             "scope": "us_macro_decision_inputs",
             "auxiliary_stale": auxiliary_stale,
             "observation_range": {"from": min(observation_dates) if observation_dates else None,
@@ -1049,6 +1158,15 @@ class RegimeService:
                     "declared": contract_count, "total": total,
                     "label": f"계열 ID·단위·주기 명시 {contract_count}/{total}",
                     "official_value_crosscheck": "핵심 계열별 테스트",
+                },
+                "calendar_continuity": {
+                    "complete": max(0, len(available) - len(gapped)),
+                    "total": len(available),
+                    "gapped": len(gapped),
+                    "label": (
+                        f"최근 비교기간 누락 {len(gapped)}개 계열"
+                        if gapped else "최근 비교기간 연속성 확인"
+                    ),
                 },
                 "revision_history": {
                     "available": vintage_count, "total": total,

@@ -11,9 +11,15 @@ from app.services.regime_rates import (
     aligned_ten_year_changes,
     calculate_rate_model,
 )
+from app.services.regime_periods import (
+    annualized_change,
+    dated_values,
+    period_delta,
+    period_percent_change,
+)
 
 
-RULE_VERSION = "2026-08-p2.1.0-rates-v4-energy-v1"
+RULE_VERSION = "2026-09-p2.2.0-calendar-rates-v5-energy-v1"
 SEVERITY_RANK = {"medium": 1, "high": 2, "critical": 3}
 REGIME_RANK = {"유지": 0, "경계": 1, "약화": 2, "전환": 3}
 FRESHNESS_DAYS = {"daily": 14, "weekly": 28, "monthly": 95, "quarterly": 200}
@@ -57,23 +63,38 @@ def _values(signal: dict[str, Any]) -> list[float]:
 
 
 def _absolute_change(signal: dict[str, Any], periods: int) -> float | None:
-    values = _values(signal)
-    return values[-1] - values[-periods - 1] if len(values) > periods else None
+    return period_delta(
+        signal.get("history", []), signal.get("frequency", "daily"), periods,
+    )
 
 
 def _percent_change(signal: dict[str, Any], periods: int) -> float | None:
-    values = _values(signal)
-    if len(values) <= periods or values[-periods - 1] == 0:
-        return None
-    return (values[-1] / values[-periods - 1] - 1) * 100
+    return period_percent_change(
+        signal.get("history", []), signal.get("frequency", "daily"), periods,
+    )
 
 
 def _annualized_3m(signal: dict[str, Any], offset: int = 0) -> float | None:
-    values = _values(signal)
-    end = len(values) - offset
-    if end < 4 or values[end - 4] <= 0:
-        return None
-    return ((values[end - 1] / values[end - 4]) ** 4 - 1) * 100
+    return annualized_change(
+        signal.get("history", []), "monthly", 3, end_index=-1 - offset,
+    )
+
+
+def _monthly_average_history(signal: dict[str, Any], window: int = 3) -> list[tuple[str, float]]:
+    rows = signal.get("history", [])
+    dated = dated_values(rows)
+    result: list[tuple[str, float]] = []
+    for end_index in range(len(dated)):
+        values = [dated[end_index][1]]
+        for periods in range(1, window):
+            pair = period_delta(rows, "monthly", periods, end_index=end_index)
+            if pair is None:
+                values = []
+                break
+            values.append(dated[end_index][1] - pair)
+        if len(values) == window:
+            result.append((dated[end_index][0].isoformat(), sum(values) / window))
+    return result
 
 
 def _trigger(rule_id: str, domain: str, severity: str, cluster: str, summary: str,
@@ -277,11 +298,22 @@ def evaluate_triggers(
 
     unemployment = signals.get("us_unemployment")
     if unemployment:
-        values = _values(unemployment)
-        if len(values) >= 15:
-            current_average = sum(values[-3:]) / 3
-            historical = [sum(values[index:index + 3]) / 3 for index in range(len(values) - 14, len(values) - 2)]
-            sahm = current_average - min(historical)
+        averages = _monthly_average_history(unemployment)
+        if averages:
+            latest_date = datetime.fromisoformat(averages[-1][0]).date()
+            latest_month = latest_date.year * 12 + latest_date.month
+            trailing = [
+                value for when, value in averages
+                if 0 <= latest_month - (
+                    datetime.fromisoformat(when).year * 12
+                    + datetime.fromisoformat(when).month
+                ) <= 12
+            ]
+        else:
+            trailing = []
+        if len(trailing) == 13:
+            current_average = averages[-1][1]
+            sahm = current_average - min(trailing)
             if sahm >= .50:
                 triggers.append(_trigger("recession.sahm", "growth", "critical", "labor",
                     f"실업률 3개월 평균이 12개월 저점 대비 {sahm:+.2f}%p", {"sahm": sahm, "threshold": .50}))

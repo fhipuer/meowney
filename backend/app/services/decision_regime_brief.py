@@ -7,17 +7,18 @@ This module deliberately never serializes chart histories or raw snapshot rows.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 
-DECISION_BRIEF_SCHEMA_VERSION = "1.2.0"
+DECISION_BRIEF_SCHEMA_VERSION = "1.3.0"
 
 SIGNAL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "시장·환율·원자재",
         (
             "market_kospi", "market_sp500", "market_nasdaq", "market_vix",
-            "market_usdkrw", "market_dollar", "market_wti", "market_ovx", "market_copper",
+            "market_usdkrw", "market_dxy", "market_dollar", "market_wti", "market_ovx", "market_copper",
             "market_gold", "market_silver", "market_gold_silver_ratio",
         ),
     ),
@@ -117,8 +118,9 @@ def _metric_summary(signal: dict[str, Any]) -> str:
         if value is None:
             continue
         signed = item.get("kind") in {"delta", "return"}
+        digits = 1 if item.get("label") == "공식 전년동월비" else 2
         rendered.append(
-            f"{_text(item.get('label'))} {_number(value, 2, signed=signed)}{_text(unit) if unit else ''}"
+            f"{_text(item.get('label'))} {_number(value, digits, signed=signed)}{_text(unit) if unit else ''}"
         )
     if rendered:
         return " · ".join(rendered)
@@ -138,8 +140,10 @@ def _append_signal_table(lines: list[str], title: str, ids: Iterable[str], signa
         status = _text(item.get("status"))
         if item.get("is_stale"):
             status += " · 오래됨"
+        if item.get("continuity_gaps"):
+            status += " · 기간 누락"
         lines.append(
-            f"| {_text(item.get('name'))} | {_value_with_unit(item.get('value'), item.get('unit'))} "
+            f"| {_text(item.get('name'))} | {_value_with_unit(item.get('display_value', item.get('value')), item.get('display_unit', item.get('unit')))} "
             f"| {_metric_summary(item)} | {status} · {_text(item.get('reason'))} "
             f"| {_text(item.get('observation_date'))} | {_text(item.get('source'))} {_text(item.get('source_key'))} |"
         )
@@ -267,17 +271,67 @@ def _append_financial_conditions(lines: list[str], current: dict[str, Any]) -> N
     duration = conditions.get("duration_stress") or {}
     curve = conditions.get("yield_curve") or {}
     credit = conditions.get("credit") or {}
+    if policy.get("target_lower") is not None and policy.get("target_upper") is not None:
+        policy_basis = (
+            f"목표범위 {_percent(policy.get('target_lower'), 2)}~{_percent(policy.get('target_upper'), 2)} "
+            f"· 중간값 {_percent(policy.get('target_midpoint'), 3)}"
+            f" (기준일 {_text(policy.get('target_as_of_date'))})"
+        )
+    else:
+        policy_basis = f"실효금리 월평균 {_percent(policy.get('fed_funds'), 2)} (대체값)"
+    effective_average = policy.get("effective_fed_funds_monthly_average")
+    if effective_average is not None:
+        policy_basis += (
+            f" · 실효금리 월평균 {_percent(effective_average, 2)}"
+            f" ({_text(policy.get('effective_fed_funds_observation_date'))})"
+        )
     lines += [
         "### 금융 전달경로 계산",
         "",
         "| 계층 | 앱 판정 | 정량 근거 |",
         "| --- | --- | --- |",
-        f"| 정책 제약 | {_text(policy.get('label'))} | Fed {_percent(policy.get('fed_funds'), 2)} · Core PCE YoY {_percent(policy.get('core_pce_yoy'), 2)} · 실질 정책금리 {_percent(policy.get('real_policy_rate'), 2, signed=True)} |",
+        f"| 정책 제약 | {_text(policy.get('label'))} | {policy_basis} · Core PCE YoY {_percent(policy.get('core_pce_yoy'), 2)} · 실질 정책금리 {_percent(policy.get('real_policy_rate'), 2, signed=True)} |",
         f"| 장기금리 부담 | {_text(long_rates.get('label'))} | 10Y {_percent(long_rates.get('nominal_10y'), 2)} · 10Y TIPS {_percent(long_rates.get('real_10y'), 2)} · BEI {_percent(long_rates.get('breakeven_10y'), 2)} · 기간 프리미엄 {_percent(long_rates.get('term_premium'), 2, signed=True)} |",
         f"| 최근 금리 충격 | {_text(shock.get('label'))} | 20관측일 {_change_window(shock.get('change_20d'), ('us10y', 'tips10y', 'bei10y'))} / 63관측일 {_change_window(shock.get('change_63d'), ('us10y', 'tips10y', 'bei10y'))} |",
         f"| 30년물 부담 | {_text(duration.get('label'))} | 30Y {_percent(duration.get('nominal_30y'), 2)} · 30Y TIPS {_percent(duration.get('real_30y'), 2)} · 30Y-10Y {_percent(duration.get('spread_30y10y'), 2, signed=True)} · 최근 5회 중 {int(duration.get('confirmation_count_5d') or 0)}회 확인 · {_text(duration.get('driver'))} |",
         f"| 수익률곡선 | {_text(curve.get('label'))} | 10Y-3M 월평균 {_percent(curve.get('monthly_average_10y3m'), 2, signed=True)} · 2Y-10Y 월평균 {_percent(curve.get('monthly_average_10y2y'), 2, signed=True)} · 12개월 침체확률 {_percent(curve.get('recession_probability_12m'), 1)} · {_text(curve.get('state'))} |",
         f"| 신용·금융여건 | {_text(credit.get('label'))} | HY OAS {_percent(credit.get('hy_oas'), 2)} · IG OAS {_percent(credit.get('ig_oas'), 2)} · NFCI {_number(credit.get('nfci'), 2, signed=True)} |",
+        "",
+    ]
+
+
+def _append_external_macro_checks(lines: list[str], current: dict[str, Any]) -> None:
+    """Point reviewers to official ISM releases without prohibited scraping."""
+
+    raw_date = (current.get("macro_quadrant") or {}).get("as_of_date") or current.get("evaluated_at")
+    try:
+        reference = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00")).date()
+    except (TypeError, ValueError):
+        reference = datetime.now(timezone.utc).date()
+    year, month = reference.year, reference.month - 1
+    if month == 0:
+        year, month = year - 1, 12
+    month_name = (
+        "january", "february", "march", "april", "may", "june",
+        "july", "august", "september", "october", "november", "december",
+    )[month - 1]
+    period = f"{year:04d}-{month:02d}"
+    manufacturing = (
+        "https://www.ismworld.org/supply-management-news-and-reports/"
+        f"reports/ism-pmi-reports/pmi/{month_name}/"
+    )
+    services = (
+        "https://www.ismworld.org/supply-management-news-and-reports/"
+        f"reports/ism-pmi-reports/services/{month_name}/"
+    )
+    lines += [
+        "### 외부 공식 확인 항목",
+        "",
+        f"- 상태: `external_verification_required` · 기준월 {period}",
+        f"- [ISM 제조업 PMI 공식 보고서]({manufacturing}): PMI와 고용 하위지수를 확인합니다.",
+        f"- [ISM 서비스업 PMI 공식 보고서]({services}): Services PMI와 고용 하위지수를 확인합니다.",
+        "- ISM 수치는 원문 접근·이용조건상 앱이 자동 시계열화하지 않습니다. 문서 검토자는 위 공식 보고서의 최신 기준월과 수치를 직접 확인해야 합니다.",
+        "- 고용보고서 정량축은 앱의 BLS/FRED 비농업고용·실업률·신규실업수당 표를 함께 사용합니다.",
         "",
     ]
 
@@ -489,6 +543,7 @@ def _append_quality_and_events(lines: list[str], current: dict[str, Any]) -> Non
     stale = quality.get("stale") or []
     auxiliary_stale = quality.get("auxiliary_stale") or []
     unavailable = quality.get("unavailable") or []
+    continuity = quality.get("continuity_gaps") or []
     unhealthy = [
         (name, feed) for name, feed in (current.get("feed_health") or {}).items()
         if feed and feed.get("status") not in {"success", "cached"}
@@ -500,6 +555,12 @@ def _append_quality_and_events(lines: list[str], current: dict[str, Any]) -> Non
         lines.append("- 오래된 보조 지표: " + ", ".join(_text(item.get("name")) for item in auxiliary_stale))
     if unavailable:
         lines.append("- 미수집 핵심 지표: " + ", ".join(_text(item) for item in unavailable))
+    for item in continuity:
+        lines.append(
+            f"- 달력 기간 누락: {_text(item.get('name'))} · "
+            + ", ".join(_text(period) for period in item.get("missing_periods") or [])
+            + " (누락 월을 다른 관측치로 대체하지 않음)"
+        )
     for name, feed in unhealthy:
         lines.append(
             f"- 수집 상태: {_text(name)} {_text(feed.get('status'))} · 마지막 성공 {_text(feed.get('last_success_at'))}"
@@ -511,7 +572,7 @@ def _append_quality_and_events(lines: list[str], current: dict[str, Any]) -> Non
             limitations.append(section["limitations"])
     for limitation in limitations:
         lines.append(f"- 측정 한계: {_text(limitation)}")
-    if not any((stale, auxiliary_stale, unavailable, unhealthy, limitations)):
+    if not any((stale, auxiliary_stale, unavailable, continuity, unhealthy, limitations)):
         lines.append("- 현재 문서에 포함한 핵심 데이터에서 별도 공백이 확인되지 않았습니다.")
     events = current.get("upcoming_events") or []
     if events:
@@ -532,6 +593,7 @@ def build_regime_quantitative_markdown(current: dict[str, Any]) -> str:
     _append_regime_summary(lines, current)
     _append_macro_environment(lines, current)
     _append_financial_conditions(lines, current)
+    _append_external_macro_checks(lines, current)
     _append_energy_shock(lines, current)
     _append_ai_thesis(lines, current)
     _append_quality_and_events(lines, current)

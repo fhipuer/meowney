@@ -1,7 +1,4 @@
-"""
-Finance Service - yfinance 연동 냥~ 🐱
-실시간 주가 조회 및 계산 담당
-"""
+"""yfinance 및 KRX OPEN API 시세 조회와 자산 평가를 담당한다."""
 import asyncio
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -11,13 +8,18 @@ from concurrent.futures import ThreadPoolExecutor
 import yfinance as yf
 
 from app.config import settings
+from app.services.krx_gold_service import (
+    KrxGoldService,
+    is_krx_gold_ticker,
+    normalize_krx_gold_ticker,
+)
 from app.services.valuation_service import calculate_asset_valuation
 
 
 class FinanceService:
     """
     금융 데이터 서비스 냥~ 🐱
-    yfinance를 사용하여 실시간 주가 조회
+    일반 종목은 yfinance, KRX 금현물은 공식 KRX OPEN API로 조회한다.
     """
 
     # 클래스 레벨 환율 캐시 (인스턴스 간 공유)
@@ -28,8 +30,9 @@ class FinanceService:
     _price_cache_ttl = timedelta(minutes=5)
     _stale_price_ttl = timedelta(hours=24)
 
-    def __init__(self):
+    def __init__(self, krx_gold_service: KrxGoldService | None = None):
         self._executor = ThreadPoolExecutor(max_workers=5)
+        self._krx_gold_service = krx_gold_service or KrxGoldService()
 
     def _get_stock_info_sync(self, ticker: str) -> dict:
         """
@@ -75,7 +78,7 @@ class FinanceService:
         """
         비동기로 주식 가격 조회 냥~
         """
-        ticker = ticker.strip().upper()
+        ticker = normalize_krx_gold_ticker(ticker) or ticker.strip().upper()
         now = datetime.now()
         cached = FinanceService._price_cache.get(ticker)
         if cached and now - cached["timestamp"] <= self._price_cache_ttl:
@@ -95,8 +98,11 @@ class FinanceService:
                 FinanceService._inflight_price_tasks.pop(ticker, None)
 
     async def _fetch_and_cache_stock_price(self, ticker: str, cached: dict | None) -> dict:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(self._executor, self._get_stock_info_sync, ticker)
+        if is_krx_gold_ticker(ticker):
+            result = await self._krx_gold_service.get_price(ticker)
+        else:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(self._executor, self._get_stock_info_sync, ticker)
         now = datetime.now()
         if result.get("valid") and result.get("current_price") is not None:
             result = {
@@ -130,6 +136,10 @@ class FinanceService:
         """
         티커 유효성 검증 냥~
         """
+        # 지원이 확정된 KRX 상품은 일시적인 API 장애나 승인 대기 때문에
+        # 자산 수정 자체가 막히지 않도록 코드만으로 유효성을 판단한다.
+        if is_krx_gold_ticker(ticker):
+            return True
         result = await self.get_stock_price(ticker)
         return result.get("valid", False)
 
@@ -142,9 +152,9 @@ class FinanceService:
 
         return {
             "valid": result.get("valid", False),
-            "ticker": ticker,
+            "ticker": result.get("ticker") or ticker,
             "name": result.get("name"),
-            "current_price": Decimal(str(result["current_price"])) if result.get("current_price") else None,
+            "current_price": Decimal(str(result["current_price"])) if result.get("current_price") is not None else None,
             "currency": result.get("currency"),
             "exchange": result.get("exchange"),
             "error": result.get("error") if not result.get("valid") else None,
@@ -152,19 +162,19 @@ class FinanceService:
 
     async def enrich_assets_with_prices(self, assets: list[dict]) -> list[dict]:
         """
-        자산 목록에 실시간 가격 정보 추가 냥~ 🐱
+        자산 목록에 자동 또는 수동 가격 정보를 추가한다.
 
         - 주식: yfinance에서 현재가 조회
+        - KRX 금현물: KRX OPEN API에서 최근 공식 종가 조회
         - 현금: current_value 사용
         - 계산: 평가금액, 손익, 수익률
         - 환율: USD 자산의 원화 환산 매입가 계산
         """
-        # 티커가 있는 자산만 필터링
-        tickers = [
-            asset["ticker"]
-            for asset in assets
-            if asset.get("ticker")
-        ]
+        tickers = []
+        for asset in assets:
+            ticker = asset.get("ticker")
+            if ticker:
+                tickers.append(normalize_krx_gold_ticker(ticker) or str(ticker).strip().upper())
 
         # 일괄 조회
         prices = await self.get_multiple_prices(list(set(tickers)))
@@ -175,110 +185,16 @@ class FinanceService:
         enriched = []
         for asset in assets:
             asset_copy = dict(asset)
-            ticker = asset.get("ticker")
-            quantity = Decimal(str(asset.get("quantity", 0)))
-            avg_price = Decimal(str(asset.get("average_price", 0)))
-            currency = asset.get("currency", "KRW")
+            raw_ticker = asset.get("ticker")
+            ticker = (
+                normalize_krx_gold_ticker(raw_ticker) or str(raw_ticker).strip().upper()
+                if raw_ticker
+                else None
+            )
 
             # 현재 환율 추가
             asset_copy["current_exchange_rate"] = Decimal(str(current_exchange_rate))
 
-            # 현재가 결정
-            if ticker and ticker in prices:
-                price_info = prices[ticker]
-                current_price = price_info.get("current_price")
-
-                # yfinance가 currency None 반환 시 DB의 자산 통화를 따름
-                price_currency = price_info.get("currency") or currency
-
-                if current_price:
-                    # 가격 통화가 USD인데 자산 통화가 KRW이면 원화 환산
-                    if price_currency == "USD" and currency == "KRW":
-                        current_price = float(current_price) * current_exchange_rate
-
-                    asset_copy["current_price"] = Decimal(str(current_price))
-                else:
-                    asset_copy["current_price"] = None
-            elif asset.get("current_value"):
-                # 티커 없는 자산 (현금, 금현물, 예금 등)
-                # current_value가 총 가치를 나타냄
-                asset_copy["current_price"] = None  # 단가는 없음
-                asset_copy["manual_value"] = True  # 수동 입력 표시
-            else:
-                asset_copy["current_price"] = None
-
-            # USD 자산의 원화 환산 매입가 계산
-            if currency == "USD" and quantity > 0:
-                # 매수 시점 환율이 있으면 사용, 없으면 현재 환율 사용
-                purchase_rate = asset.get("purchase_exchange_rate")
-                if purchase_rate:
-                    purchase_rate = Decimal(str(purchase_rate))
-                else:
-                    purchase_rate = Decimal(str(current_exchange_rate))
-
-                # 원화 환산 매입가 = 평균매수가(USD) × 수량 × 매수시점환율
-                asset_copy["cost_basis_krw"] = avg_price * quantity * purchase_rate
-            else:
-                asset_copy["cost_basis_krw"] = None
-
-            # 평가금액, 손익, 수익률 계산
-            if asset_copy.get("current_price") and quantity > 0:
-                # 티커가 있는 자산: 현재가 × 수량
-                current_price = Decimal(str(asset_copy["current_price"]))
-                market_value = current_price * quantity
-
-                # USD 자산인 경우 원화 환산
-                if currency == "USD":
-                    # USD 원본 금액 저장 (달러 표시용) 냥~
-                    asset_copy["market_value_usd"] = market_value
-                    # 원화 환산
-                    market_value_krw = market_value * Decimal(str(current_exchange_rate))
-                    # 원금도 원화 환산 (매수 시점 환율 사용)
-                    purchase_rate = asset.get("purchase_exchange_rate")
-                    if purchase_rate:
-                        purchase_rate = Decimal(str(purchase_rate))
-                    else:
-                        purchase_rate = Decimal(str(current_exchange_rate))
-                    principal_krw = avg_price * quantity * purchase_rate
-                    profit_loss = market_value_krw - principal_krw
-                    asset_copy["market_value"] = market_value_krw
-                else:
-                    principal = avg_price * quantity
-                    profit_loss = market_value - principal
-                    asset_copy["market_value"] = market_value
-
-                asset_copy["profit_loss"] = profit_loss
-
-                # 수익률은 원금 대비 계산
-                principal_for_rate = principal_krw if currency == "USD" else principal
-                if principal_for_rate > 0:
-                    asset_copy["profit_rate"] = float((profit_loss / principal_for_rate) * 100)
-                else:
-                    asset_copy["profit_rate"] = 0.0
-            elif asset.get("current_value"):
-                # 티커 없는 자산 (금현물, 현금, 예금 등)
-                current_value = Decimal(str(asset["current_value"]))
-                asset_copy["market_value"] = current_value
-
-                # 현금은 수익 개념 없음 냥~ 💰
-                if asset.get("asset_type") == "cash":
-                    asset_copy["profit_loss"] = Decimal("0")
-                    asset_copy["profit_rate"] = 0.0
-                else:
-                    # current_value = 현재 총 가치, average_price × quantity = 원금
-                    principal = avg_price * quantity
-                    asset_copy["profit_loss"] = current_value - principal
-
-                    if principal > 0:
-                        asset_copy["profit_rate"] = float(((current_value - principal) / principal) * 100)
-                    else:
-                        asset_copy["profit_rate"] = 0.0
-            else:
-                asset_copy["market_value"] = Decimal("0")
-                asset_copy["profit_loss"] = Decimal("0")
-                asset_copy["profit_rate"] = 0.0
-
-            # 모든 최종 금액은 단일 순수 계산 엔진 결과로 덮어써 화면별 차이를 막는다.
             valuation = calculate_asset_valuation(
                 asset,
                 prices.get(ticker) if ticker else None,
@@ -292,6 +208,18 @@ class FinanceService:
                 "cost_basis_krw": valuation.cost_basis_krw,
                 "profit_loss": valuation.profit_loss_krw,
                 "profit_rate": float(valuation.profit_rate) if valuation.profit_rate is not None else None,
+                "native_profit_rate": (
+                    float(valuation.native_profit_rate)
+                    if valuation.native_profit_rate is not None
+                    else None
+                ),
+                "fx_change_rate": (
+                    float(valuation.fx_change_rate)
+                    if valuation.fx_change_rate is not None
+                    else None
+                ),
+                "asset_price_effect_krw": valuation.asset_price_effect_krw,
+                "fx_effect_krw": valuation.fx_effect_krw,
                 "price_status": valuation.price_status,
                 "price_as_of": valuation.price_as_of,
                 "price_source": valuation.price_source,

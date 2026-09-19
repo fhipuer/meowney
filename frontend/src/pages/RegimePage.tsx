@@ -155,12 +155,18 @@ export function signalRuleHelp(signal: RegimeSignal) {
     return "BLS 헤드라인과 같은 최종수요 PPI(PPIFIS)의 최근 3개월 연율을 사용합니다. 상품 PPI 원자재 단계(PPIACO)는 별도 맥락 지표로 표시하며 자동 물가 점수에 합산하지 않습니다.";
   if (signal.id === "ppi_commodities")
     return "원자재 단계 상품가격을 보여주는 비계절조정 상품 PPI(PPIACO)입니다. 공급단 물가 맥락을 확인하지만 최종수요 PPI와 같은 값으로 해석하거나 자동 물가 점수에 합산하지 않습니다.";
+  if (["cpi", "core_cpi"].includes(signal.id))
+    return "단기 모멘텀은 계절조정 지수의 최근 3개월 연율을 사용하고, 공식 전년동월비는 BLS 비계절조정 지수의 같은 달을 비교합니다. 누락 월을 다른 관측치로 대신하지 않습니다.";
+  if (["cpi_nsa", "core_cpi_nsa"].includes(signal.id))
+    return "BLS 공식 전년동월비를 재현하기 위한 비계절조정 지수입니다. 같은 달의 전년 관측치가 없으면 값을 계산하지 않습니다.";
   if (
     ["cpi", "core_cpi", "pce", "core_pce", "ppi", "wages"].includes(signal.id)
   )
     return "최근 3개월 연율을 사용합니다. 물가·임금 상승세 재가속은 악화 방향, 목표 수준을 향한 둔화는 개선 방향입니다.";
   if (signal.id === "fedfunds")
-    return "Fed 기준금리에서 Core PCE 전년비를 뺀 실질 정책금리 대용치로 단기금리가 수요를 얼마나 누르는지 봅니다. 0~1%p는 약한 수요 억제, 1%p 이상은 뚜렷한 수요 억제로 표시합니다.";
+    return "실효 연방기금금리의 월평균입니다. 현재 FOMC 목표범위와는 다른 지표이며, 실시간 정책금리 판정은 목표범위 중간값을 우선 사용합니다.";
+  if (["fed_target_lower", "fed_target_upper"].includes(signal.id))
+    return "현재 FOMC 연방기금금리 목표범위의 하단·상단입니다. 앱은 두 값의 중간값에서 Core PCE 전년비를 빼 실질 정책금리 대용치를 계산합니다.";
   if (signal.id === "tips10y")
     return "10년 실질금리의 높은 절대수준으로 장기 할인율 부담을 계산하고, 공통 관측일 기준 20·63관측일 상승폭으로 최근 실질금리 충격을 별도 판정합니다.";
   if (["us30y", "tips30y"].includes(signal.id))
@@ -275,6 +281,11 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
                   SGOV 금리환경 참고
                 </Badge>
               )}
+              {signal.has_continuity_gap && (
+                <Badge variant="warning" className="whitespace-normal text-center text-[10px] font-normal leading-4">
+                  기간 누락
+                </Badge>
+              )}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {signal.source.toUpperCase()}{signal.source_key ? ` ${signal.source_key}` : ""} · 관측{" "}
@@ -295,14 +306,19 @@ function SignalCard({ signal }: { signal: RegimeSignal }) {
               {signal.is_stale
                 ? ` 최신 관측이 허용기간 ${signal.max_age_days ?? "-"}일을 넘어 현재 자동 판정에서 제외됐습니다.`
                 : ""}
+              {signal.has_continuity_gap
+                ? ` 최근 비교기간 중 ${signal.continuity_gaps?.join(", ")} 관측이 없습니다. 해당 기간을 다른 달로 대체하지 않고 계산 가능한 지표만 표시합니다.`
+                : ""}
             </InfoTip>
           </div>
         </div>
         <div className="flex items-baseline gap-2">
           <span className="text-2xl font-semibold">
-            {signal.value == null ? "-" : formatNumber(signal.value)}
+            {(signal.display_value ?? signal.value) == null
+              ? "-"
+              : formatNumber((signal.display_value ?? signal.value) as number)}
           </span>
-          <span className="text-xs text-muted-foreground">{signal.unit}</span>
+          <span className="text-xs text-muted-foreground">{signal.display_unit ?? signal.unit}</span>
         </div>
         <div
           className={`grid gap-2 ${metrics.length >= 3 ? "grid-cols-3" : "grid-cols-2"}`}
@@ -694,6 +710,16 @@ export function RateModelOverview({
               </span>
             </div>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              {policy?.target_lower != null && policy?.target_upper != null
+                ? `Fed 목표범위 ${policy.target_lower.toFixed(2)}~${policy.target_upper.toFixed(2)}% · 중간값 ${policy.target_midpoint?.toFixed(3) ?? "-"}% · ${policy.target_as_of_date ?? "기준일 미확인"}`
+                : `실효금리 월평균 ${policy?.effective_fed_funds_monthly_average?.toFixed(2) ?? policy?.fed_funds?.toFixed(2) ?? "-"}% (대체값)`}
+            </p>
+            {policy?.target_lower != null && policy?.effective_fed_funds_monthly_average != null && (
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                실효금리 월평균 {policy.effective_fed_funds_monthly_average.toFixed(2)}% · {policy.effective_fed_funds_observation_date ?? "관측월 미확인"}
+              </p>
+            )}
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
               장기 실질금리 {longRates?.real_10y?.toFixed(2) ?? "-"}% · {longRatePressureLabel(longRates?.label)}
             </p>
           </div>
@@ -2576,7 +2602,9 @@ export function RegimePage() {
                 );
               }
               const rawSignals =
-                data?.signals.filter((signal) => signal.domain === tab.id) ||
+                data?.signals.filter(
+                  (signal) => signal.domain === tab.id && !signal.presentation_hidden,
+                ) ||
                 [];
               const signals = tab.id === "rates"
                 ? [...rawSignals].sort((a, b) => {

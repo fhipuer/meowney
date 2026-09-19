@@ -48,11 +48,25 @@ def _text(value: Any) -> str:
 def _timestamp(value: Any) -> str:
     if not value:
         return "가격 기준일시 미확인"
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        return parsed.astimezone().isoformat(timespec="seconds")
-    except (TypeError, ValueError):
+    parsed = _aware_timestamp(value)
+    if parsed is None:
         return str(value)
+    return parsed.astimezone().isoformat(timespec="seconds")
+
+
+def _aware_timestamp(value: Any) -> datetime | None:
+    """시세 시각을 비교 가능한 timezone-aware datetime으로 정규화한다."""
+    try:
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")
+        )
+    except (TypeError, ValueError):
+        return None
+
+    # yfinance 시각은 실행 환경의 로컬 시각이지만 tzinfo가 없고,
+    # KRX 종가는 +09:00이 명시되어 있다. naive 값에는 해당 실행 환경의
+    # 로컬 시간대를 부여해 두 형식을 안전하게 비교한다.
+    return parsed.astimezone() if parsed.tzinfo is None else parsed
 
 
 def build_snapshot_markdown(
@@ -118,7 +132,11 @@ def build_snapshot_markdown(
     if stale:
         warnings.append("마지막 정상 시세를 사용한 자산이 있습니다: " + ", ".join(str(a["name"]) for a in stale))
 
-    price_times = [a.get("price_as_of") for a in assets if a.get("price_as_of")]
+    price_times = [
+        parsed
+        for asset in assets
+        if (parsed := _aware_timestamp(asset.get("price_as_of"))) is not None
+    ]
     lines = [
         "# 실행 시점 포트폴리오 스냅샷", "",
         f"- 문서 생성 일시: {generated_at.astimezone().isoformat(timespec='seconds')}",

@@ -1,8 +1,13 @@
 """
 자산 API 테스트 냥~ 🐱
 """
+from decimal import Decimal
+from unittest.mock import AsyncMock
+
 import pytest
 from httpx import AsyncClient
+
+from app.services.finance_service import FinanceService, get_finance_service
 
 
 @pytest.mark.asyncio
@@ -100,3 +105,92 @@ async def test_create_and_delete_asset(client: AsyncClient):
     assert delete_response.status_code == 200
     delete_data = delete_response.json()
     assert delete_data["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_krx_mini_gold_asset_uses_official_close(client: AsyncClient, monkeypatch):
+    asset_id = None
+    service = get_finance_service()
+    FinanceService._price_cache.pop("M04020100", None)
+    monkeypatch.setattr(
+        service._krx_gold_service,
+        "get_price",
+        AsyncMock(return_value={
+            "ticker": "M04020100",
+            "current_price": 195400,
+            "currency": "KRW",
+            "name": "미니금 99.99_100g",
+            "exchange": "KRX 금시장",
+            "valid": True,
+            "price_kind": "close",
+            "source": "KRX Open API",
+        }),
+    )
+    monkeypatch.setattr(service, "get_exchange_rate", AsyncMock(return_value=1300.0))
+
+    try:
+        response = await client.post("/api/v1/assets", json={
+            "name": "KRX 미니금 테스트",
+            "ticker": "M04020100",
+            "asset_type": "gold",
+            "quantity": 148,
+            "average_price": 175179.25,
+            "currency": "KRW",
+        })
+
+        assert response.status_code == 200
+        asset = response.json()
+        asset_id = asset["id"]
+        assert asset["ticker"] == "M04020100"
+        assert Decimal(asset["current_price"]) == Decimal("195400")
+        assert Decimal(asset["market_value"]) == Decimal("28919200")
+        assert asset["price_status"] == "close"
+        assert asset["price_source"] == "KRX Open API"
+    finally:
+        FinanceService._price_cache.pop("M04020100", None)
+        if asset_id:
+            await client.delete(f"/api/v1/assets/{asset_id}")
+
+
+@pytest.mark.asyncio
+async def test_usd_asset_response_includes_return_breakdown(client: AsyncClient, monkeypatch):
+    asset_id = None
+    service = get_finance_service()
+    monkeypatch.setattr(
+        service,
+        "get_stock_price",
+        AsyncMock(return_value={
+            "ticker": "FXSPLIT",
+            "current_price": 100,
+            "currency": "USD",
+            "valid": True,
+        }),
+    )
+    monkeypatch.setattr(service, "get_exchange_rate", AsyncMock(return_value=1300.0))
+
+    try:
+        response = await client.post("/api/v1/assets", json={
+            "name": "환율 분해 테스트",
+            "ticker": "FXSPLIT",
+            "asset_type": "stock",
+            "quantity": 3,
+            "average_price": 80,
+            "purchase_exchange_rate": 1200,
+            "currency": "USD",
+        })
+
+        assert response.status_code == 200
+        asset = response.json()
+        asset_id = asset["id"]
+        assert asset["native_profit_rate"] == 25.0
+        assert asset["fx_change_rate"] == pytest.approx(8.3333333333)
+        assert Decimal(asset["asset_price_effect_krw"]) == Decimal("72000")
+        assert Decimal(asset["fx_effect_krw"]) == Decimal("30000")
+        assert (
+            Decimal(asset["asset_price_effect_krw"])
+            + Decimal(asset["fx_effect_krw"])
+            == Decimal(asset["profit_loss"])
+        )
+    finally:
+        if asset_id:
+            await client.delete(f"/api/v1/assets/{asset_id}")

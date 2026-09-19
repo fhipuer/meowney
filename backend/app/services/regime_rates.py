@@ -17,8 +17,10 @@ from __future__ import annotations
 import math
 from typing import Any, Iterable
 
+from app.services.regime_periods import period_percent_change
 
-RATE_MODEL_VERSION = "2026-08-rates-v4"
+
+RATE_MODEL_VERSION = "2026-09-rates-v5-target-range"
 NYFED_PROBIT_INTERCEPT = -0.5333
 NYFED_PROBIT_SLOPE = -0.6330
 MONTHLY_TRADING_DAYS = 21
@@ -194,9 +196,27 @@ def _restriction_label(score: float | None) -> str:
 
 
 def _policy_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    fed = _latest(signals.get("fedfunds"))
-    core_pce_yoy = _percent_change(signals.get("core_pce"), 12)
-    real_policy = fed - core_pce_yoy if fed is not None and core_pce_yoy is not None else None
+    effective_history = _history(signals.get("fedfunds"))
+    effective_monthly = effective_history[-1][1] if effective_history else None
+    lower_history = dict(_history(signals.get("fed_target_lower")))
+    upper_history = dict(_history(signals.get("fed_target_upper")))
+    common_target_dates = sorted(set(lower_history) & set(upper_history))
+    target_as_of_date = common_target_dates[-1] if common_target_dates else None
+    target_lower = lower_history.get(target_as_of_date) if target_as_of_date else None
+    target_upper = upper_history.get(target_as_of_date) if target_as_of_date else None
+    target_midpoint = (
+        (target_lower + target_upper) / 2
+        if target_lower is not None and target_upper is not None else None
+    )
+    policy_rate = target_midpoint if target_midpoint is not None else effective_monthly
+    core_pce_signal = signals.get("core_pce") or {}
+    core_pce_yoy = period_percent_change(
+        core_pce_signal.get("history", []), "monthly", 12,
+    )
+    real_policy = (
+        policy_rate - core_pce_yoy
+        if policy_rate is not None and core_pce_yoy is not None else None
+    )
     score = None if real_policy is None else round(_clamp(real_policy * 50), 1)
     label = (
         "판정 불가" if real_policy is None
@@ -207,7 +227,14 @@ def _policy_layer(signals: dict[str, dict[str, Any]]) -> dict[str, Any]:
     return {
         "score": score,
         "label": label,
-        "fed_funds": fed,
+        "fed_funds": policy_rate,
+        "policy_rate_basis": "target_range_midpoint" if target_midpoint is not None else "effective_monthly_average_fallback",
+        "target_lower": target_lower,
+        "target_upper": target_upper,
+        "target_midpoint": round(target_midpoint, 3) if target_midpoint is not None else None,
+        "target_as_of_date": target_as_of_date,
+        "effective_fed_funds_monthly_average": effective_monthly,
+        "effective_fed_funds_observation_date": effective_history[-1][0] if effective_history else None,
         "core_pce_yoy": round(core_pce_yoy, 2) if core_pce_yoy is not None else None,
         "real_policy_rate": round(real_policy, 2) if real_policy is not None else None,
         "semantics": "ex_post_real_policy_proxy",
@@ -667,7 +694,10 @@ def calculate_rate_model(signal_list: list[dict[str, Any]]) -> dict[str, Any]:
         "yield_curve": yield_curve["score"] is not None,
     }
     as_of_dates = [
-        rows[-1][0] for key in ("fedfunds", "tips10y", "tips30y", "curve10y3m")
+        rows[-1][0] for key in (
+            "fed_target_lower", "fed_target_upper", "fedfunds",
+            "tips10y", "tips30y", "curve10y3m",
+        )
         if (rows := _history(signals.get(key)))
     ]
     return {

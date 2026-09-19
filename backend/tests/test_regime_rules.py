@@ -12,13 +12,22 @@ from app.services.regime_rules import (
 
 def signal(key, values, *, domain="rates", frequency="daily", start_day=1):
     start = date(2026, 7, start_day)
-    history = [
-        {"date": (start + timedelta(days=index)).isoformat(), "value": value}
-        for index, value in enumerate(values)
-    ]
+    if frequency in {"monthly", "quarterly"}:
+        step = 1 if frequency == "monthly" else 3
+        history = []
+        for index, value in enumerate(values):
+            year, month_index = divmod(2025 * 12 + index * step, 12)
+            history.append({
+                "date": f"{year:04d}-{month_index + 1:02d}-01", "value": value,
+            })
+    else:
+        history = [
+            {"date": (start + timedelta(days=index)).isoformat(), "value": value}
+            for index, value in enumerate(values)
+        ]
     return {
         "id": key, "domain": domain, "name": key, "frequency": frequency,
-        "status": "중립", "value": values[-1], "observation_date": "2026-08-15",
+        "status": "중립", "value": values[-1], "observation_date": date.today().isoformat(),
         "history": history,
     }
 

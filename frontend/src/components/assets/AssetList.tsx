@@ -1,8 +1,9 @@
 /**
  * 자산 목록 컴포넌트 냥~ 🐱
  */
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import {
+  ArrowRight,
   Pencil,
   Trash2,
   Briefcase,
@@ -16,6 +17,7 @@ import {
   BarChart3,
   Layers,
   CircleDollarSign,
+  ChevronDown,
   type LucideIcon,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -33,7 +35,7 @@ import { useStore } from '@/store/useStore'
 import { useDeleteAsset } from '@/hooks/useAssets'
 import { AssetForm } from './AssetForm'
 import type { Asset } from '@/types'
-import { getExchangeRateChange } from './asset-display'
+import { getAssetReturnBreakdown, getPriceStatusLabel } from './asset-display'
 
 interface AssetListProps {
   assets: Asset[] | undefined
@@ -54,56 +56,161 @@ const ASSET_TYPE_ICONS: Record<string, { icon: LucideIcon; label: string; bgColo
   other: { icon: CircleDollarSign, label: '기타', bgColor: 'bg-gray-500' },
 }
 
+function getKrxGoldPriceMeta(asset: Asset) {
+  if (!asset.ticker?.startsWith('M04020')) return null
+  if (asset.price_source === 'KRX Open API') {
+    const priceDate = asset.price_as_of?.slice(0, 10)
+    return `한국거래소 통계정보${priceDate ? ` · ${priceDate} 종가` : ' · 공식 종가'}`
+  }
+  return `KRX 연동 · ${getPriceStatusLabel(asset.price_status)}`
+}
+
+function formatSignedKRW(value: number) {
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  return `${sign}${formatKRW(Math.abs(value))}`
+}
+
+function ReturnSummary({
+  asset,
+  expanded,
+  detailsId,
+  onToggle,
+}: {
+  asset: Asset
+  expanded: boolean
+  detailsId: string
+  onToggle: () => void
+}) {
+  if (asset.asset_type === 'cash' || asset.profit_rate == null) {
+    return <span className="text-muted-foreground">-</span>
+  }
+
+  const breakdown = getAssetReturnBreakdown(asset)
+
+  return (
+    <div className="flex flex-col items-end tabular-nums">
+      <div className={cn('font-medium', getProfitClass(asset.profit_rate))}>
+        {formatPercent(asset.profit_rate)}
+        {breakdown && <span className="ml-1 text-[10px] font-normal text-muted-foreground">원화</span>}
+      </div>
+      {breakdown && (
+        <button
+          type="button"
+          className="mt-0.5 inline-flex items-center gap-1 rounded-sm text-[11px] font-normal text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={expanded}
+          aria-controls={detailsId}
+          aria-label={`${asset.name} 수익 분해 ${expanded ? '접기' : '펼치기'}`}
+          onClick={onToggle}
+        >
+          <span className={getProfitClass(breakdown.nativeProfitRate)}>
+            자산 {formatPercent(breakdown.nativeProfitRate)}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span className={getProfitClass(breakdown.fxChangeRate)}>
+            환율 {formatPercent(breakdown.fxChangeRate)}
+          </span>
+          <ChevronDown
+            className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')}
+            aria-hidden="true"
+          />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ReturnBreakdownDetails({ asset, isPrivacyMode }: { asset: Asset; isPrivacyMode: boolean }) {
+  const breakdown = getAssetReturnBreakdown(asset)
+  if (!breakdown) return null
+
+  const rateOptions: Intl.NumberFormatOptions = { maximumFractionDigits: 2 }
+  const pricePath = asset.current_price != null
+    ? `${formatUSD(Number(asset.average_price))} → ${formatUSD(Number(asset.current_price))}`
+    : '현재 USD 평가액 기준'
+  const fxPath = asset.purchase_exchange_rate != null && asset.current_exchange_rate != null
+    ? `${Number(asset.purchase_exchange_rate).toLocaleString('ko-KR', rateOptions)} → ${Number(asset.current_exchange_rate).toLocaleString('ko-KR', rateOptions)}`
+    : null
+  const priceDetail = isPrivacyMode
+    ? formatPercent(breakdown.nativeProfitRate)
+    : `${pricePath} (${formatPercent(breakdown.nativeProfitRate)})`
+  const fxDetail = fxPath
+    ? isPrivacyMode
+      ? formatPercent(breakdown.fxChangeRate)
+      : `${fxPath} (${formatPercent(breakdown.fxChangeRate)})`
+    : null
+
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/25 p-3 sm:p-4">
+      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
+        <div className="rounded-md bg-background/80 p-3">
+          <p className="text-[11px] text-muted-foreground">매입 원금</p>
+          <p className="mt-1 font-medium tabular-nums">
+            {maskValue(formatKRW(breakdown.costBasisKrw), isPrivacyMode)}
+          </p>
+        </div>
+
+        <div className="flex items-center justify-center gap-2 px-1 text-xs md:flex-col md:gap-0.5">
+          <span className="text-muted-foreground">자산 가격</span>
+          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <span className={cn('font-medium tabular-nums', getProfitClass(breakdown.assetPriceEffectKrw))}>
+            {maskValue(formatSignedKRW(breakdown.assetPriceEffectKrw), isPrivacyMode)}
+          </span>
+        </div>
+
+        <div className="rounded-md bg-background/80 p-3">
+          <p className="text-[11px] text-muted-foreground">자산 가격 반영</p>
+          <p className="mt-1 font-medium tabular-nums">
+            {maskValue(formatKRW(breakdown.priceAdjustedValueKrw), isPrivacyMode)}
+          </p>
+        </div>
+
+        <div className="flex items-center justify-center gap-2 px-1 text-xs md:flex-col md:gap-0.5">
+          <span className="text-muted-foreground">환율</span>
+          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <span className={cn('font-medium tabular-nums', getProfitClass(breakdown.fxEffectKrw))}>
+            {maskValue(formatSignedKRW(breakdown.fxEffectKrw), isPrivacyMode)}
+          </span>
+        </div>
+
+        <div className="rounded-md border border-border/70 bg-background p-3">
+          <p className="text-[11px] text-muted-foreground">현재 평가액</p>
+          <p className="mt-1 font-semibold tabular-nums">
+            {maskValue(formatKRW(breakdown.marketValueKrw), isPrivacyMode)}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+        <span>
+          자산 가격 <span className={getProfitClass(breakdown.nativeProfitRate)}>{priceDetail}</span>
+        </span>
+        {fxDetail && (
+          <span>
+            USD/KRW <span className={getProfitClass(breakdown.fxChangeRate)}>{fxDetail}</span>
+          </span>
+        )}
+        <span>자산 효과와 환율 효과의 합이 최종 원화 손익입니다.</span>
+      </div>
+    </div>
+  )
+}
+
 export function AssetList({ assets, isLoading }: AssetListProps) {
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null)
   const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null)
+  const [expandedReturnIds, setExpandedReturnIds] = useState<Set<string>>(new Set())
 
   const deleteAssetMutation = useDeleteAsset()
   const { isPrivacyMode } = useStore()
 
 
-  // 환율 변동 정보 표시 컴포넌트 냥~
-  const ExchangeRateInfo = ({ asset }: { asset: Asset }) => {
-    if (asset.currency !== 'USD' || !asset.purchase_exchange_rate) {
-      return null
-    }
-
-    const change = getExchangeRateChange(
-      asset.purchase_exchange_rate,
-      asset.current_exchange_rate
-    )
-    if (!change) return null
-
-    const colorClass = change.isPositive
-      ? 'text-red-500 dark:text-red-400'
-      : change.changePercent < 0
-        ? 'text-blue-500 dark:text-blue-400'
-        : 'text-muted-foreground'
-
-    const percentStr = `${change.changePercent >= 0 ? '+' : ''}${change.changePercent.toFixed(1)}%`
-
-    // 프라이버시 모드: 변동률만
-    if (isPrivacyMode) {
-      return (
-        <span className={`text-xs ${colorClass} ml-2`}>
-          FX: {percentStr}
-        </span>
-      )
-    }
-
-    // 일반 모드
-    return (
-      <>
-        {/* 데스크톱: 전체 표시 */}
-        <span className={`hidden sm:inline text-xs ${colorClass} ml-2`}>
-          FX: {change.purchaseRate.toLocaleString()}→{change.currentRate.toLocaleString()} ({percentStr})
-        </span>
-        {/* 모바일: 압축 */}
-        <span className={`sm:hidden text-xs ${colorClass} ml-1`}>
-          환율{percentStr}
-        </span>
-      </>
-    )
+  const toggleReturnDetails = (assetId: string) => {
+    setExpandedReturnIds(current => {
+      const next = new Set(current)
+      if (next.has(assetId)) next.delete(assetId)
+      else next.add(assetId)
+      return next
+    })
   }
 
   // 상대적 시간 표시 (예: "2시간 전", "3일 전")
@@ -185,15 +292,37 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
             <tbody className="divide-y divide-border/70">
               {assets.map((asset) => {
                 const type = ASSET_TYPE_ICONS[asset.asset_type] || ASSET_TYPE_ICONS.other
-                return <tr key={asset.id} className="transition-colors hover:bg-muted/30">
-                  <td className="px-5 py-3.5"><div className="font-medium">{asset.name}</div><div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground"><span>{asset.ticker || '수동 입력'}</span><span>{asset.currency}</span>{!asset.ticker && asset.updated_at && <span>{formatRelativeTime(asset.updated_at)}</span>}</div></td>
-                  <td className="px-4 py-3.5"><span className="inline-flex items-center gap-2"><span className={cn('h-2 w-2 rounded-full', type.bgColor)} />{type.label}</span></td>
-                  <td className="px-4 py-3.5 text-right tabular-nums">{asset.quantity.toLocaleString()}</td>
-                  <td className="px-4 py-3.5 text-right tabular-nums">{maskValue(asset.currency === 'USD' ? formatUSD(asset.average_price) : formatKRW(asset.average_price), isPrivacyMode)}</td>
-                  <td className="px-4 py-3.5 text-right tabular-nums"><div className="font-medium">{asset.market_value ? maskValue(formatKRW(asset.market_value), isPrivacyMode) : '-'}</div>{asset.currency === 'USD' && asset.market_value_usd != null && <div className="text-xs text-muted-foreground">{maskValue(formatUSD(asset.market_value_usd), isPrivacyMode)}</div>}</td>
-                  <td className={cn('px-4 py-3.5 text-right font-medium tabular-nums', asset.asset_type === 'cash' ? 'text-muted-foreground' : getProfitClass(asset.profit_rate || 0))}>{asset.asset_type === 'cash' ? '-' : formatPercent(asset.profit_rate || 0)}<ExchangeRateInfo asset={asset} /></td>
-                  <td className="px-3 py-3.5"><div className="flex justify-end"><Button variant="ghost" size="icon" onClick={() => setEditingAsset(asset)} aria-label={`${asset.name} 수정`}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" onClick={() => setDeletingAsset(asset)} aria-label={`${asset.name} 삭제`}><Trash2 className="h-4 w-4 text-muted-foreground" /></Button></div></td>
-                </tr>
+                const krxGoldPriceMeta = getKrxGoldPriceMeta(asset)
+                const breakdown = getAssetReturnBreakdown(asset)
+                const expanded = expandedReturnIds.has(asset.id)
+                const detailsId = `return-breakdown-desktop-${asset.id}`
+                return (
+                  <Fragment key={asset.id}>
+                    <tr className="transition-colors hover:bg-muted/30">
+                      <td className="px-5 py-3.5"><div className="font-medium">{asset.name}</div><div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground"><span>{asset.ticker || '수동 입력'}</span><span>{asset.currency}</span>{krxGoldPriceMeta && <span>{krxGoldPriceMeta}</span>}{!asset.ticker && asset.updated_at && <span>{formatRelativeTime(asset.updated_at)}</span>}</div></td>
+                      <td className="px-4 py-3.5"><span className="inline-flex items-center gap-2"><span className={cn('h-2 w-2 rounded-full', type.bgColor)} />{type.label}</span></td>
+                      <td className="px-4 py-3.5 text-right tabular-nums">{asset.quantity.toLocaleString()}</td>
+                      <td className="px-4 py-3.5 text-right tabular-nums">{maskValue(asset.currency === 'USD' ? formatUSD(asset.average_price) : formatKRW(asset.average_price), isPrivacyMode)}</td>
+                      <td className="px-4 py-3.5 text-right tabular-nums"><div className="font-medium">{asset.market_value ? maskValue(formatKRW(asset.market_value), isPrivacyMode) : '-'}</div>{asset.asset_type === 'gold' && asset.current_price != null && <div className="text-xs text-muted-foreground">{maskValue(`${formatKRW(asset.current_price)}/g`, isPrivacyMode)}</div>}{asset.currency === 'USD' && asset.market_value_usd != null && <div className="text-xs text-muted-foreground">{maskValue(formatUSD(asset.market_value_usd), isPrivacyMode)}</div>}</td>
+                      <td className="px-4 py-3.5 text-right">
+                        <ReturnSummary
+                          asset={asset}
+                          expanded={expanded}
+                          detailsId={detailsId}
+                          onToggle={() => toggleReturnDetails(asset.id)}
+                        />
+                      </td>
+                      <td className="px-3 py-3.5"><div className="flex justify-end"><Button variant="ghost" size="icon" onClick={() => setEditingAsset(asset)} aria-label={`${asset.name} 수정`}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" onClick={() => setDeletingAsset(asset)} aria-label={`${asset.name} 삭제`}><Trash2 className="h-4 w-4 text-muted-foreground" /></Button></div></td>
+                    </tr>
+                    {breakdown && expanded && (
+                      <tr id={detailsId} className="bg-muted/10">
+                        <td colSpan={7} className="px-5 pb-4 pt-1">
+                          <ReturnBreakdownDetails asset={asset} isPrivacyMode={isPrivacyMode} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
               })}
             </tbody>
           </table>
@@ -202,10 +331,38 @@ export function AssetList({ assets, isLoading }: AssetListProps) {
         <div className="divide-y divide-border/70 md:hidden">
           {assets.map((asset) => {
             const type = ASSET_TYPE_ICONS[asset.asset_type] || ASSET_TYPE_ICONS.other
-            return <div key={asset.id} className="p-4">
-              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex items-center gap-2"><span className={cn('h-2 w-2 shrink-0 rounded-full', type.bgColor)} /><p className="truncate font-medium">{asset.name}</p></div><p className="mt-1 pl-4 text-xs text-muted-foreground">{asset.ticker || type.label} · {asset.currency}</p></div><div className="text-right"><p className="font-medium tabular-nums">{asset.market_value ? maskValue(formatKRW(asset.market_value), isPrivacyMode) : '-'}</p><p className={cn('mt-1 text-xs font-medium', asset.asset_type === 'cash' ? 'text-muted-foreground' : getProfitClass(asset.profit_rate || 0))}>{asset.asset_type === 'cash' ? '-' : formatPercent(asset.profit_rate || 0)}</p></div></div>
-              <div className="mt-3 flex items-center justify-between border-t border-border/50 pt-3"><p className="text-xs text-muted-foreground">{asset.quantity.toLocaleString()} × {maskValue(asset.currency === 'USD' ? formatUSD(asset.average_price) : formatKRW(asset.average_price), isPrivacyMode)}</p><div className="flex"><Button variant="ghost" size="sm" onClick={() => setEditingAsset(asset)}><Pencil className="mr-1.5 h-3.5 w-3.5" />수정</Button><Button variant="ghost" size="icon" onClick={() => setDeletingAsset(asset)}><Trash2 className="h-3.5 w-3.5 text-muted-foreground" /></Button></div></div>
-            </div>
+            const krxGoldPriceMeta = getKrxGoldPriceMeta(asset)
+            const breakdown = getAssetReturnBreakdown(asset)
+            const expanded = expandedReturnIds.has(asset.id)
+            const detailsId = `return-breakdown-mobile-${asset.id}`
+            return (
+              <div key={asset.id} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2"><span className={cn('h-2 w-2 shrink-0 rounded-full', type.bgColor)} /><p className="truncate font-medium">{asset.name}</p></div>
+                    <p className="mt-1 pl-4 text-xs text-muted-foreground">{asset.ticker || type.label} · {asset.currency}{krxGoldPriceMeta ? ` · ${krxGoldPriceMeta}` : ''}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-medium tabular-nums">{asset.market_value ? maskValue(formatKRW(asset.market_value), isPrivacyMode) : '-'}</p>
+                    {asset.asset_type === 'gold' && asset.current_price != null && <p className="text-xs text-muted-foreground">{maskValue(`${formatKRW(asset.current_price)}/g`, isPrivacyMode)}</p>}
+                    <div className="mt-1 text-xs">
+                      <ReturnSummary
+                        asset={asset}
+                        expanded={expanded}
+                        detailsId={detailsId}
+                        onToggle={() => toggleReturnDetails(asset.id)}
+                      />
+                    </div>
+                  </div>
+                </div>
+                {breakdown && expanded && (
+                  <div id={detailsId} className="mt-3">
+                    <ReturnBreakdownDetails asset={asset} isPrivacyMode={isPrivacyMode} />
+                  </div>
+                )}
+                <div className="mt-3 flex items-center justify-between border-t border-border/50 pt-3"><p className="text-xs text-muted-foreground">{asset.quantity.toLocaleString()} × {maskValue(asset.currency === 'USD' ? formatUSD(asset.average_price) : formatKRW(asset.average_price), isPrivacyMode)}</p><div className="flex"><Button variant="ghost" size="sm" onClick={() => setEditingAsset(asset)}><Pencil className="mr-1.5 h-3.5 w-3.5" />수정</Button><Button variant="ghost" size="icon" onClick={() => setDeletingAsset(asset)}><Trash2 className="h-3.5 w-3.5 text-muted-foreground" /></Button></div></div>
+              </div>
+            )
           })}
         </div>
       </section>

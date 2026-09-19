@@ -39,6 +39,7 @@ def test_indicator_role_separates_regime_trigger_and_context():
     assert indicator_role("pce")["usage"] == "display"
     assert indicator_role("market_vix")["usage"] == "trigger"
     assert indicator_role("market_copper")["usage"] == "display"
+    assert indicator_role("market_dxy")["usage"] == "display"
     assert indicator_role("us3m")["usage"] == "display"
 
 
@@ -112,3 +113,13 @@ def test_credit_chart_exposes_absolute_thresholds():
 
     assert chart["series"] == [{"key": "value", "label": "현재 수준"}]
     assert [item["value"] for item in chart["reference_lines"]] == [4, 5]
+
+
+def test_nfci_changes_are_index_points_not_percent_returns():
+    values = [-.60] * 52 + [-.50]
+
+    metrics = display_metrics("nfci", "weekly", values)
+
+    assert metrics[-1] == {
+        "label": "1년", "value": .1, "unit": "지수p", "kind": "delta",
+    }

@@ -70,6 +70,26 @@ class TestPriceCache:
         assert result["current_price"] == 100
         assert result["stale"] is True
 
+    @pytest.mark.asyncio
+    async def test_krx_gold_ticker_is_routed_to_krx_provider(self):
+        provider = MagicMock()
+        provider.get_price = AsyncMock(return_value={
+            "ticker": "M04020100",
+            "current_price": Decimal("195400"),
+            "currency": "KRW",
+            "valid": True,
+            "price_kind": "close",
+            "source": "KRX Open API",
+        })
+        service = FinanceService(krx_gold_service=provider)
+
+        with patch.object(service, "_get_stock_info_sync") as yfinance_fetch:
+            result = await service.get_stock_price("m04020100")
+
+        provider.get_price.assert_awaited_once_with("M04020100")
+        yfinance_fetch.assert_not_called()
+        assert result["current_price"] == Decimal("195400")
+
 
 class TestEnrichAssetsWithPrices:
     """enrich_assets_with_prices 메서드 테스트"""
@@ -304,6 +324,110 @@ class TestEnrichAssetsWithPrices:
         assert etf["profit_loss"] == Decimal("500000")  # 3,500,000 - 3,000,000
         # 수익률 = (손익 / 원금) × 100
         assert abs(etf["profit_rate"] - 16.67) < 0.1  # 약 16.67%
+
+    @pytest.mark.asyncio
+    async def test_krx_mini_gold_uses_close_per_gram_over_manual_fallback(self, service):
+        assets = [{
+            "id": "gold-1",
+            "name": "국내 금현물",
+            "ticker": "M04020100",
+            "asset_type": "gold",
+            "quantity": 148,
+            "average_price": 175179.25,
+            "current_value": 28223600,
+            "currency": "KRW",
+        }]
+
+        with patch.object(service, "get_multiple_prices", new_callable=AsyncMock) as mock_prices:
+            with patch.object(service, "get_exchange_rate", new_callable=AsyncMock) as mock_rate:
+                mock_prices.return_value = {
+                    "M04020100": {
+                        "ticker": "M04020100",
+                        "current_price": Decimal("195400"),
+                        "currency": "KRW",
+                        "valid": True,
+                        "price_kind": "close",
+                        "source": "KRX Open API",
+                    }
+                }
+                mock_rate.return_value = 1300.0
+
+                enriched = await service.enrich_assets_with_prices(assets)
+
+        gold = enriched[0]
+        assert gold["current_price"] == Decimal("195400")
+        assert gold["unit_price_krw"] == Decimal("195400")
+        assert gold["market_value"] == Decimal("28919200")
+        assert gold["profit_loss"] == Decimal("2992671.00")
+        assert gold["price_status"] == "close"
+        assert gold["price_source"] == "KRX Open API"
+
+    @pytest.mark.asyncio
+    async def test_usd_asset_exposes_native_and_fx_return_breakdown(self, service):
+        assets = [{
+            "id": "usd-stock-1",
+            "name": "USD 테스트 자산",
+            "ticker": "TEST",
+            "asset_type": "stock",
+            "quantity": 3,
+            "average_price": 80,
+            "purchase_exchange_rate": 1200,
+            "currency": "USD",
+        }]
+
+        with patch.object(service, "get_multiple_prices", new_callable=AsyncMock) as mock_prices:
+            with patch.object(service, "get_exchange_rate", new_callable=AsyncMock) as mock_rate:
+                mock_prices.return_value = {
+                    "TEST": {
+                        "ticker": "TEST",
+                        "current_price": 100,
+                        "currency": "USD",
+                        "valid": True,
+                    }
+                }
+                mock_rate.return_value = 1300.0
+
+                enriched = await service.enrich_assets_with_prices(assets)
+
+        asset = enriched[0]
+        assert asset["native_profit_rate"] == 25.0
+        assert asset["fx_change_rate"] == pytest.approx(8.3333333333)
+        assert asset["asset_price_effect_krw"] == Decimal("72000")
+        assert asset["fx_effect_krw"] == Decimal("30000")
+        assert asset["asset_price_effect_krw"] + asset["fx_effect_krw"] == asset["profit_loss"]
+
+    @pytest.mark.asyncio
+    async def test_krx_mini_gold_keeps_manual_value_when_api_is_unavailable(self, service):
+        assets = [{
+            "id": "gold-1",
+            "name": "국내 금현물",
+            "ticker": "M04020100",
+            "asset_type": "gold",
+            "quantity": 148,
+            "average_price": 175179.25,
+            "current_value": 28223600,
+            "currency": "KRW",
+        }]
+
+        with patch.object(service, "get_multiple_prices", new_callable=AsyncMock) as mock_prices:
+            with patch.object(service, "get_exchange_rate", new_callable=AsyncMock) as mock_rate:
+                mock_prices.return_value = {
+                    "M04020100": {
+                        "ticker": "M04020100",
+                        "current_price": None,
+                        "valid": False,
+                        "error": "권한 승인 대기 중",
+                    }
+                }
+                mock_rate.return_value = 1300.0
+
+                enriched = await service.enrich_assets_with_prices(assets)
+
+        gold = enriched[0]
+        assert gold["market_value"] == Decimal("28223600")
+        assert gold["price_status"] == "manual"
+        assert gold["price_source"] == "manual fallback"
+        assert gold["valuation_error"] == "권한 승인 대기 중"
 
     @pytest.mark.asyncio
     async def test_usd_asset_current_value(self, service):

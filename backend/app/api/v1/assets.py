@@ -43,7 +43,7 @@ async def get_assets(
 ):
     """
     자산 목록 조회 냥~ 🐱 (v0.7.0)
-    yfinance로 현재가를 실시간 조회하여 평가액 계산 포함
+    yfinance 또는 KRX OPEN API 시세로 평가액 계산 포함
     summary에 총자산, 수익률 정보 포함
     """
     asset_service = AssetService(db)

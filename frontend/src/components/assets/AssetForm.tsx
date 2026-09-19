@@ -53,6 +53,12 @@ const CURRENCIES = [
   { value: 'USD', label: '달러 (USD)' },
 ]
 
+const KRX_GOLD_PRODUCTS = [
+  { value: 'M04020100', label: 'KRX 미니금 99.99_100g' },
+  { value: 'M04020000', label: 'KRX 금 99.99_1kg' },
+]
+const MANUAL_GOLD_VALUE = 'manual'
+
 export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFormProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = controlledOpen ?? internalOpen
@@ -139,6 +145,24 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
     }
   }
 
+  const handleAssetTypeChange = (value: string) => {
+    setTickerValidation(null)
+    setFormData(prev => {
+      if (value === 'gold' && prev.asset_type !== 'gold') {
+        return {
+          ...prev,
+          asset_type: value,
+          ticker: 'M04020100',
+          currency: 'KRW',
+        }
+      }
+      if (prev.asset_type === 'gold' && value !== 'gold') {
+        return { ...prev, asset_type: value, ticker: '' }
+      }
+      return { ...prev, asset_type: value }
+    })
+  }
+
   // USD 자산 원화 환산 취득가 계산
   const krwCostBasis = useMemo(() => {
     if (formData.currency !== 'USD') return null
@@ -154,7 +178,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
 
     const data = {
       name: formData.name,
-      ticker: formData.ticker || undefined,
+      ticker: formData.ticker || null,
       asset_type: formData.asset_type,
       quantity: parseFloat(formData.quantity) || 0,
       average_price: parseFloat(formData.average_price) || 0,
@@ -182,6 +206,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
 
   const isPending = createAssetMutation.isPending || updateAssetMutation.isPending
   const isCashType = formData.asset_type === 'cash'
+  const isGoldType = formData.asset_type === 'gold'
   const hasNoTicker = !formData.ticker.trim()  // 티커가 없는 경우
 
   return (
@@ -239,9 +264,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
                 <Label>자산 유형</Label>
                 <Select
                   value={formData.asset_type}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, asset_type: value })
-                  }
+                  onValueChange={handleAssetTypeChange}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -263,6 +286,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
                   onValueChange={(value) =>
                     setFormData({ ...formData, currency: value })
                   }
+                  disabled={isGoldType && !hasNoTicker}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -279,7 +303,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
             </div>
 
             {/* 티커 (주식인 경우) */}
-            {!isCashType && (
+            {!isCashType && !isGoldType && (
               <div className="grid gap-2">
                 <Label htmlFor="ticker">티커 심볼</Label>
                 <div className="flex gap-2">
@@ -353,12 +377,47 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
               </div>
             )}
 
+            {isGoldType && (
+              <div className="grid gap-2 md:col-span-2">
+                <Label>금 시세 연동</Label>
+                <Select
+                  value={formData.ticker || MANUAL_GOLD_VALUE}
+                  onValueChange={(value) => {
+                    const ticker = value === MANUAL_GOLD_VALUE ? '' : value
+                    setFormData(prev => ({
+                      ...prev,
+                      ticker,
+                      currency: ticker ? 'KRW' : prev.currency,
+                    }))
+                    setTickerValidation(null)
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {KRX_GOLD_PRODUCTS.map(product => (
+                      <SelectItem key={product.value} value={product.value}>
+                        {product.label}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={MANUAL_GOLD_VALUE}>직접 평가액 입력</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {hasNoTicker
+                    ? '자동 시세가 없는 실물 금 등은 현재 총 평가액을 직접 입력합니다.'
+                    : '한국거래소 공식 일별 종가(원/g)에 보유 수량(g)을 곱해 자동 평가합니다.'}
+                </p>
+              </div>
+            )}
+
             {/* 수량 & 평균 매수가 */}
             {!isCashType ? (
               <>
                 <div className="grid grid-cols-2 gap-4 md:col-span-2">
                   <div className="grid gap-2 md:col-span-2">
-                    <Label htmlFor="quantity">수량 *</Label>
+                    <Label htmlFor="quantity">{isGoldType ? '보유 수량 (g)' : '수량'} *</Label>
                     <Input
                       id="quantity"
                       type="number"
@@ -373,7 +432,7 @@ export function AssetForm({ asset, open: controlledOpen, onOpenChange }: AssetFo
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="average_price">
-                      평균 매수가 {formData.currency === 'USD' ? '(USD)' : ''} *
+                      평균 매수가 {isGoldType ? '(원/g)' : formData.currency === 'USD' ? '(USD)' : ''} *
                     </Label>
                     <Input
                       id="average_price"

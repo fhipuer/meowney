@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, Optional
 
 
-PriceStatus = Literal["live", "cached", "stale", "manual", "unavailable"]
+PriceStatus = Literal["live", "close", "cached", "stale", "manual", "unavailable"]
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,10 @@ class AssetValuation:
     profit_loss_krw: Optional[Decimal]
     profit_rate: Optional[Decimal]
     price_status: PriceStatus
+    native_profit_rate: Optional[Decimal] = None
+    fx_change_rate: Optional[Decimal] = None
+    asset_price_effect_krw: Optional[Decimal] = None
+    fx_effect_krw: Optional[Decimal] = None
     price_as_of: Optional[datetime] = None
     price_source: Optional[str] = None
     valuation_error: Optional[str] = None
@@ -65,8 +69,11 @@ def calculate_asset_valuation(
         raise ValueError(f"지원하지 않는 통화입니다: {currency}")
 
     exchange_rate = _positive_rate(current_exchange_rate, "current_exchange_rate")
+    has_explicit_purchase_rate = (
+        currency == "USD" and asset.get("purchase_exchange_rate") is not None
+    )
     purchase_rate = exchange_rate
-    if currency == "USD" and asset.get("purchase_exchange_rate") is not None:
+    if has_explicit_purchase_rate:
         purchase_rate = _positive_rate(asset["purchase_exchange_rate"], "purchase_exchange_rate")
 
     ticker = asset.get("ticker")
@@ -77,23 +84,9 @@ def calculate_asset_valuation(
     status: PriceStatus
     as_of = None
     source = None
+    valuation_error = None
 
-    if ticker:
-        if not quote or quote.get("current_price") is None:
-            cost_basis = average_price * quantity * (purchase_rate if currency == "USD" else Decimal("1"))
-            return AssetValuation(
-                current_price=None,
-                unit_price_krw=None,
-                market_value_native=None,
-                market_value_krw=None,
-                market_value_usd=None,
-                cost_basis_krw=cost_basis,
-                profit_loss_krw=None,
-                profit_rate=None,
-                price_status="unavailable",
-                valuation_error="현재 시세를 조회할 수 없습니다",
-            )
-
+    if ticker and quote and quote.get("current_price") is not None:
         quoted_price = _non_negative(quote["current_price"], "current_price")
         quote_currency = str(quote.get("currency") or currency).upper()
         if quote_currency == currency:
@@ -108,13 +101,19 @@ def calculate_asset_valuation(
         market_native = current_price * quantity
         market_krw = market_native * exchange_rate if currency == "USD" else market_native
         unit_price_krw = current_price * exchange_rate if currency == "USD" else current_price
-        status = "stale" if quote.get("stale") else ("cached" if quote.get("cached") else "live")
+        if quote.get("stale"):
+            status = "stale"
+        elif quote.get("price_kind") == "close":
+            status = "close"
+        else:
+            status = "cached" if quote.get("cached") else "live"
         as_of = quote.get("timestamp")
         source = quote.get("source")
     else:
         current_value = _decimal(asset.get("current_value"), "current_value", allow_none=True)
         if current_value is None:
             cost_basis = average_price * quantity * (purchase_rate if currency == "USD" else Decimal("1"))
+            quote_error = quote.get("error") if ticker and quote else None
             return AssetValuation(
                 current_price=None,
                 unit_price_krw=None,
@@ -125,20 +124,47 @@ def calculate_asset_valuation(
                 profit_loss_krw=None,
                 profit_rate=None,
                 price_status="unavailable",
-                valuation_error="수동 평가액이 입력되지 않았습니다",
+                valuation_error=quote_error or (
+                    "현재 시세를 조회할 수 없습니다"
+                    if ticker
+                    else "수동 평가액이 입력되지 않았습니다"
+                ),
             )
         if current_value < 0:
             raise ValueError("current_value 값은 0 이상이어야 합니다")
         market_native = current_value
         market_krw = current_value * exchange_rate if currency == "USD" else current_value
         status = "manual"
+        source = "manual fallback" if ticker else "manual"
+        if ticker and quote:
+            valuation_error = quote.get("error")
 
+    assert market_native is not None
     market_usd = market_native if currency == "USD" else None
+    native_profit_rate = None
+    fx_change_rate = None
+    asset_price_effect_krw = None
+    fx_effect_krw = None
     if asset.get("asset_type") == "cash":
         cost_basis_krw = market_krw
     else:
         cost_basis_native = average_price * quantity
         cost_basis_krw = cost_basis_native * purchase_rate if currency == "USD" else cost_basis_native
+        if currency == "USD":
+            native_profit = market_native - cost_basis_native
+            if cost_basis_native > 0:
+                native_profit_rate = native_profit / cost_basis_native * Decimal("100")
+
+            # 환율 기준이 실제로 입력된 경우에만 두 효과를 분리한다. 매입 환율이
+            # 없으면 현재 환율을 대입해 평가하므로 환율 효과 0으로 표시하면 오해를 준다.
+            if has_explicit_purchase_rate:
+                fx_change_rate = (
+                    (exchange_rate - purchase_rate) / purchase_rate * Decimal("100")
+                )
+                # 매입 환율에서 자산 가격만 먼저 바꾸고, 그 다음 현재 환율을 적용한다.
+                # 이 순서라면 두 효과의 합이 최종 원화 손익과 정확히 일치한다.
+                asset_price_effect_krw = native_profit * purchase_rate
+                fx_effect_krw = market_native * (exchange_rate - purchase_rate)
 
     assert market_krw is not None
     profit_loss = market_krw - cost_basis_krw
@@ -154,7 +180,12 @@ def calculate_asset_valuation(
         profit_loss_krw=profit_loss,
         profit_rate=profit_rate,
         price_status=status,
+        native_profit_rate=native_profit_rate,
+        fx_change_rate=fx_change_rate,
+        asset_price_effect_krw=asset_price_effect_krw,
+        fx_effect_krw=fx_effect_krw,
         price_as_of=as_of,
         price_source=source,
+        valuation_error=valuation_error,
     )
 

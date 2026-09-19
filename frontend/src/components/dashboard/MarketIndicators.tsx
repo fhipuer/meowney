@@ -12,6 +12,7 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -62,6 +63,12 @@ const META: Record<
   market_usdkrw: {
     short: "USD/KRW",
     role: "원화 포트폴리오 환율",
+    icon: Landmark,
+    group: "fx",
+  },
+  market_dxy: {
+    short: "DXY",
+    role: "익숙한 달러 시장 체감",
     icon: Landmark,
     group: "fx",
   },
@@ -117,6 +124,8 @@ const formatValue = (signal: RegimeSignal) => {
   if (signal.value == null) return "—";
   if (signal.id === "market_usdkrw")
     return signal.value.toLocaleString("ko-KR", { maximumFractionDigits: 1 });
+  if (signal.id === "market_dxy") return signal.value.toFixed(2);
+  if (signal.id === "market_dollar") return signal.value.toFixed(1);
   if (signal.id === "market_wti") return `$${signal.value.toFixed(1)} /배럴`;
   if (signal.id === "market_ovx") return signal.value.toFixed(1);
   if (signal.id === "market_copper")
@@ -199,6 +208,192 @@ function MarketCard({ signal, trigger }: { signal: RegimeSignal; trigger?: Regim
             <span className={changeTone(signal.change_12m)}>
               {signed(signal.change_12m)}
             </span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function normalizedDollarTrend(
+  dxy?: RegimeSignal,
+  broadDollar?: RegimeSignal,
+) {
+  const selected = [dxy, broadDollar].filter(
+    (signal): signal is RegimeSignal => Boolean(signal && (signal.history?.length || 0) > 1),
+  );
+  if (!selected.length) return [];
+  const startDate = selected
+    .map((signal) => signal.history?.[0]?.date || "")
+    .sort()
+    .at(-1) || "";
+  const rows = new Map<string, Record<string, string | number>>();
+  selected.forEach((signal) => {
+    const history = (signal.history || []).filter((point) => point.date >= startDate);
+    const base = history[0]?.value;
+    if (!base) return;
+    history.forEach((point) =>
+      rows.set(point.date, {
+        ...(rows.get(point.date) || { date: point.date }),
+        [signal.id]: (point.value / base) * 100,
+      }),
+    );
+  });
+  return [...rows.values()].sort((a, b) =>
+    String(a.date).localeCompare(String(b.date)),
+  );
+}
+
+function DollarMetric({
+  signal,
+  eyebrow,
+  title,
+  primary = false,
+}: {
+  signal?: RegimeSignal;
+  eyebrow: string;
+  title: string;
+  primary?: boolean;
+}) {
+  return (
+    <div className={`rounded-lg border p-4 ${primary ? "border-primary/35 bg-primary/[0.06]" : "bg-muted/15"}`}>
+      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+        {eyebrow}
+      </p>
+      <div className="mt-2 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">{title}</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums">
+            {signal ? formatValue(signal) : "—"}
+          </p>
+        </div>
+        <Badge variant="outline" className="shrink-0 text-[10px] font-normal text-muted-foreground">
+          {signal?.observation_date || "미수집"}
+        </Badge>
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border/70 pt-3 text-xs tabular-nums">
+        {[
+          ["1M", signal?.change_1m],
+          ["3M", signal?.change_3m],
+          ["12M", signal?.change_12m],
+        ].map(([label, value]) => (
+          <div key={String(label)}>
+            <p className="text-muted-foreground">{label}</p>
+            <p className={`mt-1 ${changeTone(value as number | null | undefined)}`}>
+              {signed(value as number | null | undefined)}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DollarEnvironmentCard({
+  dxy,
+  broadDollar,
+}: {
+  dxy?: RegimeSignal;
+  broadDollar?: RegimeSignal;
+}) {
+  const trend = normalizedDollarTrend(dxy, broadDollar);
+  return (
+    <Card className="bg-card/70 md:col-span-2">
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-1">
+              <CardTitle>달러 환경</CardTitle>
+              <InfoTip label="DXY와 광의 달러의 역할">
+                DXY는 유로 비중이 큰 6개 통화 바스켓으로 시장에서 익숙한 달러
+                체감 지표입니다. Fed 광의 달러는 미국 주요 교역국을 상품·서비스
+                교역 비중으로 가중해 글로벌 달러 금융여건을 보조 확인합니다. 두
+                지수의 기준값은 서로 달라 절대수준을 직접 비교하지 않으며, 자동
+                거시 레짐 점수에는 합산하지 않습니다.
+              </InfoTip>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              DXY로 빠르게 읽고, 광의 달러로 교역국 전반의 확산을 확인합니다.
+            </p>
+          </div>
+          <Badge variant="outline" className="font-normal text-muted-foreground">
+            맥락 지표
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-4 lg:grid-cols-[minmax(250px,0.8fr)_minmax(0,1.2fr)]">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <DollarMetric signal={dxy} eyebrow="주 표시 · 시장 체감" title="DXY" primary />
+            <DollarMetric signal={broadDollar} eyebrow="보조 확인 · 글로벌 압력" title="Fed 광의 달러" />
+          </div>
+          <div className="rounded-lg border bg-muted/10 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium">달러 강도 방향 비교</p>
+              <p className="text-xs text-muted-foreground">최근 1년 · 표시 시작점=100</p>
+            </div>
+            {trend.length > 1 ? (
+              <div className="mt-3 h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={trend} margin={{ top: 8, right: 12, bottom: 2, left: 0 }}>
+                    <CartesianGrid stroke="hsl(var(--chart-grid))" strokeDasharray="3 5" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={(value) => String(value).slice(5).replace("-", ".")}
+                      minTickGap={46}
+                      tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      width={38}
+                      domain={[
+                        (minimum: number) => Math.floor(minimum - 2),
+                        (maximum: number) => Math.ceil(maximum + 2),
+                      ]}
+                      tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <ReferenceLine y={100} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" />
+                    <Tooltip
+                      labelFormatter={(label) => `관측일 ${label}`}
+                      formatter={(value, name) => [Number(value).toFixed(2), name]}
+                      contentStyle={{
+                        background: "hsl(var(--card))",
+                        borderColor: "hsl(var(--border))",
+                        borderRadius: 8,
+                      }}
+                    />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="market_dxy"
+                      name="DXY"
+                      stroke={REGIME_SERIES_COLORS.blue}
+                      dot={false}
+                      strokeWidth={2.2}
+                      connectNulls
+                      isAnimationActive={false}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="market_dollar"
+                      name="광의 달러"
+                      stroke={REGIME_SERIES_COLORS.cyan}
+                      dot={false}
+                      strokeWidth={2}
+                      connectNulls
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+                두 달러지수의 비교 시계열을 수집하는 중입니다.
+              </div>
+            )}
           </div>
         </div>
       </CardContent>
@@ -440,7 +635,17 @@ export function MarketIndicators({ signals, fetchedAt, triggers = [], energyShoc
               <div className="h-px flex-1 bg-border/70" />
             </div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {group(id).map((signal) => (
+              {id === "fx" && available.some((signal) =>
+                ["market_dxy", "market_dollar"].includes(signal.id),
+              ) && (
+                <DollarEnvironmentCard
+                  dxy={available.find((signal) => signal.id === "market_dxy")}
+                  broadDollar={available.find((signal) => signal.id === "market_dollar")}
+                />
+              )}
+              {group(id).filter((signal) =>
+                id !== "fx" || !["market_dxy", "market_dollar"].includes(signal.id),
+              ).map((signal) => (
                 <MarketCard
                   key={signal.id}
                   signal={signal}

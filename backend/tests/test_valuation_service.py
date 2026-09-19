@@ -37,6 +37,11 @@ def test_usd_ticker_converts_market_and_cost_with_different_rates():
     assert result.cost_basis_krw == Decimal("288000")
     assert result.profit_loss_krw == Decimal("102000")
     assert result.unit_price_krw == Decimal("130000")
+    assert result.native_profit_rate == Decimal("25.00")
+    assert float(result.fx_change_rate) == pytest.approx(8.3333333333)
+    assert result.asset_price_effect_krw == Decimal("72000")
+    assert result.fx_effect_krw == Decimal("30000")
+    assert result.asset_price_effect_krw + result.fx_effect_krw == result.profit_loss_krw
 
 
 def test_usd_manual_cash_current_value_is_total_dollars_without_quantity_multiplication():
@@ -57,6 +62,10 @@ def test_usd_manual_cash_current_value_is_total_dollars_without_quantity_multipl
     assert result.cost_basis_krw == Decimal("1300000")
     assert result.profit_loss_krw == Decimal("0")
     assert result.price_status == "manual"
+    assert result.native_profit_rate is None
+    assert result.fx_change_rate is None
+    assert result.asset_price_effect_krw is None
+    assert result.fx_effect_krw is None
 
 
 def test_usd_manual_non_cash_converts_current_value_and_purchase_cost():
@@ -76,6 +85,28 @@ def test_usd_manual_non_cash_converts_current_value_and_purchase_cost():
     assert result.market_value_krw == Decimal("1300000")
     assert result.cost_basis_krw == Decimal("880000")
     assert result.profit_loss_krw == Decimal("420000")
+    assert result.native_profit_rate == Decimal("25.00")
+    assert float(result.fx_change_rate) == pytest.approx(18.1818181818)
+    assert result.asset_price_effect_krw == Decimal("220000")
+    assert result.fx_effect_krw == Decimal("200000")
+
+
+def test_usd_asset_without_purchase_rate_does_not_invent_fx_effect():
+    result = calculate_asset_valuation(
+        {
+            "ticker": "TEST",
+            "currency": "USD",
+            "quantity": "2",
+            "average_price": "80",
+        },
+        {"current_price": "100", "currency": "USD"},
+        RATE,
+    )
+
+    assert result.native_profit_rate == Decimal("25.00")
+    assert result.fx_change_rate is None
+    assert result.asset_price_effect_krw is None
+    assert result.fx_effect_krw is None
 
 
 def test_missing_quote_is_unavailable_not_zero():
@@ -96,6 +127,50 @@ def test_stale_quote_status_is_preserved():
         RATE,
     )
     assert result.price_status == "stale"
+
+
+def test_krx_daily_quote_is_labeled_as_official_close():
+    result = calculate_asset_valuation(
+        {
+            "ticker": "M04020100",
+            "asset_type": "gold",
+            "currency": "KRW",
+            "quantity": "148",
+            "average_price": "175179.25",
+        },
+        {
+            "current_price": "195400",
+            "currency": "KRW",
+            "price_kind": "close",
+            "source": "KRX Open API",
+        },
+        RATE,
+    )
+
+    assert result.market_value_krw == Decimal("28919200")
+    assert result.profit_loss_krw == Decimal("2992671.00")
+    assert result.price_status == "close"
+    assert result.price_source == "KRX Open API"
+
+
+def test_ticker_asset_uses_manual_total_as_fallback_when_quote_fails():
+    result = calculate_asset_valuation(
+        {
+            "ticker": "M04020100",
+            "asset_type": "gold",
+            "currency": "KRW",
+            "quantity": "148",
+            "average_price": "175179.25",
+            "current_value": "28223600",
+        },
+        {"current_price": None, "error": "KRX service unavailable"},
+        RATE,
+    )
+
+    assert result.market_value_krw == Decimal("28223600")
+    assert result.price_status == "manual"
+    assert result.price_source == "manual fallback"
+    assert result.valuation_error == "KRX service unavailable"
 
 
 @pytest.mark.parametrize("field,value", [

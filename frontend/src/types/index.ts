@@ -32,10 +32,14 @@ export interface Asset {
   market_value_usd: number | null; // USD 자산의 달러 원본 금액
   profit_loss: number | null;
   profit_rate: number | null;
+  native_profit_rate?: number | null;
+  fx_change_rate?: number | null;
+  asset_price_effect_krw?: number | null;
+  fx_effect_krw?: number | null;
   cost_basis_krw: number | null;
   current_exchange_rate: number | null;
   unit_price_krw: number | null;
-  price_status: "live" | "cached" | "stale" | "manual" | "unavailable" | null;
+  price_status: "live" | "close" | "cached" | "stale" | "manual" | "unavailable" | null;
   price_as_of: string | null;
   price_source: string | null;
   valuation_error: string | null;
@@ -63,7 +67,7 @@ export interface AssetsListResponse {
 // 자산 생성 요청
 export interface AssetCreate {
   name: string;
-  ticker?: string;
+  ticker?: string | null;
   asset_type: string;
   category_id?: string;
   quantity: number;
@@ -78,7 +82,7 @@ export interface AssetCreate {
 // 자산 수정 요청
 export interface AssetUpdate {
   name?: string;
-  ticker?: string;
+  ticker?: string | null;
   asset_type?: string;
   category_id?: string;
   quantity?: number;
@@ -493,6 +497,8 @@ export interface RegimeSignal {
   observation_date?: string;
   fetched_at?: string;
   value?: number;
+  display_value?: number;
+  display_unit?: string;
   change_1m?: number | null;
   change_3m?: number | null;
   change_12m?: number | null;
@@ -501,7 +507,13 @@ export interface RegimeSignal {
   reason: string;
   history?: { date: string; value: number }[];
   display_period?: string;
-  display_metrics?: { label: string; value: number; unit: string; kind: string }[];
+  display_metrics?: {
+    label: string;
+    value: number;
+    unit: string;
+    kind: string;
+    source_indicator_id?: string;
+  }[];
   decision_chart?: {
     title: string;
     unit: string;
@@ -531,13 +543,19 @@ export interface RegimeSignal {
   is_stale?: boolean;
   age_days?: number | null;
   max_age_days?: number;
+  continuity_gaps?: string[];
+  has_continuity_gap?: boolean;
   usable_for_decision?: boolean;
+  official_yoy?: number;
+  official_yoy_observation_date?: string;
+  official_yoy_basis?: string;
   country?: "미국" | "한국" | "글로벌";
   interpretation_lens?: "macro" | "macro_context" | "market_context";
   tone_policy?: "higher_supportive" | "higher_adverse" | "semantic_only";
   proxy_for?: string | null;
   seasonal_adjustment?: "seasonally_adjusted" | "not_seasonally_adjusted" | null;
   statistical_scope?: string | null;
+  presentation_hidden?: boolean;
 }
 
 export type ReviewUrgency = "required" | "watch" | "not_needed";
@@ -1231,6 +1249,13 @@ export interface RegimeCurrent {
         score: number | null;
         label: string;
         fed_funds: number | null;
+        policy_rate_basis?: "target_range_midpoint" | "effective_monthly_average_fallback";
+        target_lower?: number | null;
+        target_upper?: number | null;
+        target_midpoint?: number | null;
+        target_as_of_date?: string | null;
+        effective_fed_funds_monthly_average?: number | null;
+        effective_fed_funds_observation_date?: string | null;
         core_pce_yoy: number | null;
         real_policy_rate: number | null;
         semantics?: string;
@@ -1350,6 +1375,12 @@ export interface RegimeCurrent {
       used_in_decision?: false;
     }>;
     unavailable: string[];
+    continuity_gaps?: Array<{
+      id: string;
+      name: string;
+      missing_periods: string[];
+      reason_code: "calendar_period_gap";
+    }>;
     scope: "us_macro_decision_inputs";
     observation_range: { from: string | null; to: string | null };
     last_fetched_at: string | null;
@@ -1378,6 +1409,12 @@ export interface RegimeCurrent {
         total: number;
         label: string;
         official_value_crosscheck: string;
+      };
+      calendar_continuity?: {
+        complete: number;
+        total: number;
+        gapped: number;
+        label: string;
       };
       revision_history: {
         available: number;
