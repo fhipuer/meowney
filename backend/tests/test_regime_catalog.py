@@ -5,6 +5,7 @@ from app.services.regime_catalog import (
     indicator_role,
     indicator_semantics,
 )
+import app.services.regime_periods as regime_periods
 
 
 def observations(count):
@@ -123,3 +124,24 @@ def test_nfci_changes_are_index_points_not_percent_returns():
     assert metrics[-1] == {
         "label": "1년", "value": .1, "unit": "지수p", "kind": "delta",
     }
+
+
+def test_decision_chart_parses_each_observation_only_once(monkeypatch):
+    rows = [
+        {"observation_date": f"{2020 + index // 12}-{index % 12 + 1:02d}-01", "value": 100 + index}
+        for index in range(72)
+    ]
+    original = regime_periods._row_date
+    calls = 0
+
+    def counted(row):
+        nonlocal calls
+        calls += 1
+        return original(row)
+
+    monkeypatch.setattr(regime_periods, "_row_date", counted)
+
+    chart = decision_chart("core_cpi", rows)
+
+    assert chart is not None
+    assert calls == len(rows)

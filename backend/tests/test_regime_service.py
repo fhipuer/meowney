@@ -610,6 +610,30 @@ def test_complete_review_records_only_ack_context_and_optional_short_note(tmp_pa
     assert row["assessment_fingerprint"]
 
 
+def test_dashboard_summary_uses_persisted_review_state_without_recalculation(tmp_path, monkeypatch):
+    service = service_for(tmp_path)
+    service.evaluate(persist=True)
+    current = service.current(persist_state=True)
+
+    expected = service.dashboard_summary()
+    monkeypatch.setattr(
+        service,
+        "current",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("dashboard summary must not rebuild the full regime")
+        ),
+    )
+
+    result = service.dashboard_summary()
+
+    assert result == expected
+    assert result["available"] is True
+    assert result["automatic_regime"] == current["automatic_regime"]
+    assert result["review_urgency"] == current["review_urgency"]
+    assert result["needs_new_review"] == current["needs_new_review"]
+    assert result["active_trigger_count"] == len(current["triggers"])
+
+
 def test_display_only_liquidity_series_cannot_change_domain_or_candidate(tmp_path):
     service = service_for(tmp_path)
     add_series(service, "fed_assets", [100, 80, 60, 40])

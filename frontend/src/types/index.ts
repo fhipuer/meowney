@@ -992,6 +992,16 @@ export interface CapexCashContext {
   capex_to_revenue_pct?: number | null;
 }
 
+export interface RegimeDashboardSummary {
+  available: boolean;
+  evaluated_at: string | null;
+  automatic_regime: RegimeLevel | null;
+  review_urgency: ReviewUrgency;
+  review_acknowledged: boolean;
+  needs_new_review: boolean;
+  active_trigger_count: number;
+}
+
 export interface RegimeCurrent {
   id: string;
   evaluated_at: string;

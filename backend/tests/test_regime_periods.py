@@ -2,6 +2,7 @@ import pytest
 
 from app.services.regime_periods import (
     continuity_gaps,
+    dated_values,
     period_percent_change,
 )
 
@@ -38,3 +39,15 @@ def test_yoy_is_unavailable_instead_of_substituting_the_wrong_month():
     observations = [row("2025-07", 322.169), row("2026-08", 334.131)]
 
     assert period_percent_change(observations, "monthly", 12) is None
+
+
+def test_prepared_series_is_reused_without_reparsing_dates(monkeypatch):
+    observations = [row(f"2025-{month:02d}", 100 + month) for month in range(1, 13)]
+    prepared = dated_values(observations)
+
+    def fail_if_reparsed(_row):
+        raise AssertionError("prepared observations must not be reparsed")
+
+    monkeypatch.setattr("app.services.regime_periods._row_date", fail_if_reparsed)
+
+    assert period_percent_change(prepared, "monthly", 1) == pytest.approx((112 / 111 - 1) * 100)

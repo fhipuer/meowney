@@ -16,6 +16,27 @@ def test_regime_router_no_longer_exposes_a_separate_export():
 
 
 @pytest.mark.asyncio
+async def test_dashboard_summary_uses_persisted_lightweight_service(monkeypatch):
+    expected = {
+        "available": True,
+        "evaluated_at": "2026-09-24T00:00:00+00:00",
+        "automatic_regime": "경계",
+        "review_urgency": "watch",
+        "review_acknowledged": False,
+        "needs_new_review": False,
+        "active_trigger_count": 2,
+    }
+
+    class SummaryStub:
+        def dashboard_summary(self):
+            return expected
+
+    monkeypatch.setattr(regime_api, "RegimeService", SummaryStub)
+
+    assert await regime_api.get_regime_dashboard_summary() == expected
+
+
+@pytest.mark.asyncio
 async def test_aggregate_refresh_reports_partial_when_one_feed_fails(monkeypatch):
     monkeypatch.setattr(regime_api, "RegimeService", lambda: RefreshStub({"status": "success"}))
     monkeypatch.setattr(regime_api, "TreasuryYieldService", lambda: RefreshStub({"status": "success"}))

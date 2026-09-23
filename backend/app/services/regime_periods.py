@@ -12,7 +12,12 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date
 import math
-from typing import Any, Iterable
+from typing import Any, Iterable, TypeAlias
+
+
+DatedValue: TypeAlias = tuple[date, float]
+DatedValues: TypeAlias = list[DatedValue]
+SeriesRows: TypeAlias = Iterable[dict[str, Any]] | DatedValues
 
 
 def _row_date(row: dict[str, Any]) -> date | None:
@@ -23,8 +28,21 @@ def _row_date(row: dict[str, Any]) -> date | None:
         return None
 
 
-def dated_values(rows: Iterable[dict[str, Any]]) -> list[tuple[date, float]]:
+def dated_values(rows: SeriesRows) -> DatedValues:
     """Return finite, de-duplicated observations sorted by date."""
+
+    # Higher-level models reuse the same series for many rolling calculations.
+    # Accepting an already normalized series avoids reparsing and resorting the
+    # complete history for every point in a chart or momentum window.
+    if isinstance(rows, list) and (
+        not rows
+        or (
+            isinstance(rows[0], tuple)
+            and len(rows[0]) == 2
+            and isinstance(rows[0][0], date)
+        )
+    ):
+        return rows  # type: ignore[return-value]
 
     by_date: dict[date, float] = {}
     for row in rows:
@@ -56,7 +74,7 @@ def _calendar_target(value: date, frequency: str, periods: int) -> tuple[int, in
 
 
 def period_pair(
-    rows: Iterable[dict[str, Any]],
+    rows: SeriesRows,
     frequency: str,
     periods: int,
     *,
@@ -82,14 +100,14 @@ def period_pair(
 
 
 def period_delta(
-    rows: Iterable[dict[str, Any]], frequency: str, periods: int, *, end_index: int = -1,
+    rows: SeriesRows, frequency: str, periods: int, *, end_index: int = -1,
 ) -> float | None:
     pair = period_pair(rows, frequency, periods, end_index=end_index)
     return pair[1][1] - pair[0][1] if pair else None
 
 
 def period_percent_change(
-    rows: Iterable[dict[str, Any]], frequency: str, periods: int, *, end_index: int = -1,
+    rows: SeriesRows, frequency: str, periods: int, *, end_index: int = -1,
 ) -> float | None:
     pair = period_pair(rows, frequency, periods, end_index=end_index)
     if not pair or pair[0][1] == 0:
@@ -98,7 +116,7 @@ def period_percent_change(
 
 
 def annualized_change(
-    rows: Iterable[dict[str, Any]], frequency: str, periods: int, *, end_index: int = -1,
+    rows: SeriesRows, frequency: str, periods: int, *, end_index: int = -1,
 ) -> float | None:
     pair = period_pair(rows, frequency, periods, end_index=end_index)
     if not pair or pair[0][1] <= 0:
@@ -110,7 +128,7 @@ def annualized_change(
 
 
 def continuity_gaps(
-    rows: Iterable[dict[str, Any]], frequency: str, *, lookback_periods: int = 24,
+    rows: SeriesRows, frequency: str, *, lookback_periods: int = 24,
 ) -> list[str]:
     """List missing monthly/quarterly periods in the recent comparison window."""
 

@@ -34,6 +34,7 @@ import type {
   UserSettings,
   UserSettingsUpdate,
   RegimeCurrent,
+  RegimeDashboardSummary,
   RegimeLevel,
   RegimeSnapshot,
 } from '@/types'
@@ -233,6 +234,10 @@ export const dashboardApi = {
 }
 
 export const regimeApi = {
+  getSummary: async (): Promise<RegimeDashboardSummary> => {
+    const { data } = await apiClient.get<RegimeDashboardSummary>('/regime/summary')
+    return data
+  },
   getCurrent: async (): Promise<RegimeCurrent> => {
     const { data } = await apiClient.get<RegimeCurrent>('/regime')
     return data

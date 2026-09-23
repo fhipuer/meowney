@@ -143,10 +143,12 @@ class RegimeService:
         indicators = [item for item in indicators if due(item)]
         market_indicators = [item for item in market_indicators if due(item)]
         if not indicators and not market_indicators:
-            self.evaluate(persist=True)
+            await asyncio.to_thread(self.evaluate, persist=True)
             return {
                 "status": "cached", "source": "mixed", "saved": 0,
-                "evaluation": self.current(persist_state=True),
+                "evaluation": await asyncio.to_thread(
+                    self.current, persist_state=True
+                ),
             }
         run_id, started_at, saved = str(uuid4()), _now(), 0
         self.db.table("regime_fetch_runs").insert({
@@ -343,8 +345,8 @@ class RegimeService:
             }).eq("id", run_id).execute()
             self._record_feed_status("macro", "failed", saved, error[:800])
             raise
-        self.evaluate(persist=True)
-        evaluation = self.current(persist_state=True)
+        await asyncio.to_thread(self.evaluate, persist=True)
+        evaluation = await asyncio.to_thread(self.current, persist_state=True)
         return {"status": run_status, "source": "mixed", "saved": saved,
                 "errors": errors[:10], "evaluation": evaluation}
 
@@ -1017,6 +1019,61 @@ class RegimeService:
         evaluation["upcoming_events"] = event_service.upcoming()
         evaluation["feed_health"] = feed_health
         return evaluation
+
+    def dashboard_summary(self) -> dict[str, Any]:
+        """Return the last fully persisted review state without recomputation.
+
+        The dashboard only needs a handful of fields.  Rebuilding the complete
+        regime response here would recalculate every historical chart and block
+        unrelated API requests.  Refreshes already persist the evaluation,
+        assessment, active triggers, and acknowledgment needed for this view.
+        """
+
+        with self.db.connect() as conn:
+            state = conn.execute(
+                "SELECT e.id,e.evaluated_at,e.candidate_regime,e.automatic_regime,"
+                "a.urgency,a.coverage_json "
+                "FROM review_assessments a "
+                "JOIN regime_evaluations e ON e.id=a.evaluation_id "
+                "ORDER BY a.assessed_at DESC LIMIT 1"
+            ).fetchone()
+            triggers = [
+                {"rule_id": row["rule_id"], "severity": row["severity"]}
+                for row in conn.execute(
+                    "SELECT rule_id,severity FROM regime_triggers "
+                    "WHERE active=1 ORDER BY rule_id"
+                ).fetchall()
+            ]
+
+        if not state:
+            return {
+                "available": False,
+                "evaluated_at": None,
+                "automatic_regime": None,
+                "review_urgency": "not_needed",
+                "review_acknowledged": False,
+                "needs_new_review": False,
+                "active_trigger_count": 0,
+            }
+
+        coverage = json.loads(state["coverage_json"])
+        urgency = state["urgency"]
+        fingerprint = self._assessment_fingerprint(
+            state["candidate_regime"], urgency, triggers, coverage
+        )
+        acknowledgment = self._latest_acknowledgment()
+        acknowledged = self._acknowledges(
+            acknowledgment, triggers, fingerprint, urgency
+        )
+        return {
+            "available": True,
+            "evaluated_at": state["evaluated_at"],
+            "automatic_regime": state["automatic_regime"],
+            "review_urgency": urgency,
+            "review_acknowledged": acknowledged,
+            "needs_new_review": urgency == "required" and not acknowledged,
+            "active_trigger_count": len(triggers),
+        }
 
     @staticmethod
     def _thesis_changes(

@@ -4,6 +4,7 @@ import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from app.services.regime_service import RegimeService
@@ -27,9 +28,26 @@ class ReviewCompleteRequest(BaseModel):
     note: str | None = None
 
 
+class RegimeDashboardSummaryResponse(BaseModel):
+    available: bool
+    evaluated_at: str | None = None
+    automatic_regime: Literal["유지", "경계", "약화", "전환"] | None = None
+    review_urgency: Literal["required", "watch", "not_needed"]
+    review_acknowledged: bool
+    needs_new_review: bool
+    active_trigger_count: int
+
+
 @router.get("")
 async def get_current_regime():
-    return RegimeService().current()
+    # The full view is CPU-heavy.  Keep it away from the asyncio event loop so
+    # dashboard and asset requests remain responsive while it is calculated.
+    return await run_in_threadpool(lambda: RegimeService().current())
+
+
+@router.get("/summary", response_model=RegimeDashboardSummaryResponse)
+async def get_regime_dashboard_summary():
+    return await run_in_threadpool(lambda: RegimeService().dashboard_summary())
 
 
 @router.post("/refresh")

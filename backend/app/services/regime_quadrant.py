@@ -42,7 +42,7 @@ def _payroll_impulse(rows: list[dict[str, Any]]) -> float | None:
     if len(values) < 4:
         return None
     changes = [
-        period_delta(rows, "monthly", 1, end_index=index)
+        period_delta(values, "monthly", 1, end_index=index)
         for index in range(len(values) - 3, len(values))
     ]
     return sum(changes) / 3 if all(value is not None for value in changes) else None
@@ -90,9 +90,10 @@ def _robust_z(current: float, history: list[float]) -> float | None:
 
 
 def _metric_history(rows: list[dict[str, Any]], transform: Callable[[list[dict[str, Any]]], float | None]) -> list[float]:
+    prepared = dated_values(rows)
     result = []
-    for end in range(2, len(rows) + 1):
-        transformed = transform(rows[:end])
+    for end in range(2, len(prepared) + 1):
+        transformed = transform(prepared[:end])
         if transformed is not None and math.isfinite(transformed):
             result.append(transformed)
     return result
@@ -114,8 +115,9 @@ def _momentum_axis(signals: dict[str, dict[str, Any]], rules: dict, cutoff: date
     for key, (cluster, weight, transform) in rules.items():
         signal = signals.get(key)
         rows = _rows_until(signal, cutoff) if signal else []
-        transformed = transform(rows)
-        history = _metric_history(rows, transform)
+        prepared = dated_values(rows)
+        transformed = transform(prepared)
+        history = _metric_history(prepared, transform)
         z = _robust_z(transformed, history[:-1]) if transformed is not None else None
         if z is None or not rows:
             continue

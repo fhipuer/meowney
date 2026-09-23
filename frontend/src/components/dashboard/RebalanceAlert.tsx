@@ -10,14 +10,14 @@ import { useSettings } from '@/hooks/useSettings'
 
 export function RebalanceAlert() {
   // 편차 밴드 기본값을 알림 기준으로 사용 냥~
-  const { data: settings } = useSettings()
+  const { data: settings, isFetched: settingsFetched } = useSettings()
   const alertThreshold = settings?.default_absolute_band ?? 5.0
 
   const { data: alerts } = useQuery({
     queryKey: ['rebalanceAlerts', alertThreshold],
     queryFn: () => dashboardApi.getRebalanceAlerts(undefined, alertThreshold),
     staleTime: 5 * 60 * 1000,
-    enabled: alertThreshold > 0,
+    enabled: settingsFetched && alertThreshold > 0,
   })
 
   if (!alerts?.needs_rebalancing) {
